@@ -1,0 +1,16 @@
+version: '3.8'
+services:
+  trading-brain:
+    build: .
+    volumes:
+      - ./models:/app/models  # Persist models
+      - ./logs:/app/logs
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    ports:
+      - "8000:8000"
