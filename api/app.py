@@ -1,14 +1,25 @@
 # api/app.py
 from fastapi import FastAPI, HTTPException
+from contextlib import asynccontextmanager
+from inference.predictor import HybridPredictor
 from pydantic import BaseModel
-from typing import List
-import torch
 import pandas as pd
-# Import your model loaders and feature builders
+from typing import List
 
-app = FastAPI(title="Hybrid Trading Brain API")
+# Global state wrapper
+ml_models = {}
 
-# Define Input Schema
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Load model on startup
+    ml_models["predictor"] = HybridPredictor()
+    print("Models Loaded")
+    yield
+    # Clean up on shutdown
+    ml_models.clear()
+
+app = FastAPI(lifespan=lifespan)
+
 class Candle(BaseModel):
     open: float
     high: float
@@ -17,35 +28,22 @@ class Candle(BaseModel):
     tick_volume: float
 
 class PredictionRequest(BaseModel):
-    candles: List[Candle] # Expecting last 60 candles
-
-# Load models globally on startup
-models = {}
-device = "cuda" if torch.cuda.is_available() else "cpu"
-
-@app.on_event("startup")
-def load_models():
-    # Load models into the 'models' dict
-    # models['fusion'] = ...
-    print("Models loaded into memory.")
+    candles: List[Candle]
 
 @app.post("/predict")
 def predict(payload: PredictionRequest):
     if len(payload.candles) < 60:
         raise HTTPException(status_code=400, detail="Need at least 60 candles")
 
-    # Convert JSON to DataFrame
     df = pd.DataFrame([c.dict() for c in payload.candles])
     
-    # Run Inference
-    # lstm_vec, vit_vec, yolo_vec = build_features(df, models['lstm'], ...)
-    # pred = models['fusion'](...)
+    # Use the pre-loaded predictor
+    probs = ml_models["predictor"].predict(df)
     
-    # Mock Response
     return {
-        "signal": "BUY",
-        "confidence": 0.85,
-        "market_regime": "VOLATILE_BULLISH"
+        "probabilities": {
+            "buy": float(probs[0]),
+            "sell": float(probs[1]),
+            "hold": float(probs[2])
+        }
     }
-
-# Run with: uvicorn api.app:app --reload

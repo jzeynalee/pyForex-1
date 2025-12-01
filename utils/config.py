@@ -1,14 +1,24 @@
-MT5_ACCOUNT = 12345678
-MT5_PASSWORD = "yourpassword"
-MT5_SERVER = "Broker-ServerName"
+import os
+from pydantic_settings import BaseSettings
 
-SYMBOL = "EURUSD"
-TIMEFRAME = "H1"
-LOT_SIZE = 0.10
+class Settings(BaseSettings):
+    # MT5 Credentials
+    MT5_ACCOUNT: int
+    MT5_PASSWORD: str
+    MT5_SERVER: str
+    MT5_PATH: str = "" # Optional path
+    
+    # Trading Config
+    SYMBOL: str = "EURUSD"
+    TIMEFRAME: str = "H1" # Input as string, convert in connector
+    LOT_SIZE: float = 0.10
+    MAGIC_NUMBER: int = 123456
+    
+    # Model Config
+    DEVICE: str = "cuda" if os.environ.get("CUDA_VISIBLE_DEVICES") else "cpu"
+    CONFIDENCE_THRESHOLD: float = 0.75
 
-CONFIDENCE_THRESHOLD = 0.60
+    class Config:
+        env_file = ".env"
 
-SL_ATR_MULTIPLIER = 0.5
-TP_ATR_MULTIPLIER = 1.0
-
-CHECK_INTERVAL = 60   # seconds
+settings = Settings()
