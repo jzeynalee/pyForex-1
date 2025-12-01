@@ -3,13 +3,15 @@
 Neural network hybrid strategy combining multiple ML models.
 """
 import logging
-from typing import Optional
+from typing import Optional, Dict
 import pandas as pd
 
 from .base import Strategy, DataProvider, Executor
 from inference.predictor import HybridPredictor, SimpleLSTMPredictor
 from trading.signal_engine import generate_signal, Signal, SignalConfig
 from trading.risk_manager import RiskManager
+from trend_detection.fusion_trend_detector import FusionFXTrendDetector
+from trading.decision_engine import DecisionEngine
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +49,19 @@ class NeuralHybridStrategy(Strategy):
         self.last_signal: Optional[str] = None
         self.signals_generated = 0
         self.trades_executed = 0
+
+        # Initialize Components
+        self.predictor = HybridPredictor()
+        
+        # Initialize "Brain 2": Trend Engine
+        # Note: Requires ML model path or None for Step 4
+        self.trend_detector = FusionFXTrendDetector(ml_model=None) 
+        
+        # Initialize "Cortex": Decision Engine
+        self.decision_engine = DecisionEngine(threshold=0.65)
+        
+        # Buffer for MTF data (Backtesting needs to simulate MTF)
+        self._history_buffer = []
     
     def on_bar(self, df: pd.DataFrame) -> Optional[str]:
         """
@@ -66,6 +81,35 @@ class NeuralHybridStrategy(Strategy):
             logger.debug(f"Insufficient data: {len(df)} < {self.min_bars}")
             return None
         
+        # 1. BRAIN 1: Deep Learning Prediction
+        try:
+            pred_result = self.predictor.predict(df)
+        except Exception as e:
+            logger.error(f"Prediction failed: {e}")
+            return None
+        
+        # 2. BRAIN 2: Trend Analysis
+        # Note: In backtesting, getting MTF data is tricky. 
+        # For now, we simulate using the current H1 data resampled, 
+        # or simplified structural analysis if H4/M15 aren't available.
+        
+        # Ideally, data_provider should support .get_data(tf='H4')
+        # Here we attempt to build the dict if possible, or fall back to single TF
+        dfs_dict = self._prepare_mtf_data(df)
+        
+        trend_analysis = self.trend_detector.detect_trend(dfs_dict)
+
+        # 3. DECISION: Gate the signal
+        decision = self.decision_engine.decide(
+            pattern_probs=pred_result.probabilities,
+            trend_analysis=trend_analysis
+        )
+
+        logger.info(f"[DECISION] {decision.signal} | {decision.reason} | Conf: {decision.confidence:.2f}")
+
+        if decision.signal == "NO_TRADE":
+            return None
+
         # Check risk limits before prediction (saves compute)
         account_info = self._get_account_info()
         if account_info:
@@ -138,6 +182,24 @@ class NeuralHybridStrategy(Strategy):
         
         self.last_signal = signal_result.signal.value
         return signal_result.signal.value
+    
+    def _prepare_mtf_data(self, df_h1: pd.DataFrame) -> Dict:
+        """
+        Helper to approximate MTF data from H1 for backtesting 
+        if separate streams aren't available.
+        """
+        # Simplistic resampling for H4
+        df_h4 = df_h1.resample('4H', on='time').agg({
+            'open': 'first', 'high': 'max', 'low': 'min', 'close': 'last', 'tick_volume': 'sum'
+        }).dropna()
+        
+        # For M15, we can't invent data, so we might just use H1 as fallback 
+        # or require the data_provider to supply it.
+        return {
+            'H1': df_h1,
+            'H4': df_h4 if not df_h4.empty else df_h1,
+            'M15': df_h1 # Fallback if M15 not available in backtest stream
+        }
     
     def _get_account_info(self) -> Optional[dict]:
         """Get account info from executor if available."""
