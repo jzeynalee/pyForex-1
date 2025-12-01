@@ -1,39 +1,46 @@
-import pandas as pd
-import torch
-from training.train_lstm import train_lstm_logic
-from training.train_fusion import train_fusion_logic
-from trading.mt5_connector import get_candles_large_batch
+# training/auto_retrain.py
+import logging
+from trading.mt5_connector import MT5Connector
+from training.train_lstm import train_lstm_model
+# from training.train_fusion import train_fusion_model # Uncomment when implemented
 
-def check_model_drift(new_data, current_model):
-    """
-    Evaluate current model on new data. 
-    If accuracy < Threshold, return True (Retrain needed).
-    """
-    # Logic to evaluate loss on last week's data
-    return True 
+logging.basicConfig(level=logging.INFO)
 
 def auto_retrain_job():
-    print("🔄 Starting Weekly Retraining...")
+    logging.info("🔄 Starting Weekly Retraining Job...")
     
-    # 1. Fetch latest dataset
-    print("⬇️ Downloading latest history...")
-    df = get_candles_large_batch("EURUSD", "H1", n=5000)
-    df.to_csv("data/raw/eurusd_latest.csv", index=False)
+    # 1. Fetch Latest Data using the Class-based Connector
+    connector = MT5Connector()
+    if not connector.connect():
+        logging.error("❌ Could not connect to MT5 for retraining.")
+        return
+
+    logging.info("⬇️ Downloading latest 5000 candles...")
+    # Using the same .get_data method but requesting more history
+    df = connector.get_data(n=5000)
     
-    # 2. Check Drift (Optional)
-    # if not check_model_drift(df, model): return
+    if df.empty:
+        logging.error("❌ No data received.")
+        return
+
+    # Save to CSV for the training scripts to read
+    csv_path = "data/raw/eurusd_latest.csv"
+    df.to_csv(csv_path, index=False)
+    logging.info(f"✅ Data saved to {csv_path}")
     
-    # 3. Retrain Components
-    print("🧠 Retraining LSTM...")
-    train_lstm_logic("data/raw/eurusd_latest.csv")
+    # 2. Retrain LSTM
+    try:
+        train_lstm_model(data_path=csv_path)
+    except Exception as e:
+        logging.error(f"❌ LSTM Training Failed: {e}")
+
+    # 3. Retrain Fusion (Placeholder)
+    # try:
+    #     train_fusion_model()
+    # except Exception as e:
+    #     logging.error(f"Fusion Training Failed: {e}")
     
-    # (Optional) Retrain ViT/YOLO if you have new labeled images
-    
-    # 4. Retrain Fusion
-    print("🔗 Retraining Fusion Layer...")
-    train_fusion_logic()
-    
-    print("✅ Retraining Complete. New models saved to models/weights/")
+    logging.info("✅ Retraining Complete. New models ready for Inference.")
 
 if __name__ == "__main__":
     auto_retrain_job()

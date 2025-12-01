@@ -1,24 +1,38 @@
+# trading/bot.py
 import time
 import logging
 from trading.mt5_connector import MT5Connector
-from inference.predictor import HybridPredictor
 from trading.risk_manager import RiskManager
-from trading.signal_engine import generate_signal
+from strategies.neural_hybrid import NeuralHybridStrategy
 from utils.config import settings
-import MetaTrader5 as mt5
 
 class TradingBot:
     def __init__(self):
         self.connector = MT5Connector()
-        self.predictor = HybridPredictor()
-        self.risk_manager = RiskManager()
-        self.last_candle_time = None
+        # Initialize dependencies
+        account_info = 10000 # Default/Placeholder, will be updated on connect
+        self.risk_manager = RiskManager(account_balance=account_info) 
+        
+        # Inject dependencies into Strategy
+        # Note: In a real scenario, you'd fetch balance after connect
+        self.strategy = NeuralHybridStrategy(
+            data_provider=self.connector, 
+            executor=self.connector,
+            risk_manager=self.risk_manager
+        )
 
     def run(self):
         if not self.connector.connect():
             return
 
-        logging.info(f"Bot started on {settings.SYMBOL}")
+        logging.info(f"Bot started on {settings.SYMBOL} | Strategy: NeuralHybrid")
+        
+        # Update Risk Manager with actual balance
+        import MetaTrader5 as mt5
+        acc = mt5.account_info()
+        if acc:
+            self.risk_manager.starting_balance = acc.balance
+            self.risk_manager.daily_start_balance = acc.balance
 
         while True:
             try:
@@ -28,44 +42,13 @@ class TradingBot:
                     time.sleep(5)
                     continue
 
-                # 2. Check for New Candle
-                current_time = df['time'].iloc[-1]
-                if self.last_candle_time == current_time:
-                    time.sleep(1)
-                    continue
+                # 2. Pass Data to Strategy
+                # The strategy handles Prediction -> Signal -> Risk -> Execution internally
+                self.strategy.on_bar(df)
                 
-                self.last_candle_time = current_time
-                logging.info(f"Analyzing candle: {current_time}")
-
-                # 3. Get Prediction
-                probs = self.predictor.predict(df)
-                signal = generate_signal(probs, threshold=settings.CONFIDENCE_THRESHOLD)
-
-                # 4. Execute Trade
-                if signal != "NO_TRADE":
-                    self._execute_trade(signal, df)
-
-            except Exception as e:
-                logging.error(f"Critical Error: {e}", exc_info=True)
+                # Sleep to avoid spamming (approx check every 10s or align with candle close)
                 time.sleep(10)
 
-    def _execute_trade(self, signal, df):
-        # Calculate Risk
-        balance = mt5.account_info().balance
-        current_price = mt5.symbol_info_tick(settings.SYMBOL).ask # Simplified
-        atr = self.risk_manager.calculate_volatility(df)
-        
-        vol, sl, tp = self.risk_manager.get_trade_params(balance, current_price, atr, signal)
-        
-        # Send Order
-        result = self.connector.execute_order(signal, vol, sl, tp)
-        
-        if result.retcode == mt5.TRADE_RETCODE_DONE:
-            logging.info(f"Trade Open: {signal} | Vol: {vol}")
-        else:
-            logging.error(f"Trade Failed: {result.comment}")
-
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    bot = TradingBot()
-    bot.run()
+            except Exception as e:
+                logging.error(f"Loop Error: {e}", exc_info=True)
+                time.sleep(10)
