@@ -318,11 +318,13 @@ class TestTrendClassifier:
         """Test that prediction correctly maps to directions."""
         X, y = generate_synthetic_training_data(n_samples=500)
         classifier = TrendClassifier()
-        classifier.fit(X, y, validate=False)
+        classifier.fit(X, y, validate=False)        
         
-        # Mock predict_proba to return specific values
-        # This tests the argmax - 1 logic
-        pass  # Would need mocking
+        with patch.object(classifier.model, 'predict_proba', return_value=np.array([probs])):
+            # Re-scale since scaler expects scaled input
+            with patch.object(classifier.scaler, 'transform', return_value=np.array([[0]*13])):
+                prediction = classifier.predict([[0]*13])
+                assert prediction[0] == expected_direction
 
 @pytest.mark.unit
 class TestMockYOLODetector:

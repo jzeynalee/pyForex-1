@@ -7,6 +7,8 @@ import pytest
 import numpy as np
 import pandas as pd
 import torch
+import time
+import os   
 from datetime import datetime, timedelta
 
 from utils.data_loader import DataLoader, DataConfig
@@ -21,7 +23,7 @@ from trading.decision_engine import DecisionEngine
 from trading.backtest import BacktestExecutor
 from trend_detection.fusion_trend_detector import FusionFXTrendDetector
 
-@pytest.mark.unit
+@pytest.mark.slow
 class TestPerformanceSmoke:
     """Smoke tests to catch performance regressions."""
     
@@ -395,3 +397,138 @@ class TestEndToEndIntegration:
                 # Verify execution
                 if decision.signal in ['BUY', 'SELL']:
                     assert len(executor.positions) == 1 or result['success'] == True
+
+
+@pytest.mark.integration
+class TestExecutionLatency:
+    """Tests for critical path latency requirements."""
+    
+    def test_signal_generation_latency(self):
+        """Signal generation should complete under 50ms."""
+        probs = np.array([0.75, 0.15, 0.10])
+        
+        start = time.perf_counter()
+        for _ in range(100):
+            generate_signal(probs)
+        elapsed = (time.perf_counter() - start) / 100 * 1000  # ms per call
+        
+        assert elapsed < 50, f"Signal generation too slow: {elapsed:.2f}ms"
+    
+    def test_trend_detection_latency(self, mtf_data):
+        """Trend detection should complete under 100ms."""
+        detector = FusionFXTrendDetector(ml_model=None)
+        
+        # Warm up
+        detector.detect_trend(mtf_data)
+        
+        start = time.perf_counter()
+        for _ in range(10):
+            detector.detect_trend(mtf_data)
+        elapsed = (time.perf_counter() - start) / 10 * 1000
+        
+        assert elapsed < 100, f"Trend detection too slow: {elapsed:.2f}ms"
+    
+    def test_critical_path_latency(self, sample_ohlcv_data, mtf_data):
+        """
+        Full critical path: Data -> Trend -> Signal -> Risk -> Order
+        Should complete under 200ms for live trading viability.
+        """
+        detector = FusionFXTrendDetector(ml_model=None)
+        decision_engine = DecisionEngine(threshold=0.65)
+        risk_manager = RiskManager(account_balance=10000)
+        executor = BacktestExecutor()
+        executor.current_price = sample_ohlcv_data['close'].iloc[-1]
+        
+        # Warm up
+        detector.detect_trend(mtf_data)
+        
+        start = time.perf_counter()
+        
+        # 1. Trend detection
+        trend_result = detector.detect_trend(mtf_data)
+        
+        # 2. Decision
+        pattern_probs = [0.75, 0.15, 0.10]
+        decision = decision_engine.decide(pattern_probs, trend_result)
+        
+        # 3. Risk check
+        if decision.signal != 'NO_TRADE':
+            allowed, _ = risk_manager.check_risk_limits(
+                current_balance=10000,
+                current_equity=10000,
+                open_positions=0
+            )
+            
+            if allowed:
+                # 4. Calculate params
+                params = risk_manager.get_params(sample_ohlcv_data, signal=decision.signal)
+                
+                # 5. Execute
+                executor.entry(
+                    signal=decision.signal,
+                    volume=params.volume,
+                    sl=params.stop_loss,
+                    tp=params.take_profit
+                )
+        
+        elapsed = (time.perf_counter() - start) * 1000
+        
+        assert elapsed < 200, f"Critical path too slow: {elapsed:.2f}ms"
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(
+    not all([os.getenv('MT5_ACCOUNT'), os.getenv('MT5_PASSWORD'), os.getenv('MT5_SERVER')]),
+    reason="MT5 credentials not configured"
+)
+class TestMT5Integration:
+    """Integration tests requiring actual MT5 connection."""
+    
+    @pytest.fixture
+    def mt5_connector(self):
+        """Create real MT5 connector from environment."""
+        from trading.mt5_connector import MT5Connector
+        
+        connector = MT5Connector(
+            account=int(os.getenv('MT5_ACCOUNT')),
+            password=os.getenv('MT5_PASSWORD'),
+            server=os.getenv('MT5_SERVER'),
+            symbol='EURUSD',
+            timeframe='H1',
+        )
+        yield connector
+        connector.disconnect()
+    
+    def test_mt5_connection(self, mt5_connector):
+        """Test actual MT5 connection."""
+        assert mt5_connector.connect() == True
+        assert mt5_connector.connected == True
+    
+    def test_mt5_account_info(self, mt5_connector):
+        """Test fetching real account info."""
+        mt5_connector.connect()
+        info = mt5_connector.get_account_info()
+        
+        assert info is not None
+        assert info.balance > 0
+        assert info.equity > 0
+    
+    def test_mt5_fetch_data(self, mt5_connector):
+        """Test fetching real market data."""
+        mt5_connector.connect()
+        df = mt5_connector.get_data(n=100)
+        
+        assert not df.empty
+        assert len(df) == 100
+        assert 'open' in df.columns
+        assert 'close' in df.columns
+    
+    def test_mt5_symbol_info(self, mt5_connector):
+        """Test fetching symbol specifications."""
+        mt5_connector.connect()
+        info = mt5_connector.get_symbol_info()
+        
+        assert info is not None
+        assert 'point' in info
+        assert 'volume_min' in info
+        assert info['volume_min'] > 0
