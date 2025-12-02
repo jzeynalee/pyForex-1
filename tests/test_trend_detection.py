@@ -12,7 +12,7 @@ from trend_detection.regime_classifier import RegimeClassifier
 from trend_detection.trend_features import TrendFeatureBuilder
 from trend_detection.fusion_trend_detector import FusionFXTrendDetector
 
-
+@pytest.mark.unit
 class TestStructuralAnalyzer:
     """Test suite for structural trend analyzer."""
     
@@ -67,7 +67,36 @@ class TestStructuralAnalyzer:
         # Should detect bearish or neutral, not bullish
         assert result['direction'] <= 0 or result['type'] in ['bearish', 'mixed']
 
+    def test_analyze_insufficient_data(self):
+        """Test behavior with too few candles."""
+        analyzer = StructuralAnalyzer()
+        small_df = pd.DataFrame({
+            'time': pd.date_range('2024-01-01', periods=5, freq='H'),
+            'open': [1.1] * 5,
+            'high': [1.11] * 5,
+            'low': [1.09] * 5,
+            'close': [1.1] * 5,
+            'volume': [100] * 5,
+        })
+        
+        # Should handle gracefully, not crash
+        result = analyzer.analyze(small_df)
+        assert 'direction' in result
+        assert 'score' in result
+    
+    def test_analyze_with_nan_values(self, sample_ohlcv_data):
+        """Test handling of NaN in data."""
+        analyzer = StructuralAnalyzer()
+        df = sample_ohlcv_data.copy()
+        df.loc[10:15, 'close'] = np.nan
+        
+        # Depending on expected behavior:
+        # Option A: Should raise ValueError
+        # Option B: Should handle gracefully
+        with pytest.raises((ValueError, KeyError)):
+            analyzer.analyze(df)
 
+@pytest.mark.unit
 class TestMTFAnalyzer:
     """Test suite for multi-timeframe analyzer."""
     
@@ -112,7 +141,7 @@ class TestMTFAnalyzer:
         assert 'mtf_score' in result
         assert 'H1' in result['individual_scores']
 
-
+@pytest.mark.unit
 class TestRegimeClassifier:
     """Test suite for regime classifier."""
     
@@ -172,6 +201,7 @@ class TestRegimeClassifier:
         assert result['adjusted_score'] < 0.5
 
 
+@pytest.mark.unit
 class TestTrendFeatureBuilder:
     """Test suite for trend feature builder."""
     
@@ -233,6 +263,7 @@ class TestTrendFeatureBuilder:
         assert features['ema_alignment'] in [-1, 0, 1]
 
 
+@pytest.mark.unit
 class TestFusionFXTrendDetector:
     """Test suite for the main trend detector."""
     

@@ -21,7 +21,57 @@ from trading.decision_engine import DecisionEngine
 from trading.backtest import BacktestExecutor
 from trend_detection.fusion_trend_detector import FusionFXTrendDetector
 
+@pytest.mark.unit
+class TestPerformanceSmoke:
+    """Smoke tests to catch performance regressions."""
+    
+    @pytest.mark.slow
+    def test_trend_detection_performance(self, mtf_data):
+        """Ensure trend detection completes in reasonable time."""
+        import time
+        
+        detector = FusionFXTrendDetector(ml_model=None)
+        
+        start = time.time()
+        for _ in range(100):
+            detector.detect_trend(mtf_data)
+        elapsed = time.time() - start
+        
+        # Should complete 100 iterations in under 5 seconds
+        assert elapsed < 5.0, f"Too slow: {elapsed:.2f}s for 100 iterations"
+    
+    @pytest.mark.slow
+    def test_backtest_large_dataset(self):
+        """Test backtest can handle larger datasets."""
+        # Generate 1000 candles
+        n = 1000
+        np.random.seed(42)
+        prices = 1.1 * np.exp(np.cumsum(np.random.randn(n) * 0.001))
+        
+        df = pd.DataFrame({
+            'time': pd.date_range('2024-01-01', periods=n, freq='H'),
+            'open': prices,
+            'high': prices * 1.002,
+            'low': prices * 0.998,
+            'close': prices,
+            'volume': np.random.randint(100, 1000, n),
+        })
+        
+        executor = BacktestExecutor()
+        
+        for i, row in df.iterrows():
+            executor.current_price = row['close']
+            if i % 50 == 0 and len(executor.positions) == 0:
+                executor.entry('BUY', volume=0.1, 
+                              sl=row['close'] * 0.99, 
+                              tp=row['close'] * 1.02)
+            executor.update_price(row['close'])
+        
+        metrics = executor.get_performance_metrics()
+        assert metrics['total_trades'] > 0
 
+
+@pytest.mark.unit
 class TestDataToModelPipeline:
     """Test data loading to model inference pipeline."""
     
@@ -62,7 +112,7 @@ class TestDataToModelPipeline:
         assert tensor.shape == (1, 3, 224, 224)
         assert tensor.dtype == torch.float32
 
-
+@pytest.mark.unit
 class TestModelFusionPipeline:
     """Test multi-modal model fusion pipeline."""
     
@@ -102,6 +152,7 @@ class TestModelFusionPipeline:
         assert torch.allclose(gates.sum(dim=1), torch.ones(batch_size), atol=1e-5)
 
 
+@pytest.mark.unit
 class TestSignalToTradePipeline:
     """Test signal generation to trade execution pipeline."""
     
@@ -166,6 +217,7 @@ class TestSignalToTradePipeline:
         assert len(executor.positions) == 1
 
 
+@pytest.mark.unit
 class TestTrendDetectionPipeline:
     """Test trend detection pipeline."""
     
@@ -198,7 +250,7 @@ class TestTrendDetectionPipeline:
         # ML should have been used
         assert result['details']['ml_confidence'] != 0.5  # Default is 0.5 when no ML
 
-
+@pytest.mark.unit
 class TestDecisionEnginePipeline:
     """Test decision engine integration."""
     
@@ -220,6 +272,7 @@ class TestDecisionEnginePipeline:
         assert decision.reason != ""
 
 
+@pytest.mark.unit
 class TestBacktestSimulation:
     """Test backtest simulation scenarios."""
     
@@ -292,6 +345,7 @@ class TestBacktestSimulation:
         assert risk_manager.daily_trades <= risk_manager.config.max_daily_trades
 
 
+@pytest.mark.integration
 class TestEndToEndIntegration:
     """Full end-to-end system tests."""
     

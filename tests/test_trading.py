@@ -15,9 +15,21 @@ from trading.risk_manager import RiskManager, RiskConfig, TradeParams
 from trading.decision_engine import DecisionEngine, DecisionResult
 from trading.backtest import BacktestExecutor, BacktestConfig
 
-
+@pytest.mark.unit
 class TestSignalEngine:
     """Test suite for signal generation."""
+    
+    @pytest.mark.parametrize("probs,expected_signal", [
+        ([0.80, 0.10, 0.10], Signal.BUY),
+        ([0.10, 0.85, 0.05], Signal.SELL),
+        ([0.15, 0.15, 0.70], Signal.HOLD),
+        ([0.45, 0.43, 0.12], Signal.NO_TRADE),  # Insufficient spread
+        ([0.50, 0.30, 0.20], Signal.NO_TRADE),  # Below threshold
+    ])
+    def test_signal_generation_parametrized(self, probs, expected_signal):
+        """Test signal generation with various probability distributions."""
+        result = generate_signal(np.array(probs))
+        assert result.signal == expected_signal
     
     def test_signal_enum(self):
         """Test Signal enum values."""
@@ -100,7 +112,7 @@ class TestSignalEngine:
         with pytest.raises(ValueError, match="Expected 3 probabilities"):
             generate_signal(np.array([0.5, 0.5]))
 
-
+@pytest.mark.unit
 class TestSignalAggregator:
     """Test suite for signal aggregation."""
     
@@ -161,7 +173,7 @@ class TestSignalAggregator:
         
         assert len(agg.signal_history) == 0
 
-
+@pytest.mark.unit
 class TestRiskManager:
     """Test suite for risk management."""
     
@@ -298,7 +310,37 @@ class TestRiskManager:
         assert status['daily_trades'] == 1
         assert status['daily_pnl'] == 50
 
+    def test_get_params_with_zero_atr(self, sample_ohlcv_data):
+        """Test fallback when ATR is zero (flat price)."""
+        rm = RiskManager(account_balance=10000)
+        
+        # Create flat price data
+        flat_df = sample_ohlcv_data.copy()
+        flat_df['high'] = 1.1
+        flat_df['low'] = 1.1
+        flat_df['close'] = 1.1
+        flat_df['open'] = 1.1
+        
+        params = rm.get_params(flat_df, signal='BUY')
+        
+        # Should use fallback, not crash or return zeros
+        assert params.volume > 0
+        assert params.stop_loss != params.take_profit
+    
+    def test_risk_limits_with_negative_balance(self):
+        """Test behavior with edge case balances."""
+        rm = RiskManager(account_balance=10000)
+        
+        # This shouldn't happen, but test defensive behavior
+        allowed, reason = rm.check_risk_limits(
+            current_balance=-100,
+            current_equity=-100,
+            open_positions=0
+        )
+        
+        assert allowed == False
 
+@pytest.mark.unit
 class TestDecisionEngine:
     """Test suite for decision engine."""
     
@@ -365,6 +407,7 @@ class TestDecisionEngine:
         assert result.signal == "NO_TRADE"
 
 
+@pytest.mark.unit
 class TestBacktestExecutor:
     """Test suite for backtest executor."""
     
