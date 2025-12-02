@@ -13,9 +13,10 @@ from pathlib import Path
 from datetime import datetime
 import logging
 import time
-
 import pandas as pd
 import torch
+
+from utils.config import settings
 
 # Setup logging
 logging.basicConfig(
@@ -29,10 +30,11 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Configuration
-SYMBOL = os.getenv('TRADING_SYMBOL', 'EURUSD')
-ACCOUNT = int(os.getenv('MT5_ACCOUNT', '0'))
-PASSWORD = os.getenv('MT5_PASSWORD', '')
-SERVER = os.getenv('MT5_SERVER', '')
+SYMBOL = settings.SYMBOL
+ACCOUNT = settings.MT5_ACCOUNT
+PASSWORD = settings.MT5_PASSWORD
+SERVER = settings.MT5_SERVER
+PATH = settings.MT5_PATH
 
 # Model paths
 MODEL_DIR = Path(__file__).parent.parent / 'models'

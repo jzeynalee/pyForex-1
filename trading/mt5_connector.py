@@ -82,19 +82,18 @@ class MT5Connector:
         magic_number: int = 123456,
     ):
         if not MT5_AVAILABLE:
-            raise RuntimeError("MetaTrader5 library not available")
-    
+            raise RuntimeError("MetaTrader5 library not available")    
 
-        self.account = "abc"
-        self.password = "abcs"
-        self.server = "MetaQuotes-Demo"
-        self.type = "Forex Hedged USD"
-        self.investor = "abcs"
-        self.name = "Javad Zainali"
+        self.account = account
+        self.password = password
+        self.server = server
         self.path = path
         self.symbol = symbol
         self.timeframe = timeframe
         self.magic_number = magic_number
+        
+        self.connected = False
+        self._timeframe_mt5 = self._get_mt5_timeframe(timeframe)
         
         self.connected = False
         self._timeframe_mt5 = self._get_mt5_timeframe(timeframe)

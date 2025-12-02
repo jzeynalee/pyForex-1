@@ -45,7 +45,7 @@ class Settings(BaseSettings):
         return v
 
     class Config:
-        env_file = ".env"
+        env_file = "config.env"
         extra = "ignore"
 
 # Singleton instance
