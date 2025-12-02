@@ -83,10 +83,14 @@ class MT5Connector:
     ):
         if not MT5_AVAILABLE:
             raise RuntimeError("MetaTrader5 library not available")
-        
-        self.account = account
-        self.password = password
-        self.server = server
+    
+
+        self.account = "abc"
+        self.password = "abcs"
+        self.server = "MetaQuotes-Demo"
+        self.type = "Forex Hedged USD"
+        self.investor = "abcs"
+        self.name = "Javad Zainali"
         self.path = path
         self.symbol = symbol
         self.timeframe = timeframe

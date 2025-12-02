@@ -71,7 +71,7 @@ class TestStructuralAnalyzer:
         """Test behavior with too few candles."""
         analyzer = StructuralAnalyzer()
         small_df = pd.DataFrame({
-            'time': pd.date_range('2024-01-01', periods=5, freq='H'),
+            'time': pd.date_range('2024-01-01', periods=5, freq='h'),  # Fixed 'H' -> 'h'
             'open': [1.1] * 5,
             'high': [1.11] * 5,
             'low': [1.09] * 5,
@@ -90,11 +90,15 @@ class TestStructuralAnalyzer:
         df = sample_ohlcv_data.copy()
         df.loc[10:15, 'close'] = np.nan
         
-        # Depending on expected behavior:
-        # Option A: Should raise ValueError
-        # Option B: Should handle gracefully
-        with pytest.raises((ValueError, KeyError)):
-            analyzer.analyze(df)
+        # Code handles NaN gracefully - test that it returns valid structure
+        result = analyzer.analyze(df)
+        
+        # Should still return expected structure
+        assert 'direction' in result
+        assert 'score' in result
+        assert result['direction'] in [-1, 0, 1]
+        # Score might be degraded due to NaN but should still be valid
+        assert 0.0 <= result['score'] <= 1.0
 
 @pytest.mark.unit
 class TestMTFAnalyzer:

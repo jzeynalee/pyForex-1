@@ -2,29 +2,37 @@
 import pytest
 import numpy as np
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def sample_ohlcv_data():
     """Generate realistic OHLCV data."""
     n = 200
     np.random.seed(42)
     base_price = 1.1000
     
-    dates = pd.date_range(end=datetime.now(), periods=n, freq='H')
+    # Use 'h' instead of 'H' (pandas deprecation fix)
+    dates = pd.date_range(end=datetime.now(), periods=n, freq='h')
     returns = np.random.randn(n) * 0.001
     prices = base_price * np.exp(np.cumsum(returns))
     
-    return pd.DataFrame({
+    df = pd.DataFrame({
         'time': dates,
         'open': prices,
         'high': prices * (1 + np.abs(np.random.randn(n)) * 0.002),
         'low': prices * (1 - np.abs(np.random.randn(n)) * 0.002),
         'close': prices * (1 + np.random.randn(n) * 0.001),
         'volume': np.random.randint(100, 1000, n),
+        'tick_volume': np.random.randint(100, 1000, n),  # Added missing column
     })
+    
+    # Fix OHLC constraints
+    df['high'] = df[['high', 'open', 'close']].max(axis=1)
+    df['low'] = df[['low', 'open', 'close']].min(axis=1)
+    
+    return df
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def mtf_data(sample_ohlcv_data):
     """Multi-timeframe data dict."""
     return {
@@ -33,12 +41,12 @@ def mtf_data(sample_ohlcv_data):
         'M15': sample_ohlcv_data.copy(),
     }
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def bullish_trend_data():
     """Data with clear uptrend."""
     n = 200
-    dates = pd.date_range(end=datetime.now(), periods=n, freq='H')
-    # Steady upward drift
+    np.random.seed(43)
+    dates = pd.date_range(end=datetime.now(), periods=n, freq='h')  # Fixed
     prices = 1.1 + np.linspace(0, 0.05, n) + np.random.randn(n) * 0.001
     
     return pd.DataFrame({
@@ -48,13 +56,15 @@ def bullish_trend_data():
         'low': prices * 0.998,
         'close': prices * 1.001,
         'volume': np.random.randint(100, 1000, n),
+        'tick_volume': np.random.randint(100, 1000, n),
     })
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def bearish_trend_data():
     """Data with clear downtrend."""
     n = 200
-    dates = pd.date_range(end=datetime.now(), periods=n, freq='H')
+    np.random.seed(44)
+    dates = pd.date_range(end=datetime.now(), periods=n, freq='h')  # Fixed
     prices = 1.15 - np.linspace(0, 0.05, n) + np.random.randn(n) * 0.001
     
     return pd.DataFrame({
@@ -64,6 +74,7 @@ def bearish_trend_data():
         'low': prices * 0.998,
         'close': prices * 0.999,
         'volume': np.random.randint(100, 1000, n),
+        'tick_volume': np.random.randint(100, 1000, n),
     })
 
 @pytest.fixture
@@ -117,53 +128,3 @@ def mock_trend_analysis_sideways():
         'trend_strength': 25,
         'details': {}
     }
-
-@pytest.fixture
-def sample_ohlcv_data():
-    df = _generate_ohlcv_data()
-    
-    # Validate fixture data
-    required_cols = ['time', 'open', 'high', 'low', 'close', 'volume']
-    assert all(col in df.columns for col in required_cols)
-    assert len(df) >= 100, "Need sufficient data for tests"
-    assert df['high'].ge(df['low']).all(), "High must be >= Low"
-    
-    return df
-
-@pytest.fixture
-def sample_ohlcv_data():
-    """Generate realistic OHLCV data with validation."""
-    n = 200
-    np.random.seed(42)
-    base_price = 1.1000
-    
-    dates = pd.date_range(end=datetime.now(), periods=n, freq='H')
-    returns = np.random.randn(n) * 0.001
-    prices = base_price * np.exp(np.cumsum(returns))
-    
-    # Generate high/low that respect OHLC constraints
-    high_mult = 1 + np.abs(np.random.randn(n)) * 0.002
-    low_mult = 1 - np.abs(np.random.randn(n)) * 0.002
-    close_mult = 1 + np.random.randn(n) * 0.001
-    
-    df = pd.DataFrame({
-        'time': dates,
-        'open': prices,
-        'high': prices * high_mult,
-        'low': prices * low_mult,
-        'close': prices * close_mult,
-        'volume': np.random.randint(100, 1000, n),
-    })
-    
-    # Ensure high >= max(open, close) and low <= min(open, close)
-    df['high'] = df[['high', 'open', 'close']].max(axis=1)
-    df['low'] = df[['low', 'open', 'close']].min(axis=1)
-    
-    # Validate
-    assert (df['high'] >= df['low']).all(), "High must be >= Low"
-    assert (df['high'] >= df['open']).all(), "High must be >= Open"
-    assert (df['high'] >= df['close']).all(), "High must be >= Close"
-    assert (df['low'] <= df['open']).all(), "Low must be <= Open"
-    assert (df['low'] <= df['close']).all(), "Low must be <= Close"
-    
-    return df

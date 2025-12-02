@@ -6,7 +6,7 @@ import pytest
 import numpy as np
 import torch
 from pathlib import Path
-
+from unittest.mock import patch
 from models.lstm import LSTMModel, LSTMWithAttention
 from models.fusion import FusionNet, SimpleFusion, AttentionFusion
 from models.trend_classifier import (
