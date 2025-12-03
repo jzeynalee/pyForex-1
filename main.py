@@ -12,6 +12,7 @@ import argparse
 import logging
 import sys
 from pathlib import Path
+from typing import Optional
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent))
@@ -180,10 +181,10 @@ def main():
             run_live(args)
             
     except KeyboardInterrupt:
-        print("\n🛑 Stopped by user")
+        print("\n Stopped by user")
         
     except Exception as e:
-        logging.critical(f"🔥 Fatal error: {e}", exc_info=True)
+        logging.critical(f" Fatal error: {e}", exc_info=True)
         sys.exit(1)
 
 

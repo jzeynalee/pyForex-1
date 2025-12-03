@@ -1,0 +1,487 @@
+2025-12-03 19:12:28 | CRITICAL | root |  Fatal error: BacktestExecutor.__init__() got an unexpected keyword argument 'initial_balance'
+Traceback (most recent call last):
+  File "D:\myBot\pyforex-1\main.py", line 179, in main
+    run_backtest(args)
+    ~~~~~~~~~~~~^^^^^^
+  File "D:\myBot\pyforex-1\main.py", line 82, in run_backtest
+    bot = BacktestBot(
+        data=df,
+        strategy_class=NeuralHybridStrategy,
+        initial_balance=args.balance,
+    )
+  File "D:\myBot\pyforex-1\trading\bot.py", line 246, in __init__
+    self.executor = BacktestExecutor(initial_balance=initial_balance)
+                    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: BacktestExecutor.__init__() got an unexpected keyword argument 'initial_balance'
+2025-12-03 19:13:11 | CRITICAL | root |  Fatal error: cannot import name 'pd' from 'pandas' (C:\Users\javad\miniconda3\Lib\site-packages\pandas\__init__.py)
+Traceback (most recent call last):
+  File "D:\myBot\pyforex-1\main.py", line 179, in main
+    run_backtest(args)
+    ~~~~~~~~~~~~^^^^^^
+  File "D:\myBot\pyforex-1\main.py", line 58, in run_backtest
+    from trading.bot import BacktestBot
+  File "D:\myBot\pyforex-1\trading\bot.py", line 8, in <module>
+    from pandas import pd
+ImportError: cannot import name 'pd' from 'pandas' (C:\Users\javad\miniconda3\Lib\site-packages\pandas\__init__.py)
+2025-12-03 19:16:26 | CRITICAL | root |  Fatal error: cannot import name 'pd' from 'pandas' (C:\Users\javad\miniconda3\Lib\site-packages\pandas\__init__.py)
+Traceback (most recent call last):
+  File "D:\myBot\pyforex-1\main.py", line 179, in main
+    run_backtest(args)
+    ~~~~~~~~~~~~^^^^^^
+  File "D:\myBot\pyforex-1\main.py", line 58, in run_backtest
+    from trading.bot import BacktestBot
+  File "D:\myBot\pyforex-1\trading\bot.py", line 8, in <module>
+    from pandas import pd
+ImportError: cannot import name 'pd' from 'pandas' (C:\Users\javad\miniconda3\Lib\site-packages\pandas\__init__.py)
+2025-12-03 19:18:17 | CRITICAL | root |  Fatal error: BacktestExecutor.__init__() got an unexpected keyword argument 'initial_balance'
+Traceback (most recent call last):
+  File "D:\myBot\pyforex-1\main.py", line 179, in main
+    run_backtest(args)
+    ~~~~~~~~~~~~^^^^^^
+  File "D:\myBot\pyforex-1\main.py", line 82, in run_backtest
+    bot = BacktestBot(
+        data=df,
+        strategy_class=NeuralHybridStrategy,
+        initial_balance=args.balance,
+    )
+  File "D:\myBot\pyforex-1\trading\bot.py", line 261, in __init__
+    self.executor = BacktestExecutor(initial_balance=initial_balance)
+                    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: BacktestExecutor.__init__() got an unexpected keyword argument 'initial_balance'
+2025-12-03 19:24:32 | INFO     | inference.predictor | Loading models from models\weights on cpu
+2025-12-03 19:24:33 | INFO     | timm.models._builder | Loading pretrained weights from Hugging Face hub (timm/vit_base_patch16_224.augreg2_in21k_ft_in1k)
+2025-12-03 19:24:34 | WARNING  | huggingface_hub.file_download | Xet Storage is enabled for this repo, but the 'hf_xet' package is not installed. Falling back to regular HTTP download. For better performance, install the package with: `pip install huggingface_hub[hf_xet]` or `pip install hf_xet`
+2025-12-03 19:29:50 | ERROR    | inference.predictor | Failed to load models: ("Connection broken: ConnectionResetError(10054, 'An existing connection was forcibly closed by the remote host', None, 10054, None)", ConnectionResetError(10054, 'An existing connection was forcibly closed by the remote host', None, 10054, None))
+2025-12-03 19:29:50 | CRITICAL | root |  Fatal error: ("Connection broken: ConnectionResetError(10054, 'An existing connection was forcibly closed by the remote host', None, 10054, None)", ConnectionResetError(10054, 'An existing connection was forcibly closed by the remote host', None, 10054, None))
+Traceback (most recent call last):
+  File "C:\Users\javad\miniconda3\Lib\site-packages\urllib3\response.py", line 779, in _error_catcher
+    yield
+  File "C:\Users\javad\miniconda3\Lib\site-packages\urllib3\response.py", line 904, in _raw_read
+    data = self._fp_read(amt, read1=read1) if not fp_closed else b""
+           ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^
+  File "C:\Users\javad\miniconda3\Lib\site-packages\urllib3\response.py", line 887, in _fp_read
+    return self._fp.read(amt) if amt is not None else self._fp.read()
+           ~~~~~~~~~~~~~^^^^^
+  File "C:\Users\javad\miniconda3\Lib\http\client.py", line 479, in read
+    s = self.fp.read(amt)
+  File "C:\Users\javad\miniconda3\Lib\socket.py", line 719, in readinto
+    return self._sock.recv_into(b)
+           ~~~~~~~~~~~~~~~~~~~~^^^
+  File "C:\Users\javad\miniconda3\Lib\ssl.py", line 1304, in recv_into
+    return self.read(nbytes, buffer)
+           ~~~~~~~~~^^^^^^^^^^^^^^^^
+  File "C:\Users\javad\miniconda3\Lib\ssl.py", line 1138, in read
+    return self._sslobj.read(len, buffer)
+           ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+ConnectionResetError: [WinError 10054] An existing connection was forcibly closed by the remote host
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "C:\Users\javad\miniconda3\Lib\site-packages\requests\models.py", line 820, in generate
+    yield from self.raw.stream(chunk_size, decode_content=True)
+  File "C:\Users\javad\miniconda3\Lib\site-packages\urllib3\response.py", line 1091, in stream
+    data = self.read(amt=amt, decode_content=decode_content)
+  File "C:\Users\javad\miniconda3\Lib\site-packages\urllib3\response.py", line 980, in read
+    data = self._raw_read(amt)
+  File "C:\Users\javad\miniconda3\Lib\site-packages\urllib3\response.py", line 903, in _raw_read
+    with self._error_catcher():
+         ~~~~~~~~~~~~~~~~~~~^^
+  File "C:\Users\javad\miniconda3\Lib\contextlib.py", line 162, in __exit__
+    self.gen.throw(value)
+    ~~~~~~~~~~~~~~^^^^^^^
+  File "C:\Users\javad\miniconda3\Lib\site-packages\urllib3\response.py", line 806, in _error_catcher
+    raise ProtocolError(f"Connection broken: {e!r}", e) from e
+urllib3.exceptions.ProtocolError: ("Connection broken: ConnectionResetError(10054, 'An existing connection was forcibly closed by the remote host', None, 10054, None)", ConnectionResetError(10054, 'An existing connection was forcibly closed by the remote host', None, 10054, None))
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "D:\myBot\pyforex-1\main.py", line 179, in main
+    run_backtest(args)
+    ~~~~~~~~~~~~^^^^^^
+  File "D:\myBot\pyforex-1\main.py", line 82, in run_backtest
+    bot = BacktestBot(
+        data=df,
+        strategy_class=NeuralHybridStrategy,
+        initial_balance=args.balance,
+    )
+  File "D:\myBot\pyforex-1\trading\bot.py", line 257, in __init__
+    self.strategy = strategy_class(
+                    ~~~~~~~~~~~~~~^
+        data_provider=self,  # Bot acts as data provider
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        executor=self.executor,
+        ^^^^^^^^^^^^^^^^^^^^^^^
+        risk_manager=self.risk_manager,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "D:\myBot\pyforex-1\strategies\neural_hybrid.py", line 44, in __init__
+    self.predictor = predictor or HybridPredictor()
+                                  ~~~~~~~~~~~~~~~^^
+  File "D:\myBot\pyforex-1\inference\predictor.py", line 64, in __init__
+    self._load_models()
+    ~~~~~~~~~~~~~~~~~^^
+  File "D:\myBot\pyforex-1\inference\predictor.py", line 78, in _load_models
+    self.vit = ViTExtractor(
+               ~~~~~~~~~~~~^
+        model_name="vit_base_patch16_224",
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        pretrained=True,
+        ^^^^^^^^^^^^^^^^
+    ).to(self.device)
+    ^
+  File "D:\myBot\pyforex-1\models\vit.py", line 37, in __init__
+    self.vit = create_model(model_name, pretrained=pretrained)
+               ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\javad\miniconda3\Lib\site-packages\timm\models\_factory.py", line 138, in create_model
+    model = create_fn(
+        pretrained=pretrained,
+    ...<3 lines>...
+        **kwargs,
+    )
+  File "C:\Users\javad\miniconda3\Lib\site-packages\timm\models\vision_transformer.py", line 2820, in vit_base_patch16_224
+    model = _create_vision_transformer('vit_base_patch16_224', pretrained=pretrained, **dict(model_args, **kwargs))
+  File "C:\Users\javad\miniconda3\Lib\site-packages\timm\models\vision_transformer.py", line 2720, in _create_vision_transformer
+    return build_model_with_cfg(
+        VisionTransformer,
+    ...<5 lines>...
+        **kwargs,
+    )
+  File "C:\Users\javad\miniconda3\Lib\site-packages\timm\models\_builder.py", line 457, in build_model_with_cfg
+    load_pretrained(
+    ~~~~~~~~~~~~~~~^
+        model,
+        ^^^^^^
+    ...<5 lines>...
+        cache_dir=cache_dir,
+        ^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\javad\miniconda3\Lib\site-packages\timm\models\_builder.py", line 226, in load_pretrained
+    state_dict = load_state_dict_from_hf(pretrained_loc, weights_only=True, cache_dir=cache_dir)
+  File "C:\Users\javad\miniconda3\Lib\site-packages\timm\models\_hub.py", line 226, in load_state_dict_from_hf
+    cached_safe_file = hf_hub_download(
+        repo_id=hf_model_id,
+    ...<2 lines>...
+        cache_dir=cache_dir,
+    )
+  File "C:\Users\javad\miniconda3\Lib\site-packages\huggingface_hub\utils\_validators.py", line 114, in _inner_fn
+    return fn(*args, **kwargs)
+  File "C:\Users\javad\miniconda3\Lib\site-packages\huggingface_hub\file_download.py", line 1010, in hf_hub_download
+    return _hf_hub_download_to_cache_dir(
+        # Destination
+    ...<14 lines>...
+        force_download=force_download,
+    )
+  File "C:\Users\javad\miniconda3\Lib\site-packages\huggingface_hub\file_download.py", line 1171, in _hf_hub_download_to_cache_dir
+    _download_to_tmp_and_move(
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^
+        incomplete_path=Path(blob_path + ".incomplete"),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<8 lines>...
+        xet_file_data=xet_file_data,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\javad\miniconda3\Lib\site-packages\huggingface_hub\file_download.py", line 1738, in _download_to_tmp_and_move
+    http_get(
+    ~~~~~~~~^
+        url_to_download,
+        ^^^^^^^^^^^^^^^^
+    ...<4 lines>...
+        expected_size=expected_size,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\javad\miniconda3\Lib\site-packages\huggingface_hub\file_download.py", line 496, in http_get
+    for chunk in r.iter_content(chunk_size=constants.DOWNLOAD_CHUNK_SIZE):
+                 ~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\javad\miniconda3\Lib\site-packages\requests\models.py", line 822, in generate
+    raise ChunkedEncodingError(e)
+requests.exceptions.ChunkedEncodingError: ("Connection broken: ConnectionResetError(10054, 'An existing connection was forcibly closed by the remote host', None, 10054, None)", ConnectionResetError(10054, 'An existing connection was forcibly closed by the remote host', None, 10054, None))
+2025-12-03 19:31:28 | INFO     | inference.predictor | Loading models from models\weights on cpu
+2025-12-03 19:31:29 | INFO     | timm.models._builder | Loading pretrained weights from Hugging Face hub (timm/vit_base_patch16_224.augreg2_in21k_ft_in1k)
+2025-12-03 19:31:31 | WARNING  | huggingface_hub.file_download | Xet Storage is enabled for this repo, but the 'hf_xet' package is not installed. Falling back to regular HTTP download. For better performance, install the package with: `pip install huggingface_hub[hf_xet]` or `pip install hf_xet`
+2025-12-03 19:33:31 | INFO     | timm.models._hub | [timm/vit_base_patch16_224.augreg2_in21k_ft_in1k] Safe alternative available for 'pytorch_model.bin' (as 'model.safetensors'). Loading weights using safetensors.
+2025-12-03 19:33:33 | WARNING  | models.yolo_detector | Failed to load YOLO model: [Errno 2] No such file or directory: 'models\\weights\\yolo_best.pt'. Using fallback.
+2025-12-03 19:33:33 | INFO     | inference.predictor | Loaded weights: models\weights\lstm_best.pt
+2025-12-03 19:33:33 | WARNING  | inference.predictor | Weight file not found: models\weights\vit_best.pt (using random/pretrained)
+2025-12-03 19:33:33 | WARNING  | inference.predictor | Weight file not found: models\weights\fusion_best.pt (using random/pretrained)
+2025-12-03 19:33:33 | INFO     | inference.predictor | All models loaded successfully
+2025-12-03 19:33:33 | INFO     | inference.predictor | Loading models from models\weights on cpu
+2025-12-03 19:33:34 | INFO     | timm.models._builder | Loading pretrained weights from Hugging Face hub (timm/vit_base_patch16_224.augreg2_in21k_ft_in1k)
+2025-12-03 19:33:34 | INFO     | timm.models._hub | [timm/vit_base_patch16_224.augreg2_in21k_ft_in1k] Safe alternative available for 'pytorch_model.bin' (as 'model.safetensors'). Loading weights using safetensors.
+2025-12-03 19:33:35 | WARNING  | models.yolo_detector | Failed to load YOLO model: [Errno 2] No such file or directory: 'models\\weights\\yolo_best.pt'. Using fallback.
+2025-12-03 19:33:35 | INFO     | inference.predictor | Loaded weights: models\weights\lstm_best.pt
+2025-12-03 19:33:35 | WARNING  | inference.predictor | Weight file not found: models\weights\vit_best.pt (using random/pretrained)
+2025-12-03 19:33:35 | WARNING  | inference.predictor | Weight file not found: models\weights\fusion_best.pt (using random/pretrained)
+2025-12-03 19:33:35 | INFO     | inference.predictor | All models loaded successfully
+2025-12-03 19:33:36 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.37) | Conf: 0.00
+2025-12-03 19:33:36 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.38) | Conf: 0.00
+2025-12-03 19:33:36 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.38) | Conf: 0.00
+2025-12-03 19:33:37 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.37) | Conf: 0.00
+2025-12-03 19:33:37 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.37) | Conf: 0.00
+2025-12-03 19:33:37 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:33:37 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:33:38 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:33:38 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:33:38 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.37) | Conf: 0.00
+2025-12-03 19:33:38 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:33:39 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:33:39 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.37) | Conf: 0.00
+2025-12-03 19:33:39 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.37) | Conf: 0.00
+2025-12-03 19:33:40 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.37) | Conf: 0.00
+2025-12-03 19:33:40 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.38) | Conf: 0.00
+2025-12-03 19:33:40 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.38) | Conf: 0.00
+2025-12-03 19:33:40 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.38) | Conf: 0.00
+2025-12-03 19:33:41 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.38) | Conf: 0.00
+2025-12-03 19:33:41 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.38) | Conf: 0.00
+2025-12-03 19:33:41 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.38) | Conf: 0.00
+2025-12-03 19:33:41 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.38) | Conf: 0.00
+2025-12-03 19:33:42 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.38) | Conf: 0.00
+2025-12-03 19:33:42 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.35) | Conf: 0.00
+2025-12-03 19:33:42 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.34) | Conf: 0.00
+2025-12-03 19:33:42 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.34) | Conf: 0.00
+2025-12-03 19:33:43 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.34) | Conf: 0.00
+2025-12-03 19:33:43 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.34) | Conf: 0.00
+2025-12-03 19:33:43 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.35) | Conf: 0.00
+2025-12-03 19:33:43 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.35) | Conf: 0.00
+2025-12-03 19:33:44 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.35) | Conf: 0.00
+2025-12-03 19:33:44 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.35) | Conf: 0.00
+2025-12-03 19:33:44 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.35) | Conf: 0.00
+2025-12-03 19:33:45 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:33:45 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:33:45 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.35) | Conf: 0.00
+2025-12-03 19:33:45 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:33:46 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.37) | Conf: 0.00
+2025-12-03 19:33:46 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:33:46 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.37) | Conf: 0.00
+2025-12-03 19:33:46 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:33:47 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:33:47 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:33:47 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.37) | Conf: 0.00
+2025-12-03 19:33:48 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:33:48 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.38) | Conf: 0.00
+2025-12-03 19:33:48 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.37) | Conf: 0.00
+2025-12-03 19:33:48 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.38) | Conf: 0.00
+2025-12-03 19:33:49 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.37) | Conf: 0.00
+2025-12-03 19:33:49 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.37) | Conf: 0.00
+2025-12-03 19:33:49 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.35) | Conf: 0.00
+2025-12-03 19:33:49 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.35) | Conf: 0.00
+2025-12-03 19:33:50 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:33:50 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:33:50 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:33:50 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:33:51 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.35) | Conf: 0.00
+2025-12-03 19:33:51 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.35) | Conf: 0.00
+2025-12-03 19:33:51 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:33:52 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.35) | Conf: 0.00
+2025-12-03 19:33:52 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:33:52 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.35) | Conf: 0.00
+2025-12-03 19:33:52 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.35) | Conf: 0.00
+2025-12-03 19:33:53 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:33:53 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.37) | Conf: 0.00
+2025-12-03 19:33:53 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:33:53 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:33:54 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:33:54 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:33:54 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.38) | Conf: 0.00
+2025-12-03 19:33:54 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.38) | Conf: 0.00
+2025-12-03 19:33:55 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.37) | Conf: 0.00
+2025-12-03 19:33:55 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:33:55 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:33:55 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:33:56 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:33:56 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:33:56 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:33:57 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:33:57 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:33:57 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:33:57 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:33:58 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:33:58 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:33:58 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.35) | Conf: 0.00
+2025-12-03 19:33:58 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.35) | Conf: 0.00
+2025-12-03 19:33:59 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:33:59 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.37) | Conf: 0.00
+2025-12-03 19:33:59 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.37) | Conf: 0.00
+2025-12-03 19:33:59 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:34:00 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.37) | Conf: 0.00
+2025-12-03 19:34:00 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.37) | Conf: 0.00
+2025-12-03 19:34:00 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:34:01 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:34:01 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:34:01 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.34) | Conf: 0.00
+2025-12-03 19:34:01 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.33) | Conf: 0.00
+2025-12-03 19:34:02 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.34) | Conf: 0.00
+2025-12-03 19:34:02 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.35) | Conf: 0.00
+2025-12-03 19:34:02 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.35) | Conf: 0.00
+2025-12-03 19:34:02 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.35) | Conf: 0.00
+2025-12-03 19:34:03 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.35) | Conf: 0.00
+2025-12-03 19:34:03 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.35) | Conf: 0.00
+2025-12-03 19:34:03 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.35) | Conf: 0.00
+2025-12-03 19:34:03 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:34:04 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:34:04 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:34:04 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:34:05 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:34:05 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:34:05 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:34:05 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.37) | Conf: 0.00
+2025-12-03 19:34:06 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.37) | Conf: 0.00
+2025-12-03 19:34:06 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:34:06 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:34:06 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.37) | Conf: 0.00
+2025-12-03 19:34:07 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.38) | Conf: 0.00
+2025-12-03 19:34:07 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.38) | Conf: 0.00
+2025-12-03 19:34:07 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.38) | Conf: 0.00
+2025-12-03 19:34:07 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.38) | Conf: 0.00
+2025-12-03 19:34:08 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.38) | Conf: 0.00
+2025-12-03 19:34:08 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.38) | Conf: 0.00
+2025-12-03 19:34:08 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:34:09 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.35) | Conf: 0.00
+2025-12-03 19:34:09 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.35) | Conf: 0.00
+2025-12-03 19:34:09 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:34:09 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.37) | Conf: 0.00
+2025-12-03 19:34:10 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.37) | Conf: 0.00
+2025-12-03 19:34:10 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:34:10 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:34:10 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.35) | Conf: 0.00
+2025-12-03 19:34:11 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:34:11 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.37) | Conf: 0.00
+2025-12-03 19:34:11 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:34:11 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:34:12 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:34:12 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.37) | Conf: 0.00
+2025-12-03 19:34:12 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.37) | Conf: 0.00
+2025-12-03 19:34:12 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:34:13 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.37) | Conf: 0.00
+2025-12-03 19:34:13 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.38) | Conf: 0.00
+2025-12-03 19:34:13 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.38) | Conf: 0.00
+2025-12-03 19:34:14 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.38) | Conf: 0.00
+2025-12-03 19:34:14 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.38) | Conf: 0.00
+2025-12-03 19:34:14 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.38) | Conf: 0.00
+2025-12-03 19:34:14 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.38) | Conf: 0.00
+2025-12-03 19:34:15 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.38) | Conf: 0.00
+2025-12-03 19:34:15 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.37) | Conf: 0.00
+2025-12-03 19:34:15 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.37) | Conf: 0.00
+2025-12-03 19:34:15 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.37) | Conf: 0.00
+2025-12-03 19:34:16 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.37) | Conf: 0.00
+2025-12-03 19:34:16 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:34:16 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:34:16 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.37) | Conf: 0.00
+2025-12-03 19:34:17 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.37) | Conf: 0.00
+2025-12-03 19:34:17 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:34:17 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:34:18 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:34:18 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:34:18 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.37) | Conf: 0.00
+2025-12-03 19:34:18 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:34:19 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.37) | Conf: 0.00
+2025-12-03 19:34:19 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.37) | Conf: 0.00
+2025-12-03 19:34:19 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.37) | Conf: 0.00
+2025-12-03 19:34:19 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.37) | Conf: 0.00
+2025-12-03 19:34:20 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.37) | Conf: 0.00
+2025-12-03 19:34:20 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.37) | Conf: 0.00
+2025-12-03 19:34:20 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.37) | Conf: 0.00
+2025-12-03 19:34:21 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.37) | Conf: 0.00
+2025-12-03 19:34:21 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.38) | Conf: 0.00
+2025-12-03 19:34:21 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.37) | Conf: 0.00
+2025-12-03 19:34:21 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.37) | Conf: 0.00
+2025-12-03 19:34:22 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:34:22 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:34:22 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:34:23 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.35) | Conf: 0.00
+2025-12-03 19:34:23 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.35) | Conf: 0.00
+2025-12-03 19:34:23 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:34:23 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.35) | Conf: 0.00
+2025-12-03 19:34:24 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:34:24 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.35) | Conf: 0.00
+2025-12-03 19:34:24 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.35) | Conf: 0.00
+2025-12-03 19:34:25 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:34:25 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:34:25 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.37) | Conf: 0.00
+2025-12-03 19:34:25 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.37) | Conf: 0.00
+2025-12-03 19:34:26 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:34:26 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.35) | Conf: 0.00
+2025-12-03 19:34:26 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.33) | Conf: 0.00
+2025-12-03 19:34:26 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.33) | Conf: 0.00
+2025-12-03 19:34:27 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.34) | Conf: 0.00
+2025-12-03 19:34:27 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.34) | Conf: 0.00
+2025-12-03 19:34:27 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.35) | Conf: 0.00
+2025-12-03 19:34:27 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.35) | Conf: 0.00
+2025-12-03 19:34:28 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.35) | Conf: 0.00
+2025-12-03 19:34:28 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.35) | Conf: 0.00
+2025-12-03 19:34:28 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:34:29 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:34:29 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.35) | Conf: 0.00
+2025-12-03 19:34:29 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:34:29 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:34:30 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:34:30 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:34:30 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:34:30 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:34:31 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.35) | Conf: 0.00
+2025-12-03 19:34:31 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:34:31 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:34:31 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.35) | Conf: 0.00
+2025-12-03 19:34:32 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.34) | Conf: 0.00
+2025-12-03 19:34:32 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.33) | Conf: 0.00
+2025-12-03 19:34:32 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.34) | Conf: 0.00
+2025-12-03 19:34:33 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.33) | Conf: 0.00
+2025-12-03 19:34:33 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.34) | Conf: 0.00
+2025-12-03 19:34:33 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.34) | Conf: 0.00
+2025-12-03 19:34:33 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.34) | Conf: 0.00
+2025-12-03 19:34:34 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.34) | Conf: 0.00
+2025-12-03 19:34:34 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.33) | Conf: 0.00
+2025-12-03 19:34:34 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.34) | Conf: 0.00
+2025-12-03 19:34:35 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.34) | Conf: 0.00
+2025-12-03 19:34:35 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.34) | Conf: 0.00
+2025-12-03 19:34:35 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.34) | Conf: 0.00
+2025-12-03 19:34:35 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.34) | Conf: 0.00
+2025-12-03 19:34:36 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.35) | Conf: 0.00
+2025-12-03 19:34:36 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.35) | Conf: 0.00
+2025-12-03 19:34:36 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.35) | Conf: 0.00
+2025-12-03 19:34:36 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.35) | Conf: 0.00
+2025-12-03 19:34:37 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:34:37 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.35) | Conf: 0.00
+2025-12-03 19:34:37 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.35) | Conf: 0.00
+2025-12-03 19:34:38 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.35) | Conf: 0.00
+2025-12-03 19:34:38 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.35) | Conf: 0.00
+2025-12-03 19:34:38 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.34) | Conf: 0.00
+2025-12-03 19:34:38 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.33) | Conf: 0.00
+2025-12-03 19:34:39 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.33) | Conf: 0.00
+2025-12-03 19:34:39 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.34) | Conf: 0.00
+2025-12-03 19:34:39 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.33) | Conf: 0.00
+2025-12-03 19:34:39 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.33) | Conf: 0.00
+2025-12-03 19:34:40 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.34) | Conf: 0.00
+2025-12-03 19:34:40 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.35) | Conf: 0.00
+2025-12-03 19:34:40 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.35) | Conf: 0.00
+2025-12-03 19:34:41 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.35) | Conf: 0.00
+2025-12-03 19:34:41 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.34) | Conf: 0.00
+2025-12-03 19:34:41 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.35) | Conf: 0.00
+2025-12-03 19:34:41 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.35) | Conf: 0.00
+2025-12-03 19:34:42 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.35) | Conf: 0.00
+2025-12-03 19:34:42 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:34:42 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.35) | Conf: 0.00
+2025-12-03 19:34:42 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.34) | Conf: 0.00
+2025-12-03 19:34:43 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.35) | Conf: 0.00
+2025-12-03 19:34:43 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.34) | Conf: 0.00
+2025-12-03 19:34:43 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.34) | Conf: 0.00
+2025-12-03 19:34:43 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.35) | Conf: 0.00
+2025-12-03 19:34:44 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.35) | Conf: 0.00
+2025-12-03 19:34:44 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:34:44 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.35) | Conf: 0.00
+2025-12-03 19:34:45 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:34:45 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.35) | Conf: 0.00
+2025-12-03 19:34:45 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.33) | Conf: 0.00
+2025-12-03 19:34:45 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.34) | Conf: 0.00
+2025-12-03 19:34:46 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:34:46 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.36) | Conf: 0.00
+2025-12-03 19:34:46 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.34) | Conf: 0.00
+2025-12-03 19:34:46 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.34) | Conf: 0.00
+2025-12-03 19:34:47 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.34) | Conf: 0.00
+2025-12-03 19:34:47 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.34) | Conf: 0.00
+2025-12-03 19:34:47 | INFO     | strategies.neural_hybrid | [DECISION] NO_TRADE | Pattern weak (0.34) | Conf: 0.00
