@@ -5,6 +5,8 @@ Main trading bot orchestration.
 import time
 import logging
 import signal as os_signal
+import pandas as pd
+import sys
 from typing import Optional, Type
 from datetime import datetime
 from dataclasses import dataclass
@@ -239,10 +241,14 @@ class BacktestBot:
         strategy_class: Type[Strategy],
         initial_balance: float = 10000.0,
     ):
-        from trading.backtest import BacktestExecutor
+        # FIX: Imported BacktestConfig here to fix the TypeError
+        from trading.backtest import BacktestExecutor, BacktestConfig
         
         self.data = data
-        self.executor = BacktestExecutor(initial_balance=initial_balance)
+        
+        # FIX: Create config object and pass it to executor
+        config = BacktestConfig(initial_balance=initial_balance)
+        self.executor = BacktestExecutor(config=config)
         
         self.risk_manager = RiskManager(
             account_balance=initial_balance,

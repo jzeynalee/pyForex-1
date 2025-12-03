@@ -1,4 +1,14 @@
 # training/auto_retrain.py
+import sys
+import os
+from pathlib import Path
+
+# --- FIX: Add project root to sys.path ---
+# This allows python to find 'trading', 'utils', 'models' modules
+# when running this script directly from the terminal.
+sys.path.insert(0, str(Path(__file__).parent.parent))
+# -----------------------------------------
+
 import logging
 from trading.mt5_connector import MT5Connector
 from training.train_lstm import train_lstm_model
@@ -23,14 +33,19 @@ def auto_retrain_job():
         logging.error("❌ No data received.")
         return
 
+    # Ensure directories exist
+    data_dir = Path("data/raw")
+    data_dir.mkdir(parents=True, exist_ok=True)
+
     # Save to CSV for the training scripts to read
-    csv_path = "data/raw/eurusd_latest.csv"
+    csv_path = data_dir / "eurusd_latest.csv"
     df.to_csv(csv_path, index=False)
     logging.info(f"✅ Data saved to {csv_path}")
     
     # 2. Retrain LSTM
     try:
-        train_lstm_model(data_path=csv_path)
+        # Pass the absolute path to ensure training script finds it
+        train_lstm_model(data_path=str(csv_path))
     except Exception as e:
         logging.error(f"❌ LSTM Training Failed: {e}")
 
