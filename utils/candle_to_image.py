@@ -1,206 +1,222 @@
-# utils/candle_to_image.py
+# candle_to_image.py
 """
-High-performance candlestick chart image generation using OpenCV.
+Candlestick chart image generator for ML training.
+Converts OHLCV DataFrames to chart images suitable for ViT/YOLO.
 """
-import cv2
+
 import numpy as np
+from PIL import Image, ImageDraw
+from typing import Tuple, Optional, List, Dict
 import pandas as pd
-from typing import Tuple, Optional
+
+
+class CandlestickRenderer:
+    """
+    Renders OHLCV data as candlestick chart images.
+    """
+    
+    def __init__(
+        self,
+        image_size: Tuple[int, int] = (224, 224),
+        background_color: Tuple[int, int, int] = (255, 255, 255),
+        bull_color: Tuple[int, int, int] = (0, 180, 0),
+        bear_color: Tuple[int, int, int] = (220, 0, 0),
+        wick_color: Tuple[int, int, int] = (60, 60, 60),
+        padding: float = 0.1,
+        candle_width_ratio: float = 0.7,
+    ):
+        self.image_size = image_size
+        self.background_color = background_color
+        self.bull_color = bull_color
+        self.bear_color = bear_color
+        self.wick_color = wick_color
+        self.padding = padding
+        self.candle_width_ratio = candle_width_ratio
+    
+    def render(
+        self, 
+        df: pd.DataFrame,
+        include_volume: bool = False,
+    ) -> np.ndarray:
+        """
+        Render candlestick chart from OHLCV DataFrame.
+        
+        Args:
+            df: DataFrame with 'open', 'high', 'low', 'close' columns
+            include_volume: Whether to render volume bars at bottom
+        
+        Returns:
+            numpy array of shape (H, W, 3) in RGB uint8 format
+        """
+        width, height = self.image_size
+        
+        img = Image.new('RGB', (width, height), self.background_color)
+        draw = ImageDraw.Draw(img)
+        
+        opens = df['open'].values
+        highs = df['high'].values
+        lows = df['low'].values
+        closes = df['close'].values
+        
+        n_candles = len(df)
+        if n_candles == 0:
+            return np.array(img)
+        
+        price_min = lows.min()
+        price_max = highs.max()
+        price_range = price_max - price_min
+        
+        if price_range == 0:
+            price_range = price_max * 0.01
+        
+        price_min -= price_range * self.padding
+        price_max += price_range * self.padding
+        price_range = price_max - price_min
+        
+        chart_height = height * (0.8 if include_volume else 1.0)
+        candle_spacing = width / n_candles
+        candle_width = candle_spacing * self.candle_width_ratio
+        
+        def price_to_y(price):
+            return int(chart_height - ((price - price_min) / price_range * chart_height))
+        
+        for i in range(n_candles):
+            o, h, l, c = opens[i], highs[i], lows[i], closes[i]
+            
+            x_center = candle_spacing * (i + 0.5)
+            x_left = x_center - candle_width / 2
+            x_right = x_center + candle_width / 2
+            
+            y_high = price_to_y(h)
+            y_low = price_to_y(l)
+            y_open = price_to_y(o)
+            y_close = price_to_y(c)
+            
+            is_bullish = c >= o
+            body_color = self.bull_color if is_bullish else self.bear_color
+            
+            wick_x = int(x_center)
+            draw.line([(wick_x, y_high), (wick_x, y_low)], fill=self.wick_color, width=1)
+            
+            body_top = min(y_open, y_close)
+            body_bottom = max(y_open, y_close)
+            
+            if body_bottom - body_top < 1:
+                body_bottom = body_top + 1
+            
+            draw.rectangle(
+                [int(x_left), body_top, int(x_right), body_bottom],
+                fill=body_color,
+                outline=self.wick_color,
+            )
+        
+        if include_volume and 'tick_volume' in df.columns:
+            self._draw_volume(draw, df, width, height, chart_height, candle_spacing, candle_width)
+        
+        return np.array(img)
+    
+    def _draw_volume(self, draw, df, width, height, chart_height, candle_spacing, candle_width):
+        """Draw volume bars at the bottom of the chart."""
+        volumes = df['tick_volume'].values if 'tick_volume' in df.columns else df.get('volume', pd.Series([0]*len(df))).values
+        
+        vol_max = volumes.max() if volumes.max() > 0 else 1
+        vol_height = height - chart_height
+        
+        for i, vol in enumerate(volumes):
+            x_center = candle_spacing * (i + 0.5)
+            x_left = x_center - candle_width / 2
+            x_right = x_center + candle_width / 2
+            
+            bar_height = (vol / vol_max) * vol_height * 0.8
+            y_bottom = height
+            y_top = height - bar_height
+            
+            is_bullish = df['close'].iloc[i] >= df['open'].iloc[i]
+            color = self.bull_color if is_bullish else self.bear_color
+            
+            light_color = tuple(min(255, c + 100) for c in color)
+            draw.rectangle([int(x_left), int(y_top), int(x_right), int(y_bottom)], fill=light_color)
+    
+    def render_with_annotations(
+        self,
+        df: pd.DataFrame,
+        annotations: List[Dict],
+    ) -> Tuple[np.ndarray, List[Dict]]:
+        """
+        Render chart with pattern annotations for YOLO training.
+        
+        Args:
+            df: OHLCV DataFrame
+            annotations: List of dicts with 'start_idx', 'end_idx', 'pattern_class'
+        
+        Returns:
+            (image_array, bounding_boxes)
+        """
+        img = self.render(df)
+        width, height = self.image_size
+        
+        n_candles = len(df)
+        candle_spacing = width / n_candles
+        
+        price_min = df['low'].min()
+        price_max = df['high'].max()
+        price_range = price_max - price_min
+        price_min -= price_range * self.padding
+        price_max += price_range * self.padding
+        price_range = price_max - price_min
+        
+        bboxes = []
+        for ann in annotations:
+            start_idx = ann['start_idx']
+            end_idx = ann['end_idx']
+            class_id = ann['class_id']
+            
+            x_left = (start_idx / n_candles)
+            x_right = ((end_idx + 1) / n_candles)
+            
+            pattern_df = df.iloc[start_idx:end_idx+1]
+            y_high = (price_max - pattern_df['high'].max()) / price_range
+            y_low = (price_max - pattern_df['low'].min()) / price_range
+            
+            x_center = (x_left + x_right) / 2
+            y_center = (y_high + y_low) / 2
+            box_width = x_right - x_left
+            box_height = y_low - y_high
+            
+            x_center = max(0, min(1, x_center))
+            y_center = max(0, min(1, y_center))
+            box_width = max(0.01, min(1, box_width))
+            box_height = max(0.01, min(1, box_height))
+            
+            bboxes.append({
+                'class_id': class_id,
+                'x_center': x_center,
+                'y_center': y_center,
+                'width': box_width,
+                'height': box_height,
+            })
+        
+        return img, bboxes
 
 
 def candle_image(
-    df_window: pd.DataFrame,
+    df: pd.DataFrame,
     target_size: int = 224,
-    background_color: Tuple[int, int, int] = (255, 255, 255),
-    bullish_color: Tuple[int, int, int] = (0, 200, 0),
-    bearish_color: Tuple[int, int, int] = (200, 0, 0),
-    wick_color: Tuple[int, int, int] = (50, 50, 50),
-    body_width_ratio: float = 0.6,
-    padding_pct: float = 0.05,
-    add_volume: bool = False,
+    include_volume: bool = False,
 ) -> np.ndarray:
     """
-    Generates a candlestick chart image using OpenCV.
+    Convenience function to generate candlestick image.
     
     Args:
-        df_window: DataFrame with 'open', 'high', 'low', 'close' columns
-        target_size: Output image dimensions (square)
-        background_color: RGB background color
-        bullish_color: RGB color for bullish candles
-        bearish_color: RGB color for bearish candles
-        wick_color: RGB color for wicks
-        body_width_ratio: Width of candle body relative to slot width
-        padding_pct: Padding percentage for price range
-        add_volume: If True, adds volume bars at bottom
+        df: OHLCV DataFrame
+        target_size: Output image size (square)
+        include_volume: Include volume bars
     
     Returns:
-        RGB image array of shape (target_size, target_size, 3)
+        numpy array (H, W, 3) uint8 RGB
     """
-    # Initialize canvas
-    img = np.full((target_size, target_size, 3), background_color, dtype=np.uint8)
-    
-    if df_window.empty:
-        return img
-    
-    # Extract OHLC data
-    opens = df_window['open'].values.astype(np.float64)
-    highs = df_window['high'].values.astype(np.float64)
-    lows = df_window['low'].values.astype(np.float64)
-    closes = df_window['close'].values.astype(np.float64)
-    
-    num_candles = len(df_window)
-    
-    # Calculate price range with padding
-    min_price = lows.min()
-    max_price = highs.max()
-    price_range = max_price - min_price
-    
-    if price_range == 0:
-        price_range = min_price * 0.01 if min_price > 0 else 1.0
-    
-    padding = price_range * padding_pct
-    y_min = min_price - padding
-    y_max = max_price + padding
-    y_range = y_max - y_min
-    
-    # Chart area (leave room for volume if enabled)
-    chart_height = int(target_size * 0.8) if add_volume else target_size
-    volume_height = target_size - chart_height if add_volume else 0
-    
-    # Calculate candle dimensions
-    candle_width = target_size / num_candles
-    body_half_width = max(1, int(candle_width * body_width_ratio / 2))
-    
-    def price_to_y(price: float) -> int:
-        """Convert price to Y coordinate (inverted: high price = low Y)."""
-        normalized = (price - y_min) / y_range
-        return int(chart_height - (normalized * chart_height))
-    
-    # Draw candles
-    for i in range(num_candles):
-        cx = int((i + 0.5) * candle_width)  # Center X
-        
-        o, h, l, c = opens[i], highs[i], lows[i], closes[i]
-        
-        y_open = price_to_y(o)
-        y_close = price_to_y(c)
-        y_high = price_to_y(h)
-        y_low = price_to_y(l)
-        
-        # Determine direction
-        is_bullish = c >= o
-        color = bullish_color if is_bullish else bearish_color
-        
-        # Body coordinates
-        body_top = min(y_open, y_close)
-        body_bottom = max(y_open, y_close)
-        
-        # Ensure minimum body height of 1 pixel
-        if body_bottom == body_top:
-            body_bottom += 1
-        
-        # Draw wick (vertical line from low to high)
-        cv2.line(img, (cx, y_high), (cx, y_low), wick_color, thickness=1)
-        
-        # Draw body (filled rectangle)
-        x1 = cx - body_half_width
-        x2 = cx + body_half_width
-        cv2.rectangle(img, (x1, body_top), (x2, body_bottom), color, thickness=-1)
-    
-    # Optionally add volume bars
-    if add_volume and 'tick_volume' in df_window.columns:
-        volumes = df_window['tick_volume'].values.astype(np.float64)
-        max_vol = volumes.max()
-        if max_vol > 0:
-            for i in range(num_candles):
-                cx = int((i + 0.5) * candle_width)
-                vol_height = int((volumes[i] / max_vol) * volume_height * 0.9)
-                
-                is_bullish = closes[i] >= opens[i]
-                color = bullish_color if is_bullish else bearish_color
-                
-                x1 = cx - body_half_width
-                x2 = cx + body_half_width
-                y1 = target_size - vol_height
-                y2 = target_size
-                
-                cv2.rectangle(img, (x1, y1), (x2, y2), color, thickness=-1)
-    
-    return img
-
-
-def candle_image_with_indicators(
-    df_window: pd.DataFrame,
-    target_size: int = 224,
-    ma_periods: Optional[list] = None,
-) -> np.ndarray:
-    """
-    Generates candlestick chart with optional moving averages overlaid.
-    
-    Args:
-        df_window: DataFrame with OHLC data
-        target_size: Output image size
-        ma_periods: List of MA periods to plot (e.g., [20, 50])
-    
-    Returns:
-        RGB image array
-    """
-    # Start with base candle image
-    img = candle_image(df_window, target_size)
-    
-    if ma_periods is None or df_window.empty:
-        return img
-    
-    closes = df_window['close'].values.astype(np.float64)
-    lows = df_window['low'].values.astype(np.float64)
-    highs = df_window['high'].values.astype(np.float64)
-    
-    # Price scaling (same as candle_image)
-    min_price = lows.min()
-    max_price = highs.max()
-    price_range = max_price - min_price
-    if price_range == 0:
-        price_range = 1.0
-    padding = price_range * 0.05
-    y_min = min_price - padding
-    y_max = max_price + padding
-    y_range = y_max - y_min
-    
-    num_candles = len(df_window)
-    candle_width = target_size / num_candles
-    
-    def price_to_y(price: float) -> int:
-        normalized = (price - y_min) / y_range
-        return int(target_size - (normalized * target_size))
-    
-    # MA colors (blue shades)
-    ma_colors = [
-        (255, 100, 100),  # Light blue
-        (255, 50, 50),    # Darker blue
-        (200, 50, 50),    # Even darker
-    ]
-    
-    for idx, period in enumerate(ma_periods):
-        if period > len(closes):
-            continue
-            
-        # Calculate SMA
-        ma = pd.Series(closes).rolling(period).mean().values
-        
-        color = ma_colors[idx % len(ma_colors)]
-        
-        # Draw MA line
-        points = []
-        for i in range(period - 1, num_candles):
-            cx = int((i + 0.5) * candle_width)
-            cy = price_to_y(ma[i])
-            points.append((cx, cy))
-        
-        if len(points) > 1:
-            points_array = np.array(points, dtype=np.int32)
-            cv2.polylines(img, [points_array], False, color, thickness=1)
-    
-    return img
+    renderer = CandlestickRenderer(image_size=(target_size, target_size))
+    return renderer.render(df, include_volume=include_volume)
 
 
 def normalize_for_model(
@@ -211,23 +227,41 @@ def normalize_for_model(
     Normalize image for neural network input.
     
     Args:
-        img: RGB image in uint8 [0, 255]
-        use_imagenet_stats: If True, normalize with ImageNet mean/std
+        img: HWC uint8 image
+        use_imagenet_stats: Use ImageNet mean/std
     
     Returns:
-        Normalized float32 array in CHW format
+        CHW float32 normalized array
     """
-    # Convert to float and scale to [0, 1]
     img_float = img.astype(np.float32) / 255.0
+    img_chw = img_float.transpose(2, 0, 1)
     
     if use_imagenet_stats:
-        # ImageNet statistics
-        mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
-        std = np.array([0.229, 0.224, 0.225], dtype=np.float32)
-        
-        img_float = (img_float - mean) / std
+        mean = np.array([0.485, 0.456, 0.406]).reshape(3, 1, 1)
+        std = np.array([0.229, 0.224, 0.225]).reshape(3, 1, 1)
+        img_chw = (img_chw - mean) / std
     
-    # HWC -> CHW
-    img_float = np.transpose(img_float, (2, 0, 1))
+    return img_chw
+
+
+if __name__ == "__main__":
+    np.random.seed(42)
+    n = 60
+    prices = 100 + np.cumsum(np.random.randn(n) * 0.5)
     
-    return img_float
+    df = pd.DataFrame({
+        'open': prices,
+        'high': prices + np.abs(np.random.randn(n) * 0.3),
+        'low': prices - np.abs(np.random.randn(n) * 0.3),
+        'close': prices + np.random.randn(n) * 0.2,
+        'tick_volume': np.random.randint(100, 1000, n),
+    })
+    
+    renderer = CandlestickRenderer()
+    img = renderer.render(df, include_volume=True)
+    
+    print(f"Image shape: {img.shape}")
+    print(f"Image dtype: {img.dtype}")
+    
+    Image.fromarray(img).save("test_candle.png")
+    print("Saved test_candle.png")
