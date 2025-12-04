@@ -1,0 +1,7 @@
+# Training Datasets
+datasets/
+*.jpg
+*.png
+SYN_*.jpg
+dataset_cache.pt
+checkpoints_vit_cached/
