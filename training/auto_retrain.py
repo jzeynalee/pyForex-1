@@ -35,7 +35,7 @@ def auto_retrain_job():
     # M15 * 100,000 = ~3 years of data
     # M5  * 100,000 = ~1 year of data
     # M1  * 100,000 = ~3 months of data
-    DOWNLOAD_COUNT = 1000000 
+    DOWNLOAD_COUNT = 8000000 
     TIMEFRAME = "M15"  # <--- CHANGE THIS to your desired timeframe
     SYMBOL = "EURUSD"
 

@@ -42,9 +42,31 @@ def train_dynamic(data_path, epochs, seq_len, hidden_dim, lr, dropout, horizon, 
     df = df.iloc[:-horizon].copy()
     
     # 3. Dynamic Selection
-    exclude = ['time', 'open', 'high', 'low', 'close', 'tick_volume', 'date', 'target']
+    '''exclude = ['time', 'open', 'high', 'low', 'close', 'tick_volume', 'date', 'target']
     selector = DynamicFeatureSelector(n_features=25) # Pick Top 25
-    selected_features = selector.select(df, 'target', exclude)
+    selected_features = selector.select(df, 'target', exclude)'''
+
+    # 3. DYNAMIC FEATURE SELECTION
+    # Explicitly drop known non-feature columns
+    exclude = ['time', 'date', 'timestamp', 'open', 'high', 'low', 'close', 
+               'tick_volume', 'volume', 'spread', 'real_volume', 'target', 'custom_target']
+    
+    # Drop exclude columns if they exist
+    candidates = df.drop(columns=[c for c in exclude if c in df.columns], errors='ignore')
+    
+    # CRITICAL FIX: Select ONLY numeric types (float/int)
+    # This removes datetime objects which cause the crash
+    candidates = candidates.select_dtypes(include=['float32', 'float64', 'int32', 'int64', 'int8', 'uint8'])
+    
+    # Final Sanity Check: Ensure no objects remain
+    if candidates.select_dtypes(include=['object', 'datetime']).shape[1] > 0:
+        logger.warning("⚠️ Non-numeric columns detected! Forcing drop.")
+        candidates = candidates.select_dtypes(exclude=['object', 'datetime'])
+
+    logger.info(f"🔍 Feature Candidates: {candidates.shape[1]} columns")
+    
+    selector = DynamicFeatureSelector(n_features=25)
+    selected_features = selector.select(candidates, targets)
     
     # 4. Scale & Split
     train_size = int(len(df) * 0.8)

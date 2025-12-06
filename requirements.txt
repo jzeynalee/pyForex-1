@@ -26,6 +26,9 @@ numba     #>=0.62.1         # Released Sep 2025
 pandas_ta     #>=0.3.34     # Stable release
 vaderSentiment     #>=3.3.2
 nltk     #>=3.9.1
+pyarrow #>22.0.0
+polars
+bottleneck
 
 # --- Machine Learning (Tabular) ---
 scikit-learn     #>=1.7.2   # Released Sep 2025
