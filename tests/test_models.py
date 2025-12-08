@@ -7,7 +7,7 @@ import numpy as np
 import torch
 from pathlib import Path
 from unittest.mock import patch
-from models.lstm import LSTMModel, LSTMWithAttention
+from models.tcn import TCNModel
 from models.fusion import FusionNet, SimpleFusion, AttentionFusion
 from models.trend_classifier import (
     TrendClassifier, TrendClassifierConfig, 
@@ -16,20 +16,20 @@ from models.trend_classifier import (
 from models.yolo_detector import MockYOLODetector
 
 @pytest.mark.unit
-class TestLSTMModel:
-    """Test suite for LSTM model."""
+class TestTCNModel:
+    """Test suite for TCN model."""
     
     def test_init_default(self):
-        """Test LSTM initialization with defaults."""
-        model = LSTMModel()
+        """Test TCN initialization with defaults."""
+        model = TCNModel()
         
         assert model.hidden_dim == 64
         assert model.num_layers == 2
         assert model.feature_dim == 64
     
     def test_init_custom(self):
-        """Test LSTM initialization with custom params."""
-        model = LSTMModel(
+        """Test TCN initialization with custom params."""
+        model = TCNModel(
             input_dim=10,
             hidden_dim=128,
             num_layers=3,
@@ -41,8 +41,8 @@ class TestLSTMModel:
         assert model.feature_dim == 256  # bidirectional doubles it
     
     def test_forward_features_mode(self):
-        """Test LSTM forward pass in features mode."""
-        model = LSTMModel()
+        """Test TCN forward pass in features mode."""
+        model = TCNModel()
         model.eval()
         
         batch_size = 4
@@ -57,8 +57,8 @@ class TestLSTMModel:
         assert features.shape == (batch_size, 64)
     
     def test_forward_classify_mode(self):
-        """Test LSTM forward pass in classify mode."""
-        model = LSTMModel(num_classes=3)
+        """Test TCN forward pass in classify mode."""
+        model = TCNModel(num_classes=3)
         model.eval()
         
         x = torch.randn(4, 60, 5)
@@ -70,7 +70,7 @@ class TestLSTMModel:
     
     def test_invalid_mode(self):
         """Test that invalid mode raises error."""
-        model = LSTMModel()
+        model = TCNModel()
         x = torch.randn(1, 60, 5)
         
         with pytest.raises(ValueError, match="Unknown mode"):
@@ -78,19 +78,19 @@ class TestLSTMModel:
     
     def test_get_feature_dim(self):
         """Test feature dimension getter."""
-        model = LSTMModel(hidden_dim=128)
+        model = TCNModel(hidden_dim=128)
         assert model.get_feature_dim() == 128
         
-        model_bi = LSTMModel(hidden_dim=128, bidirectional=True)
+        model_bi = TCNModel(hidden_dim=128, bidirectional=True)
         assert model_bi.get_feature_dim() == 256
 
 @pytest.mark.unit
-class TestLSTMWithAttention:
-    """Test suite for LSTM with attention model."""
+class TestTCNWithAttention:
+    """Test suite for TCN with attention model."""
     
     def test_forward(self):
         """Test forward pass."""
-        model = LSTMWithAttention()
+        model = TestTCNModel()
         model.eval()
         
         x = torch.randn(4, 60, 5)
@@ -102,7 +102,7 @@ class TestLSTMWithAttention:
     
     def test_classify_mode(self):
         """Test classification mode."""
-        model = LSTMWithAttention(num_classes=3)
+        model = TestTCNModel(num_classes=3)
         model.eval()
         
         x = torch.randn(4, 60, 5)
@@ -120,7 +120,7 @@ class TestFusionNet:
         """Test FusionNet initialization."""
         model = FusionNet()
         
-        assert model.lstm_dim == 64
+        assert model.tcn_dim == 64
         assert model.vit_dim == 768
         assert model.yolo_dim == 20
     
@@ -130,12 +130,12 @@ class TestFusionNet:
         model.eval()
         
         batch_size = 4
-        lstm_feat = torch.randn(batch_size, 64)
+        tcn_feat = torch.randn(batch_size, 64)
         vit_feat = torch.randn(batch_size, 768)
         yolo_feat = torch.randn(batch_size, 20)
         
         with torch.no_grad():
-            logits = model(lstm_feat, vit_feat, yolo_feat)
+            logits = model(tcn_feat, vit_feat, yolo_feat)
         
         assert logits.shape == (batch_size, 3)
     
@@ -144,12 +144,12 @@ class TestFusionNet:
         model = FusionNet()
         model.eval()
         
-        lstm_feat = torch.randn(4, 64)
+        tcn_feat = torch.randn(4, 64)
         vit_feat = torch.randn(4, 768)
         yolo_feat = torch.randn(4, 20)
         
         with torch.no_grad():
-            logits, gates = model.forward_with_gates(lstm_feat, vit_feat, yolo_feat)
+            logits, gates = model.forward_with_gates(tcn_feat, vit_feat, yolo_feat)
         
         assert logits.shape == (4, 3)
         assert gates.shape == (4, 3)
@@ -167,12 +167,12 @@ class TestSimpleFusion:
         model = SimpleFusion()
         model.eval()
         
-        lstm_feat = torch.randn(4, 64)
+        tcn_feat = torch.randn(4, 64)
         vit_feat = torch.randn(4, 768)
         yolo_feat = torch.randn(4, 20)
         
         with torch.no_grad():
-            logits = model(lstm_feat, vit_feat, yolo_feat)
+            logits = model(tcn_feat, vit_feat, yolo_feat)
         
         assert logits.shape == (4, 3)
 
@@ -185,12 +185,12 @@ class TestAttentionFusion:
         model = AttentionFusion()
         model.eval()
         
-        lstm_feat = torch.randn(4, 64)
+        tcn_feat = torch.randn(4, 64)
         vit_feat = torch.randn(4, 768)
         yolo_feat = torch.randn(4, 20)
         
         with torch.no_grad():
-            logits = model(lstm_feat, vit_feat, yolo_feat)
+            logits = model(tcn_feat, vit_feat, yolo_feat)
         
         assert logits.shape == (4, 3)
 

@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 from utils.data_loader import DataLoader, DataConfig
 from utils.candle_to_image import candle_image, normalize_for_model
 from utils.config import settings  # <--- IMPORT SETTINGS HERE
-from models.lstm import LSTMModel
+from models.tcn import TCNModel
 from models.fusion import FusionNet
 from models.yolo_detector import MockYOLODetector
 from models.trend_classifier import TrendClassifier, generate_synthetic_training_data
@@ -79,8 +79,8 @@ class TestPerformanceSmoke:
 @pytest.mark.unit
 class TestDataToModelPipeline:
     # ... [Keep existing content] ...
-    def test_csv_to_lstm_inference(self, temp_csv_file):
-        """Test complete pipeline from CSV to LSTM inference."""
+    def test_csv_to_tcn_inference(self, temp_csv_file):
+        """Test complete pipeline from CSV to TCN inference."""
         # Load data
         loader = DataLoader(DataConfig(sequence_length=60))
         df = loader.load_csv(temp_csv_file)
@@ -90,7 +90,7 @@ class TestDataToModelPipeline:
         X, y = loader.create_sequences(train)
         
         # Initialize model
-        model = LSTMModel()
+        model = TCNModel()
         model.eval()
         
         # Run inference
@@ -124,9 +124,9 @@ class TestModelFusionPipeline:
         # Prepare inputs
         batch_size = 2
         
-        # LSTM features
-        lstm_model = LSTMModel()
-        lstm_model.eval()
+        # TCN features
+        tcn_model = TCNModel()
+        tcn_model.eval()
         x_seq = torch.randn(batch_size, 60, 5)
         
         # ViT features (mocked as random)
@@ -143,9 +143,9 @@ class TestModelFusionPipeline:
         fusion_model.eval()
         
         with torch.no_grad():
-            lstm_feat = lstm_model(x_seq, mode='features')
+            tcn_feat = tcn_model(x_seq, mode='features')
             logits, gates = fusion_model.forward_with_gates(
-                lstm_feat, vit_features, yolo_features
+                tcn_feat, vit_features, yolo_features
             )
         
         assert logits.shape == (batch_size, 3)
@@ -351,7 +351,7 @@ class TestEndToEndIntegration:
         trend_result = trend_detector.detect_trend(mtf_data)
         
         # 2. Pattern Recognition (mocked)
-        # In real scenario, this would come from LSTM/ViT/YOLO fusion
+        # In real scenario, this would come from TCN/ViT/YOLO fusion
         pattern_probs = [0.72, 0.18, 0.10]
         
         # 3. Decision Engine

@@ -5,14 +5,16 @@ pyForex - Multi-Modal Forex Trading System
 ==========================================
 
 Unified CLI entry point for all operations:
-    - Live trading with MT5
+    - Multi-style trading (scalp + intraday + swing simultaneously)
+    - Live trading with MT5 (single strategy)
     - Backtesting on historical data
     - Model training (LSTM, ViT, Fusion, YOLO, Trend Classifier)
     - Single predictions / inference
     - Dataset generation
 
 Usage:
-    python main.py live [options]           # Start live trading
+    python main.py multi [options]          # Multi-style trading (recommended)
+    python main.py live [options]           # Single-style live trading
     python main.py backtest [options]       # Run backtest
     python main.py train <model> [options]  # Train a model
     python main.py predict [options]        # Run prediction
@@ -20,7 +22,10 @@ Usage:
     python main.py status                   # Check system status
 
 Examples:
-    python main.py live --symbol EURUSD --timeframe H1
+    python main.py multi --symbol EURUSD                    # All 3 styles
+    python main.py multi --symbol EURUSD --no-scalp         # Intraday + Swing only
+    python main.py multi --mock                             # Test with mock connector
+    python main.py live --symbol EURUSD --timeframe H1      # Single strategy
     python main.py backtest --data data/EURUSD_H1.csv --strategy neural
     python main.py train lstm --epochs 50 --data data/raw/eurusd.csv
     python main.py train vit --data-dir datasets/vit --epochs 30
@@ -333,9 +338,47 @@ class SystemChecker:
 # COMMAND HANDLERS
 # ============================================================================
 
+def cmd_multi_style(args, logger: logging.Logger):
+    """Handle multi-style trading command."""
+    logger.info("🚀 Starting Multi-Style Trading Mode")
+    
+    checker = SystemChecker(logger)
+    if not checker.run_all_checks("live"):
+        logger.error("Prerequisites not met. Aborting.")
+        return 1
+    
+    if args.dry_run:
+        logger.info("DRY RUN - would start multi-style trading with:")
+        logger.info(f"  Symbol: {args.symbol}")
+        logger.info(f"  Scalping: {'enabled' if not args.no_scalp else 'disabled'}")
+        logger.info(f"  Intraday: {'enabled' if not args.no_intraday else 'disabled'}")
+        logger.info(f"  Swing: {'enabled' if not args.no_swing else 'disabled'}")
+        return 0
+    
+    try:
+        from trading.multi_style_orchestrator import run_multi_style_bot
+        
+        run_multi_style_bot(
+            symbol=args.symbol,
+            mock=args.mock,
+            enable_scalp=not args.no_scalp,
+            enable_intraday=not args.no_intraday,
+            enable_swing=not args.no_swing,
+        )
+        
+        return 0
+        
+    except KeyboardInterrupt:
+        logger.info("Interrupted by user")
+        return 0
+    except Exception as e:
+        logger.error(f"Multi-style trading error: {e}", exc_info=True)
+        return 1
+
+
 def cmd_live(args, logger: logging.Logger):
-    """Handle live trading command."""
-    logger.info("🚀 Starting Live Trading Mode")
+    """Handle live trading command (single style)."""
+    logger.info("🚀 Starting Live Trading Mode (Single Style)")
     
     checker = SystemChecker(logger)
     if not checker.run_all_checks("live"):
@@ -790,7 +833,10 @@ def create_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  %(prog)s live --symbol EURUSD --timeframe H1
+  %(prog)s multi --symbol EURUSD                  # All 3 styles (scalp+intraday+swing)
+  %(prog)s multi --no-scalp                       # Intraday + Swing only
+  %(prog)s multi --mock                           # Test with mock connector
+  %(prog)s live --symbol EURUSD --timeframe H1    # Single strategy mode
   %(prog)s backtest --data data/EURUSD_H1.csv
   %(prog)s train lstm --epochs 50
   %(prog)s predict --symbol EURUSD
@@ -819,12 +865,26 @@ Examples:
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
     
     # -------------------------------------------------------------------------
-    # LIVE TRADING
+    # MULTI-STYLE TRADING
+    # -------------------------------------------------------------------------
+    multi_parser = subparsers.add_parser(
+        "multi",
+        help="Start multi-style trading (scalp + intraday + swing)",
+        description="Run simultaneous scalping, intraday, and swing trading strategies",
+    )
+    multi_parser.add_argument("--symbol", default="EURUSD", help="Trading symbol")
+    multi_parser.add_argument("--mock", action="store_true", help="Use mock connector (testing)")
+    multi_parser.add_argument("--no-scalp", action="store_true", help="Disable scalping strategy")
+    multi_parser.add_argument("--no-intraday", action="store_true", help="Disable intraday strategy")
+    multi_parser.add_argument("--no-swing", action="store_true", help="Disable swing strategy")
+    
+    # -------------------------------------------------------------------------
+    # LIVE TRADING (SINGLE STYLE)
     # -------------------------------------------------------------------------
     live_parser = subparsers.add_parser(
         "live",
-        help="Start live trading",
-        description="Run live trading with MT5 connection",
+        help="Start live trading (single style)",
+        description="Run live trading with MT5 connection (single strategy)",
     )
     live_parser.add_argument("--symbol", default="EURUSD", help="Trading symbol")
     live_parser.add_argument("--timeframe", default="H1", help="Timeframe (M1,M5,M15,M30,H1,H4,D1)")
@@ -948,6 +1008,7 @@ def main():
         return 0
     
     command_handlers = {
+        "multi": cmd_multi_style,
         "live": cmd_live,
         "backtest": cmd_backtest,
         "train": cmd_train,

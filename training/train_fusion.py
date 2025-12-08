@@ -1,6 +1,6 @@
 # training/train_fusion.py
 """
-Fusion model training - combines features from LSTM, ViT, and YOLO.
+Fusion model training - combines features from TCN, ViT, and YOLO.
 """
 import torch
 import torch.nn as nn
@@ -15,7 +15,7 @@ from tqdm import tqdm
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from models.lstm import LSTMModel
+from models.tcn import TCNModel
 from models.vit import ViTExtractor
 from models.fusion import FusionNet, SimpleFusion
 from models.yolo_detector import YOLOPatternDetector, MockYOLODetector
@@ -33,7 +33,7 @@ class FeatureDataset(torch.utils.data.Dataset):
         self,
         data: np.ndarray,
         labels: np.ndarray,
-        lstm_model: nn.Module,
+        tcn_model: nn.Module,
         vit_model: nn.Module,
         yolo_detector,
         device: torch.device,
@@ -42,7 +42,7 @@ class FeatureDataset(torch.utils.data.Dataset):
     ):
         self.data = data
         self.labels = labels
-        self.lstm_model = lstm_model
+        self.tcn_model = tcn_model
         self.vit_model = vit_model
         self.yolo_detector = yolo_detector
         self.device = device
@@ -56,19 +56,19 @@ class FeatureDataset(torch.utils.data.Dataset):
         """Extract features from all samples."""
         logger.info("Extracting features from all samples...")
         
-        lstm_feats = []
+        tcn_feats = []
         vit_feats = []
         yolo_feats = []
         
-        self.lstm_model.eval()
+        self.tcn_model.eval()
         self.vit_model.eval()
         
         with torch.no_grad():
             for i in tqdm(range(len(self.data)), desc="Extracting"):
-                # LSTM features
+                # TCN features
                 seq = torch.tensor(self.data[i]).float().unsqueeze(0).to(self.device)
-                lstm_feat = self.lstm_model(seq, mode='features')
-                lstm_feats.append(lstm_feat.cpu())
+                tcn_feat = self.tcn_model(seq, mode='features')
+                tcn_feats.append(tcn_feat.cpu())
                 
                 # Generate image from sequence
                 # Convert scaled data back to approximate OHLCV for image
@@ -90,7 +90,7 @@ class FeatureDataset(torch.utils.data.Dataset):
                 yolo_feats.append(torch.tensor(yolo_vec).float())
         
         return {
-            'lstm': torch.cat(lstm_feats, dim=0),
+            'tcn': torch.cat(tcn_feats, dim=0),
             'vit': torch.cat(vit_feats, dim=0),
             'yolo': torch.stack(yolo_feats, dim=0),
         }
@@ -100,7 +100,7 @@ class FeatureDataset(torch.utils.data.Dataset):
     
     def __getitem__(self, idx):
         return (
-            self.features['lstm'][idx],
+            self.features['tcn'][idx],
             self.features['vit'][idx],
             self.features['yolo'][idx],
             self.labels[idx],
@@ -147,13 +147,13 @@ def train_fusion_model(
     logger.info(f"Train: {len(X_train)}, Test: {len(X_test)}")
     
     # 2. Load pre-trained models (frozen)
-    lstm = LSTMModel().to(device).eval()
+    tcn = TCNModel().to(device).eval()
     vit = ViTExtractor().to(device).eval()
     
-    lstm_path = weights_dir / "lstm_best.pt"
-    if lstm_path.exists():
-        lstm.load_state_dict(torch.load(lstm_path, map_location=device))
-        logger.info("Loaded pre-trained LSTM")
+    tcn_path = weights_dir / "tcn_best.pt"
+    if tcn_path.exists():
+        tcn.load_state_dict(torch.load(tcn_path, map_location=device))
+        logger.info("Loaded pre-trained TCN")
     
     vit_path = weights_dir / "vit_best.pt"
     if vit_path.exists():
@@ -169,7 +169,7 @@ def train_fusion_model(
         yolo = MockYOLODetector()
     
     # Freeze feature extractors
-    for param in lstm.parameters():
+    for param in tcn.parameters():
         param.requires_grad = False
     for param in vit.parameters():
         param.requires_grad = False
@@ -177,12 +177,12 @@ def train_fusion_model(
     # 3. Create feature datasets
     logger.info("Creating training dataset...")
     train_dataset = FeatureDataset(
-        X_train, y_train, lstm, vit, yolo, device
+        X_train, y_train, tcn, vit, yolo, device
     )
     
     logger.info("Creating test dataset...")
     test_dataset = FeatureDataset(
-        X_test, y_test, lstm, vit, yolo, device
+        X_test, y_test, tcn, vit, yolo, device
     )
     
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
@@ -190,7 +190,7 @@ def train_fusion_model(
     
     # 4. Initialize fusion model
     fusion = FusionNet(
-        lstm_dim=lstm.get_feature_dim(),
+        tcn_dim=tcn.get_feature_dim(),
         vit_dim=vit.get_feature_dim(),
         yolo_dim=yolo.get_feature_dim() if hasattr(yolo, 'get_feature_dim') else 20,
         num_classes=3,
@@ -210,14 +210,14 @@ def train_fusion_model(
         fusion.train()
         train_loss = 0.0
         
-        for lstm_f, vit_f, yolo_f, labels in train_loader:
-            lstm_f = lstm_f.to(device)
+        for tcn_f, vit_f, yolo_f, labels in train_loader:
+            tcn_f = tcn_f.to(device)
             vit_f = vit_f.to(device)
             yolo_f = yolo_f.to(device)
             labels = labels.to(device)
             
             optimizer.zero_grad()
-            outputs = fusion(lstm_f, vit_f, yolo_f)
+            outputs = fusion(tcn_f, vit_f, yolo_f)
             loss = criterion(outputs, labels)
             loss.backward()
             optimizer.step()
@@ -234,13 +234,13 @@ def train_fusion_model(
         total = 0
         
         with torch.no_grad():
-            for lstm_f, vit_f, yolo_f, labels in test_loader:
-                lstm_f = lstm_f.to(device)
+            for tcn_f, vit_f, yolo_f, labels in test_loader:
+                tcn_f = tcn_f.to(device)
                 vit_f = vit_f.to(device)
                 yolo_f = yolo_f.to(device)
                 labels = labels.to(device)
                 
-                outputs = fusion(lstm_f, vit_f, yolo_f)
+                outputs = fusion(tcn_f, vit_f, yolo_f)
                 loss = criterion(outputs, labels)
                 test_loss += loss.item()
                 

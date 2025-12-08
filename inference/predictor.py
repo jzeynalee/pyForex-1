@@ -1,64 +1,133 @@
-# inference/predictor.py
 """
-Hybrid predictor combining LSTM, ViT, and YOLO models.
+Hybrid Predictor for pyForex Trading System.
+
+Combines multiple models for robust trading predictions:
+- TCN (Temporal Convolutional Network) for time-series analysis
+- ViT (Vision Transformer) for visual chart patterns
+- YOLO for candlestick pattern detection
+- Fusion network for combining modalities
+
+Author: pyForex Team
 """
+
 import torch
 import numpy as np
 import pandas as pd
 import logging
 from pathlib import Path
-from typing import Dict, Optional, Tuple, NamedTuple
+from typing import Dict, Optional, Tuple, NamedTuple, List
 from dataclasses import dataclass
-
-from models.lstm import LSTMModel
-from models.vit import ViTExtractor
-from models.fusion import FusionNet
-from models.yolo_detector import YOLOPatternDetector
-from utils.candle_to_image import candle_image, normalize_for_model
-from utils.config import settings
+from enum import IntEnum
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Type Definitions
+# =============================================================================
+
+class Signal(IntEnum):
+    """Trading signal enumeration."""
+    BUY = 0
+    SELL = 1
+    HOLD = 2
 
 
 class PredictionResult(NamedTuple):
     """Structured prediction output."""
     probabilities: np.ndarray  # [P(BUY), P(SELL), P(HOLD)]
-    predicted_class: int       # 0=BUY, 1=SELL, 2=HOLD
+    predicted_class: int       # Signal enum value
     confidence: float          # Max probability
-    gate_weights: Optional[np.ndarray] = None  # Modality weights if available
+    signal_name: str          # 'BUY', 'SELL', 'HOLD'
+    gate_weights: Optional[np.ndarray] = None  # Modality weights [seq, vit, yolo]
 
 
 @dataclass
 class ModelDimensions:
     """Model dimension configuration."""
-    lstm_dim: int = 64
-    vit_dim: int = 768
-    yolo_dim: int = 20
-    num_classes: int = 3
+    seq_dim: int = 64        # TCN output dimension
+    vit_dim: int = 768       # ViT feature dimension
+    yolo_dim: int = 20       # YOLO pattern vector size
+    num_classes: int = 3     # BUY, SELL, HOLD
 
+
+@dataclass 
+class PredictorConfig:
+    """Configuration for HybridPredictor."""
+    weights_dir: str = "./weights"
+    device: str = "auto"  # 'auto', 'cuda', 'cpu'
+    sequence_length: int = 60
+    image_size: int = 224
+    
+    # Model selection
+    seq_model_type: str = "tcn"  # 'tcn' or 'lstm'
+    fusion_type: str = "gated"   # 'gated', 'simple', 'attention'
+    
+    # TCN-specific
+    tcn_profile: str = "INTRADAY"  # 'SCALP', 'INTRADAY', 'SWING'
+    
+    # Inference settings
+    confidence_threshold: float = 0.6
+    use_ensemble: bool = False
+
+
+# =============================================================================
+# Helper Functions
+# =============================================================================
+
+def get_device(device_str: str) -> torch.device:
+    """Resolve device string to torch.device."""
+    if device_str == "auto":
+        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    return torch.device(device_str)
+
+
+# =============================================================================
+# Main Predictor Class
+# =============================================================================
 
 class HybridPredictor:
     """
     Multi-modal predictor combining:
-    - LSTM for time-series patterns
+    - TCN for time-series patterns (replaces LSTM)
     - ViT for visual chart patterns
     - YOLO for candlestick pattern detection
     - Fusion network for combining modalities
+    
+    Example:
+        predictor = HybridPredictor(weights_dir="./weights")
+        result = predictor.predict(df_window)
+        print(f"Signal: {result.signal_name}, Confidence: {result.confidence:.2%}")
     """
     
-    CLASS_NAMES = ['BUY', 'SELL', 'HOLD']
+    SIGNAL_NAMES = ['BUY', 'SELL', 'HOLD']
     
     def __init__(
         self,
+        config: Optional[PredictorConfig] = None,
         weights_dir: Optional[str] = None,
         device: Optional[str] = None,
         dims: Optional[ModelDimensions] = None,
     ):
-        self.weights_dir = Path(weights_dir or settings.WEIGHTS_DIR)
-        self.device = torch.device(device or settings.DEVICE)
+        """
+        Initialize the hybrid predictor.
+        
+        Args:
+            config: Full configuration object
+            weights_dir: Path to model weights (overrides config)
+            device: Device string (overrides config)
+            dims: Model dimensions (overrides config defaults)
+        """
+        # Handle config
+        self.config = config or PredictorConfig()
+        if weights_dir:
+            self.config.weights_dir = weights_dir
+        if device:
+            self.config.device = device
+        
+        self.weights_dir = Path(self.config.weights_dir)
+        self.device = get_device(self.config.device)
         self.dims = dims or ModelDimensions()
-        self.seq_len = settings.SEQUENCE_LENGTH
-        self.img_size = settings.IMAGE_SIZE
         
         self._models_loaded = False
         self._load_models()
@@ -68,36 +137,16 @@ class HybridPredictor:
         logger.info(f"Loading models from {self.weights_dir} on {self.device}")
         
         try:
-            # Initialize architectures
-            self.lstm = LSTMModel(
-                input_dim=5,
-                hidden_dim=self.dims.lstm_dim,
-                num_classes=self.dims.num_classes,
-            ).to(self.device)
+            self._load_sequence_model()
+            self._load_vision_model()
+            self._load_yolo_model()
+            self._load_fusion_model()
             
-            self.vit = ViTExtractor(
-                model_name="vit_base_patch16_224",
-                pretrained=True,
-            ).to(self.device)
-            
-            self.fusion = FusionNet(
-                lstm_dim=self.dims.lstm_dim,
-                vit_dim=self.dims.vit_dim,
-                yolo_dim=self.dims.yolo_dim,
-                num_classes=self.dims.num_classes,
-            ).to(self.device)
-            
-            # YOLO handles device internally
-            self.yolo = YOLOPatternDetector(
-                model_path=str(self.weights_dir / "yolo_best.pt"),
-                num_classes=self.dims.yolo_dim,
-            )
-            
-            # Load trained weights (if available)
+            # Load trained weights
             self._load_weights()
             
-            # Set to eval mode
-            self.lstm.eval()
+            # Set to evaluation mode
+            self.seq_model.eval()
             self.vit.eval()
             self.fusion.eval()
             
@@ -108,10 +157,56 @@ class HybridPredictor:
             logger.error(f"Failed to load models: {e}")
             raise
     
+    def _load_sequence_model(self):
+        """Load TCN or LSTM sequence model."""
+        if self.config.seq_model_type == "tcn":
+            from models.tcn import TCNModel
+            self.seq_model = TCNModel.from_profile(
+                self.config.tcn_profile
+            ).to(self.device)
+            logger.info(f"Loaded TCN model (profile: {self.config.tcn_profile})")
+        else:
+            # Fallback to LSTM if needed
+            from models.lstm import LSTMModel
+            self.seq_model = LSTMModel(
+                input_dim=5,
+                hidden_dim=self.dims.seq_dim,
+                num_classes=self.dims.num_classes,
+            ).to(self.device)
+            logger.info("Loaded LSTM model")
+    
+    def _load_vision_model(self):
+        """Load Vision Transformer model."""
+        from models.vit import ViTExtractor
+        self.vit = ViTExtractor(
+            model_name="vit_base_patch16_224",
+            pretrained=True,
+        ).to(self.device)
+    
+    def _load_yolo_model(self):
+        """Load YOLO pattern detector."""
+        from models.yolo_detector import YOLOPatternDetector
+        yolo_path = self.weights_dir / "yolo_best.pt"
+        self.yolo = YOLOPatternDetector(
+            model_path=str(yolo_path) if yolo_path.exists() else None,
+            num_classes=self.dims.yolo_dim,
+        )
+    
+    def _load_fusion_model(self):
+        """Load fusion network."""
+        from models.fusion import create_fusion_model
+        self.fusion = create_fusion_model(
+            fusion_type=self.config.fusion_type,
+            seq_dim=self.dims.seq_dim,
+            vit_dim=self.dims.vit_dim,
+            yolo_dim=self.dims.yolo_dim,
+            num_classes=self.dims.num_classes,
+        ).to(self.device)
+    
     def _load_weights(self):
         """Load saved model weights."""
         weight_files = {
-            'lstm': self.weights_dir / "lstm_best.pt",
+            'seq_model': self.weights_dir / f"{self.config.seq_model_type}_best.pt",
             'vit': self.weights_dir / "vit_best.pt",
             'fusion': self.weights_dir / "fusion_best.pt",
         }
@@ -123,45 +218,46 @@ class HybridPredictor:
                 model.load_state_dict(state_dict)
                 logger.info(f"Loaded weights: {path}")
             else:
-                logger.warning(f"Weight file not found: {path} (using random/pretrained)")
+                logger.warning(f"Weight file not found: {path}")
     
     def predict(self, df_window: pd.DataFrame) -> PredictionResult:
         """
         Generate prediction from raw DataFrame.
         
         Args:
-            df_window: DataFrame with at least `seq_len` rows of OHLCV data
+            df_window: DataFrame with at least seq_len rows of OHLCV data
+                      Required columns: open, high, low, close, tick_volume
         
         Returns:
-            PredictionResult with probabilities and metadata
+            PredictionResult with probabilities, class, confidence, and signal name
         """
         if not self._models_loaded:
             raise RuntimeError("Models not loaded")
         
-        if len(df_window) < self.seq_len:
-            raise ValueError(f"Need at least {self.seq_len} rows, got {len(df_window)}")
+        seq_len = self.config.sequence_length
+        if len(df_window) < seq_len:
+            raise ValueError(f"Need at least {seq_len} rows, got {len(df_window)}")
         
         # Use last seq_len rows
-        df_input = df_window.tail(self.seq_len)
+        df_input = df_window.tail(seq_len)
         
         # Prepare inputs
-        lstm_input = self._prepare_lstm_input(df_input)
+        seq_input = self._prepare_seq_input(df_input)
         vit_input = self._prepare_vit_input(df_input)
         
         # Run inference
         with torch.no_grad():
-            # Extract features (not classifications!)
-            lstm_feat = self.lstm(lstm_input, mode='features')
+            # Extract features
+            seq_feat = self.seq_model(seq_input, mode='features')
             vit_feat = self.vit(vit_input)
             
             # YOLO detection
-            img_array = candle_image(df_input, target_size=self.img_size)
-            yolo_vec = self.yolo.detect(img_array)
+            yolo_vec = self._get_yolo_features(df_input)
             yolo_feat = torch.tensor(yolo_vec).float().unsqueeze(0).to(self.device)
             
             # Fusion and classification
             logits, gate_weights = self.fusion.forward_with_gates(
-                lstm_feat, vit_feat, yolo_feat
+                seq_feat, vit_feat, yolo_feat
             )
             
             probs = torch.softmax(logits, dim=1).cpu().numpy()[0]
@@ -174,43 +270,54 @@ class HybridPredictor:
             probabilities=probs,
             predicted_class=predicted_class,
             confidence=confidence,
+            signal_name=self.SIGNAL_NAMES[predicted_class],
             gate_weights=gates,
         )
     
-    def _prepare_lstm_input(self, df: pd.DataFrame) -> torch.Tensor:
-        """Prepare LSTM input tensor."""
-        # Extract OHLCV
+    def _prepare_seq_input(self, df: pd.DataFrame) -> torch.Tensor:
+        """Prepare sequence model input tensor."""
         cols = ['open', 'high', 'low', 'close', 'tick_volume']
         data = df[cols].values.astype(np.float32)
         
-        # Simple normalization (z-score within window)
+        # Z-score normalization within window
         mean = data.mean(axis=0)
         std = data.std(axis=0) + 1e-8
         data_norm = (data - mean) / std
         
-        # To tensor: (1, seq_len, 5)
+        # Shape: (1, seq_len, features)
         tensor = torch.tensor(data_norm).float().unsqueeze(0)
         return tensor.to(self.device)
     
     def _prepare_vit_input(self, df: pd.DataFrame) -> torch.Tensor:
         """Prepare ViT input tensor from candlestick image."""
-        # Generate candlestick image
-        img_array = candle_image(df, target_size=self.img_size)
+        from utils.candle_to_image import candle_image, normalize_for_model
         
-        # Normalize for ViT
+        img_array = candle_image(df, target_size=self.config.image_size)
         img_norm = normalize_for_model(img_array, use_imagenet_stats=True)
         
-        # To tensor: (1, 3, 224, 224)
+        # Shape: (1, 3, H, W)
         tensor = torch.tensor(img_norm).float().unsqueeze(0)
         return tensor.to(self.device)
     
+    def _get_yolo_features(self, df: pd.DataFrame) -> np.ndarray:
+        """Get YOLO pattern detection features."""
+        from utils.candle_to_image import candle_image
+        
+        img_array = candle_image(df, target_size=self.config.image_size)
+        return self.yolo.detect(img_array)
+    
     def predict_batch(
         self, 
-        df_windows: list[pd.DataFrame]
-    ) -> list[PredictionResult]:
+        df_windows: List[pd.DataFrame]
+    ) -> List[PredictionResult]:
         """
         Batch prediction for multiple windows.
-        More efficient than calling predict() repeatedly.
+        
+        Args:
+            df_windows: List of DataFrames to predict
+        
+        Returns:
+            List of PredictionResults
         """
         # TODO: Implement proper batching for efficiency
         return [self.predict(df) for df in df_windows]
@@ -218,48 +325,78 @@ class HybridPredictor:
     def get_signal(
         self, 
         df_window: pd.DataFrame,
-        threshold: float = 0.6,
+        threshold: Optional[float] = None,
     ) -> str:
         """
-        Convenience method to get trading signal.
+        Get trading signal with confidence threshold.
         
         Args:
             df_window: Input DataFrame
-            threshold: Minimum confidence for BUY/SELL signal
+            threshold: Confidence threshold (default from config)
         
         Returns:
             'BUY', 'SELL', or 'HOLD'
         """
+        threshold = threshold or self.config.confidence_threshold
         result = self.predict(df_window)
         
         # Only trade if confident enough
         if result.confidence < threshold:
             return 'HOLD'
         
-        return self.CLASS_NAMES[result.predicted_class]
+        return result.signal_name
+    
+    def get_model_info(self) -> Dict:
+        """Get information about loaded models."""
+        return {
+            'sequence_model': self.config.seq_model_type,
+            'tcn_profile': self.config.tcn_profile,
+            'fusion_type': self.config.fusion_type,
+            'device': str(self.device),
+            'weights_dir': str(self.weights_dir),
+            'models_loaded': self._models_loaded,
+            'dimensions': {
+                'seq_dim': self.dims.seq_dim,
+                'vit_dim': self.dims.vit_dim,
+                'yolo_dim': self.dims.yolo_dim,
+            }
+        }
 
 
-class SimpleLSTMPredictor:
+# =============================================================================
+# Simplified TCN-only Predictor
+# =============================================================================
+
+class TCNPredictor:
     """
-    Simplified predictor using only LSTM.
-    Useful for testing or when visual features aren't needed.
+    Simplified predictor using only TCN.
+    
+    Useful for:
+    - Testing and debugging
+    - When visual features aren't available
+    - Lower latency requirements
     """
     
-    CLASS_NAMES = ['BUY', 'SELL', 'HOLD']
+    SIGNAL_NAMES = ['BUY', 'SELL', 'HOLD']
     
     def __init__(
         self,
         weights_path: Optional[str] = None,
+        profile: str = "INTRADAY",
         device: Optional[str] = None,
+        sequence_length: int = 60,
     ):
-        self.device = torch.device(device or settings.DEVICE)
-        self.seq_len = settings.SEQUENCE_LENGTH
+        self.device = get_device(device or "auto")
+        self.seq_len = sequence_length
+        self.profile = profile
         
-        self.model = LSTMModel().to(self.device)
+        from models.tcn import TCNModel
+        self.model = TCNModel.from_profile(profile).to(self.device)
         
         if weights_path and Path(weights_path).exists():
             state_dict = torch.load(weights_path, map_location=self.device)
             self.model.load_state_dict(state_dict)
+            logger.info(f"Loaded TCN weights from {weights_path}")
         
         self.model.eval()
     
@@ -288,4 +425,40 @@ class SimpleLSTMPredictor:
             probabilities=probs,
             predicted_class=predicted_class,
             confidence=confidence,
+            signal_name=self.SIGNAL_NAMES[predicted_class],
+            gate_weights=None,
         )
+    
+    def get_signal(
+        self, 
+        df_window: pd.DataFrame,
+        threshold: float = 0.6,
+    ) -> str:
+        """Get trading signal with threshold."""
+        result = self.predict(df_window)
+        if result.confidence < threshold:
+            return 'HOLD'
+        return result.signal_name
+
+
+# =============================================================================
+# Factory Functions
+# =============================================================================
+
+def create_predictor(
+    predictor_type: str = "hybrid",
+    **kwargs
+) -> HybridPredictor:
+    """
+    Factory function for creating predictors.
+    
+    Args:
+        predictor_type: 'hybrid', 'tcn', or 'simple'
+        **kwargs: Arguments passed to predictor constructor
+    """
+    if predictor_type == "tcn":
+        return TCNPredictor(**kwargs)
+    elif predictor_type == "hybrid":
+        return HybridPredictor(**kwargs)
+    else:
+        raise ValueError(f"Unknown predictor type: {predictor_type}")
