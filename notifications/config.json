@@ -1,0 +1,51 @@
+{
+    "telegram": {
+        "bot_token": "YOUR_TELEGRAM_BOT_TOKEN",
+        "chat_id": "@your_channel_or_chat_id",
+        "enabled": true,
+        "post_trades": true,
+        "post_daily_summary": true,
+        "post_alerts": true,
+        "min_trade_pnl_to_post": 0.0,
+        "max_posts_per_hour": 30
+    },
+    "twitter": {
+        "api_key": "YOUR_TWITTER_API_KEY",
+        "api_secret": "YOUR_TWITTER_API_SECRET",
+        "access_token": "YOUR_ACCESS_TOKEN",
+        "access_token_secret": "YOUR_ACCESS_TOKEN_SECRET",
+        "bearer_token": "YOUR_BEARER_TOKEN",
+        "enabled": true,
+        "post_trades": false,
+        "post_daily_summary": true,
+        "post_weekly_summary": true,
+        "post_milestones": true,
+        "min_trade_pnl_to_post": 50.0,
+        "include_hashtags": true,
+        "default_hashtags": ["algotrading", "forex", "trading", "quant", "fintech"],
+        "max_posts_per_day": 50,
+        "min_minutes_between_posts": 15
+    },
+    "linkedin": {
+        "access_token": "YOUR_LINKEDIN_ACCESS_TOKEN",
+        "person_urn": "urn:li:person:YOUR_PERSON_ID",
+        "organization_urn": "",
+        "enabled": true,
+        "post_trades": false,
+        "post_daily_summary": false,
+        "post_weekly_summary": true,
+        "post_monthly_summary": true,
+        "post_milestones": true,
+        "include_hashtags": true,
+        "default_hashtags": ["algorithmictrading", "fintech", "forex", "machinelearning", "quantfinance"],
+        "max_posts_per_day": 3
+    },
+    "dry_run": false,
+    "log_posts": true,
+    "posts_log_file": "logs/social_posts.json",
+    "bot_name": "pyForex",
+    "include_disclaimer": true,
+    "disclaimer_text": "Past performance ≠ future results. Not financial advice.",
+    "attach_charts": true,
+    "chart_directory": "./charts"
+}
