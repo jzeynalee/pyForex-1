@@ -2,9 +2,10 @@
 """
 Live trading bot with integrated trend detection.
 
-Key changes from original:
-- Loads TrendClassifier for FTDM-V1 Step 4
-- Uses enhanced signal generation with trend context
+UPDATED:
+- Uses TCN instead of LSTM for sequence modeling
+- Full MTF integration with configurable profiles
+- Enhanced signal generation with trend context
 """
 
 import sys
@@ -15,6 +16,7 @@ import logging
 import time
 import pandas as pd
 import torch
+from typing import Optional, Dict, Any
 
 from utils.config import settings
 
@@ -36,46 +38,55 @@ PASSWORD = settings.MT5_PASSWORD
 SERVER = settings.MT5_SERVER
 PATH = settings.MT5_PATH
 
-# Model paths
+# Model paths - UPDATED: TCN instead of LSTM
 MODEL_DIR = Path(__file__).parent.parent / 'models'
-LSTM_MODEL_PATH = MODEL_DIR / 'lstm_best.pt'
+TCN_MODEL_PATH = MODEL_DIR / 'tcn_best.pt'
 FUSION_MODEL_PATH = MODEL_DIR / 'fusion_best.pt'
 TREND_CLASSIFIER_PATH = MODEL_DIR / 'trend_classifier.joblib'
 
 
-def load_production_models():
+def load_production_models(
+    tcn_profile: str = "INTRADAY",
+    mtf_profile: str = "SWING",
+):
     """
-    Load all models including trend detector with TrendClassifier.
+    Load all models including TCN and MTF trend detector.
+    
+    Args:
+        tcn_profile: TCN profile ('SCALP', 'INTRADAY', 'SWING')
+        mtf_profile: MTF analysis profile
     
     Returns:
-        Tuple of (lstm, vit, yolo, fusion, trend_detector, signal_engine, device)
+        Dict with all loaded components
     """
     device = "cuda" if torch.cuda.is_available() else "cpu"
     logger.info(f"Using device: {device}")
     
     # Import model classes
     from models.fusion import FusionNet
-    from models.lstm import LSTMModel
+    from models.tcn import TCNModel  # UPDATED: TCN instead of LSTM
     from models.vit import ViTExtractor
     from models.yolo_detector import YOLOPatternDetector
-    from trading.enhanced_signal_engine import FusionFXTrendDetector
+    from trading.decision_engine import MTFDecisionEngine
     
-    # Initialize models
-    lstm = LSTMModel().to(device).eval()
+    # Initialize models - UPDATED: Use TCN
+    tcn = TCNModel.from_profile(tcn_profile).to(device).eval()
     vit = ViTExtractor().to(device).eval()
     yolo = YOLOPatternDetector()
     fusion = FusionNet().to(device).eval()
     
     # Load weights
-    if LSTM_MODEL_PATH.exists():
-        lstm.load_state_dict(torch.load(LSTM_MODEL_PATH, map_location=device))
-        logger.info(f"Loaded LSTM weights from {LSTM_MODEL_PATH}")
+    if TCN_MODEL_PATH.exists():
+        tcn.load_state_dict(torch.load(TCN_MODEL_PATH, map_location=device))
+        logger.info(f"Loaded TCN weights from {TCN_MODEL_PATH}")
+    else:
+        logger.warning(f"TCN weights not found at {TCN_MODEL_PATH}")
     
     if FUSION_MODEL_PATH.exists():
         fusion.load_state_dict(torch.load(FUSION_MODEL_PATH, map_location=device))
         logger.info(f"Loaded Fusion weights from {FUSION_MODEL_PATH}")
     
-    # Load TrendClassifier for Step 4
+    # Load TrendClassifier for Step 4 (optional)
     trend_classifier = None
     if TREND_CLASSIFIER_PATH.exists():
         try:
@@ -87,126 +98,23 @@ def load_production_models():
     else:
         logger.warning(
             f"TrendClassifier not found at {TREND_CLASSIFIER_PATH}. "
-            "Step 4 will use neutral defaults. "
-            "Run 'python scripts/train_trend_classifier.py --synthetic' to create one."
+            "Step 4 will use neutral defaults."
         )
     
-    # Initialize trend detector with TrendClassifier
-    trend_detector = FusionFXTrendDetector(ml_model=trend_classifier)
-    
-    # Signal engine wraps trend detector
-    signal_engine = EnhancedSignalEngine(
-        pattern_fusion_model=fusion,
-        trend_detector=trend_detector
+    # Initialize MTF-enabled decision engine
+    decision_engine = MTFDecisionEngine(
+        profile=mtf_profile,
+        ml_model=trend_classifier,
     )
     
-    return lstm, vit, yolo, fusion, trend_detector, signal_engine, device
-
-
-class EnhancedSignalEngine:
-    """
-    Combines pattern predictions with trend context for signal generation.
-    """
-    
-    def __init__(self, pattern_fusion_model, trend_detector):
-        self.fusion = pattern_fusion_model
-        self.trend_detector = trend_detector
-    
-    def generate_signal(
-        self,
-        pattern_probs: list,
-        dfs_dict: dict,
-        threshold: float = 0.70,
-    ) -> dict:
-        """
-        Generate trading signal from pattern predictions and trend context.
-        
-        Args:
-            pattern_probs: [P(BUY), P(SELL), P(HOLD)] from Fusion model
-            dfs_dict: {'H4': df, 'H1': df, 'M15': df}
-            threshold: Minimum confidence to trade
-        
-        Returns:
-            Dict with signal, confidence, reason, and trend analysis
-        """
-        # Get trend analysis
-        trend_analysis = self.trend_detector.detect_trend(dfs_dict)
-        
-        p_buy, p_sell, p_hold = pattern_probs
-        
-        # Determine pattern signal
-        if max(p_buy, p_sell) < threshold:
-            pattern_signal = "NO_TRADE"
-            pattern_conf = max(p_buy, p_sell)
-        elif p_buy > p_sell:
-            pattern_signal = "BUY"
-            pattern_conf = p_buy
-        else:
-            pattern_signal = "SELL"
-            pattern_conf = p_sell
-        
-        # Apply trend filter
-        trend_direction = trend_analysis['direction']
-        trend_conf = trend_analysis['confidence']
-        
-        # Trading rules based on trend context
-        signal = "NO_TRADE"
-        reason = ""
-        final_confidence = 0.0
-        
-        if pattern_signal == "NO_TRADE":
-            reason = f"Pattern confidence too low ({pattern_conf:.2f} < {threshold})"
-            
-        elif trend_direction == "SIDEWAYS":
-            # In sideways markets, require higher pattern confidence
-            if pattern_conf >= 0.80:
-                signal = pattern_signal
-                final_confidence = pattern_conf * 0.8  # Reduce confidence
-                reason = f"Sideways market but strong pattern ({pattern_conf:.2f})"
-            else:
-                reason = f"Sideways market, pattern not strong enough"
-                
-        elif pattern_signal == "BUY" and trend_direction == "BULLISH":
-            # Aligned: pattern and trend both bullish
-            signal = "BUY"
-            final_confidence = (pattern_conf + trend_conf) / 2
-            reason = f"Aligned bullish (pattern={pattern_conf:.2f}, trend={trend_conf:.2f})"
-            
-        elif pattern_signal == "SELL" and trend_direction == "BEARISH":
-            # Aligned: pattern and trend both bearish
-            signal = "SELL"
-            final_confidence = (pattern_conf + trend_conf) / 2
-            reason = f"Aligned bearish (pattern={pattern_conf:.2f}, trend={trend_conf:.2f})"
-            
-        elif pattern_signal == "BUY" and trend_direction == "BEARISH":
-            # Counter-trend: be cautious
-            if pattern_conf >= 0.85 and trend_conf < 0.6:
-                signal = "BUY"
-                final_confidence = pattern_conf * 0.7
-                reason = f"Counter-trend BUY (weak bear trend)"
-            else:
-                reason = f"Counter-trend BUY rejected (trend too strong)"
-                
-        elif pattern_signal == "SELL" and trend_direction == "BULLISH":
-            # Counter-trend: be cautious
-            if pattern_conf >= 0.85 and trend_conf < 0.6:
-                signal = "SELL"
-                final_confidence = pattern_conf * 0.7
-                reason = f"Counter-trend SELL (weak bull trend)"
-            else:
-                reason = f"Counter-trend SELL rejected (trend too strong)"
-        
-        return {
-            'signal': signal,
-            'confidence': final_confidence,
-            'reason': reason,
-            'trend_analysis': trend_analysis,
-            'pattern_prediction': {
-                'signal': pattern_signal,
-                'confidence': pattern_conf,
-                'probabilities': pattern_probs,
-            }
-        }
+    return {
+        'tcn': tcn,
+        'vit': vit,
+        'yolo': yolo,
+        'fusion': fusion,
+        'decision_engine': decision_engine,
+        'device': device,
+    }
 
 
 class RiskManager:
@@ -217,16 +125,18 @@ class RiskManager:
     
     def calculate_volatility(self, df: pd.DataFrame, period: int = 14) -> float:
         """Calculate ATR for volatility."""
-        high = df['high']
-        low = df['low']
-        close = df['close']
+        import numpy as np
         
-        tr1 = high - low
-        tr2 = abs(high - close.shift(1))
-        tr3 = abs(low - close.shift(1))
-        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+        high = df['high'].values
+        low = df['low'].values
+        close = df['close'].values
         
-        return tr.rolling(period).mean().iloc[-1]
+        tr1 = high[1:] - low[1:]
+        tr2 = np.abs(high[1:] - close[:-1])
+        tr3 = np.abs(low[1:] - close[:-1])
+        tr = np.maximum(np.maximum(tr1, tr2), tr3)
+        
+        return float(np.mean(tr[-period:]))
     
     def get_trade_params(
         self,
@@ -234,14 +144,29 @@ class RiskManager:
         current_price: float,
         atr: float,
         direction: str,
+        confidence: float = 0.7,
     ) -> tuple:
         """
         Calculate volume, SL, TP.
         
+        Args:
+            balance: Account balance
+            current_price: Current price
+            atr: ATR value
+            direction: 'BUY' or 'SELL'
+            confidence: Signal confidence (adjusts position size)
+        
         Returns:
             Tuple of (volume, sl_price, tp_price)
         """
-        risk_amount = balance * self.risk
+        # Adjust risk based on confidence
+        adjusted_risk = self.risk
+        if confidence > 0.80:
+            adjusted_risk = self.risk * 1.2
+        elif confidence < 0.60:
+            adjusted_risk = self.risk * 0.8
+        
+        risk_amount = balance * adjusted_risk
         
         # SL = 1.5 ATR, TP = 3 ATR
         sl_dist = atr * 1.5
@@ -254,35 +179,57 @@ class RiskManager:
             sl = current_price + sl_dist
             tp = current_price - tp_dist
         
-        # Calculate volume (simplified)
+        # Calculate volume
         pip_value = 10.0  # $10 per pip per lot
         pips_at_risk = sl_dist / 0.0001
-        volume = risk_amount / (pips_at_risk * pip_value)
+        volume = risk_amount / (pips_at_risk * pip_value) if pips_at_risk > 0 else 0.01
         volume = max(0.01, min(1.0, round(volume, 2)))
         
         return volume, sl, tp
 
 
-def build_features(df, lstm, vit, yolo):
+def build_features(df: pd.DataFrame, models: Dict, device: str):
     """
     Build feature vectors from price data.
     
-    This is a placeholder - implement based on your actual model inputs.
+    Args:
+        df: Price DataFrame
+        models: Dict with tcn, vit, yolo, fusion
+        device: Torch device
+    
+    Returns:
+        Tuple of (seq_features, vit_features, yolo_features)
     """
-    import torch
+    import numpy as np
     
-    # LSTM features from price sequence
+    # TCN features from price sequence
     seq_len = min(60, len(df))
-    price_seq = df[['open', 'high', 'low', 'close']].tail(seq_len).values
-    price_seq = torch.tensor(price_seq, dtype=torch.float32).unsqueeze(0)
+    cols = ['open', 'high', 'low', 'close', 'tick_volume']
+    price_seq = df[cols].tail(seq_len).values.astype(np.float32)
     
-    # ViT features from chart image (placeholder)
-    vit_features = torch.zeros(1, 768)
+    # Normalize
+    mean = price_seq.mean(axis=0)
+    std = price_seq.std(axis=0) + 1e-8
+    price_seq = (price_seq - mean) / std
     
-    # YOLO pattern features (placeholder)
-    yolo_features = torch.zeros(1, 256)
+    seq_tensor = torch.tensor(price_seq).float().unsqueeze(0).to(device)
     
-    return price_seq, vit_features, yolo_features
+    # ViT features from chart image (placeholder if not available)
+    try:
+        from utils.candle_to_image import candle_image, normalize_for_model
+        img = candle_image(df.tail(60), target_size=224)
+        img_norm = normalize_for_model(img, use_imagenet_stats=True)
+        vit_tensor = torch.tensor(img_norm).float().unsqueeze(0).to(device)
+    except ImportError:
+        vit_tensor = torch.zeros(1, 3, 224, 224).to(device)
+    
+    # YOLO features
+    yolo_features = models['yolo'].detect(
+        np.zeros((224, 224, 3), dtype=np.uint8)
+    )
+    yolo_tensor = torch.tensor(yolo_features).float().unsqueeze(0).to(device)
+    
+    return seq_tensor, vit_tensor, yolo_tensor
 
 
 def get_candles(symbol: str, timeframe: str, n: int = 200) -> list:
@@ -300,7 +247,7 @@ def get_candles(symbol: str, timeframe: str, n: int = 200) -> list:
             'D1': mt5.TIMEFRAME_D1,
         }
         
-        rates = mt5.copy_rates_from_pos(symbol, tf_map[timeframe], 0, n)
+        rates = mt5.copy_rates_from_pos(symbol, tf_map.get(timeframe, mt5.TIMEFRAME_H1), 0, n)
         return rates if rates is not None else []
         
     except ImportError:
@@ -342,7 +289,7 @@ def send_order(symbol: str, volume: float, order_type: int, sl: float, tp: float
         "sl": sl,
         "tp": tp,
         "magic": 123456,
-        "comment": "PyForex Enhanced",
+        "comment": "PyForex TCN+MTF",
         "type_time": mt5.ORDER_TIME_GTC,
         "type_filling": mt5.ORDER_FILLING_IOC,
     }
@@ -350,9 +297,20 @@ def send_order(symbol: str, volume: float, order_type: int, sl: float, tp: float
     return mt5.order_send(request)
 
 
-def live_bot():
-    """Main trading loop."""
-    print("🚀 Starting Enhanced Hybrid Trading System with FTDM-V1...")
+def live_bot(
+    tcn_profile: str = "INTRADAY",
+    mtf_profile: str = "SWING",
+):
+    """
+    Main trading loop.
+    
+    Args:
+        tcn_profile: TCN model profile
+        mtf_profile: MTF analysis profile
+    """
+    print("🚀 Starting Enhanced Trading System (TCN + MTF)...")
+    print(f"   TCN Profile: {tcn_profile}")
+    print(f"   MTF Profile: {mtf_profile}")
     
     if not connect(ACCOUNT, PASSWORD, SERVER):
         print("❌ MT5 Connection Failed")
@@ -361,83 +319,85 @@ def live_bot():
     import MetaTrader5 as mt5
     
     risk_manager = RiskManager(risk_per_trade=0.01)
-    lstm, vit, yolo, fusion, trend_detector, signal_engine, device = load_production_models()
+    models = load_production_models(tcn_profile, mtf_profile)
+    device = models['device']
     
     current_candle_time = None
     
     while True:
         try:
-            # Get multi-timeframe data for trend detection
-            candles_h4 = get_candles(SYMBOL, "H4", n=200)
-            candles_h1 = get_candles(SYMBOL, "H1", n=200)
-            candles_m15 = get_candles(SYMBOL, "M15", n=200)
+            # Get multi-timeframe data
+            if mtf_profile == "SCALP":
+                tfs = ["M5", "M15", "H1"]
+            elif mtf_profile == "SWING":
+                tfs = ["H1", "H4", "D1"]
+            else:  # INTRADAY
+                tfs = ["M15", "H1", "H4"]
             
-            if not candles_h1:
-                logger.warning("No H1 data received")
+            dfs_dict = {}
+            for tf in tfs:
+                candles = get_candles(SYMBOL, tf, n=200)
+                if candles is not None and len(candles) > 0:
+                    dfs_dict[tf] = pd.DataFrame(candles)
+                    dfs_dict[tf]['time'] = pd.to_datetime(dfs_dict[tf]['time'], unit='s')
+            
+            # Primary TF for candle check
+            primary_tf = tfs[1]  # Middle timeframe
+            if primary_tf not in dfs_dict:
+                logger.warning(f"No {primary_tf} data received")
                 time.sleep(10)
                 continue
             
-            df_h4 = pd.DataFrame(candles_h4)
-            df_h1 = pd.DataFrame(candles_h1)
-            df_m15 = pd.DataFrame(candles_m15)
+            df_primary = dfs_dict[primary_tf]
             
-            # Check for new H1 candle
-            last_time = df_h1['time'].iloc[-1]
+            # Check for new candle
+            last_time = df_primary['time'].iloc[-1]
             if current_candle_time == last_time:
                 time.sleep(1)
                 continue
             
             current_candle_time = last_time
-            print(f"🔎 Analyzing candle: {datetime.fromtimestamp(last_time)}")
+            print(f"🔎 Analyzing candle: {last_time}")
             
-            # Pattern prediction (Deep Learning models)
+            # Pattern prediction (TCN + ViT + YOLO + Fusion)
             with torch.no_grad():
-                lstm_v, vit_v, yolo_v = build_features(df_h1, lstm, vit, yolo)
-                lstm_v = lstm_v.to(device)
-                vit_v = vit_v.to(device)
-                yolo_v = yolo_v.to(device)
+                seq_v, vit_v, yolo_v = build_features(df_primary, models, device)
                 
-                preds = fusion(lstm_v, vit_v, yolo_v)
+                # Get TCN features
+                tcn_feat = models['tcn'](seq_v, mode='features')
+                
+                # Get ViT features
+                vit_feat = models['vit'](vit_v)
+                
+                # Fusion
+                preds = models['fusion'](tcn_feat, vit_feat, yolo_v)
                 probs = preds.softmax(dim=1).cpu().numpy()[0]
             
-            # Enhanced signal generation with trend context
-            dfs_dict = {'H4': df_h4, 'H1': df_h1, 'M15': df_m15}
-            signal_result = signal_engine.generate_signal(probs, dfs_dict, threshold=0.70)
-            
-            signal = signal_result['signal']
-            confidence = signal_result['confidence']
-            reason = signal_result['reason']
-            trend_analysis = signal_result['trend_analysis']
-            
-            logger.info(f"Signal: {signal} | Confidence: {confidence:.2f} | Reason: {reason}")
-            logger.info(
-                f"Trend: {trend_analysis['trend_name']} | "
-                f"Strength: {trend_analysis['trend_strength']:.1f} | "
-                f"ML Conf: {trend_analysis['details'].get('ml_confidence', 0):.2f}"
+            # Get recommendation from MTF decision engine
+            recommendation = models['decision_engine'].get_recommendation(
+                pattern_probs=probs.tolist(),
+                dfs_dict=dfs_dict,
             )
             
-            if signal != "NO_TRADE":
+            signal = recommendation['signal']
+            confidence = recommendation['confidence']
+            reason = recommendation['reason']
+            trend = recommendation['trend']
+            
+            logger.info(f"Signal: {signal} | Confidence: {confidence:.2f} | Trend: {trend}")
+            logger.info(f"Reason: {reason}")
+            
+            if signal in ("BUY", "SELL"):
                 # Risk calculation
                 account_info = mt5.account_info()
                 balance = account_info.balance
                 tick = mt5.symbol_info_tick(SYMBOL)
                 current_price = tick.ask if signal == "BUY" else tick.bid
-                atr = risk_manager.calculate_volatility(df_h1)
+                atr = risk_manager.calculate_volatility(df_primary)
                 
-                # Adjust position size based on trend confidence
-                base_risk = 0.01
-                trend_conf = trend_analysis['confidence']
-                
-                if trend_conf > 0.75:
-                    adjusted_risk = base_risk * 1.3  # Increase for strong trends
-                elif trend_conf < 0.5:
-                    adjusted_risk = base_risk * 0.7  # Decrease for weak trends
-                else:
-                    adjusted_risk = base_risk
-                
-                risk_manager.risk = adjusted_risk
+                # Get trade parameters
                 vol, sl, tp = risk_manager.get_trade_params(
-                    balance, current_price, atr, signal
+                    balance, current_price, atr, signal, confidence
                 )
                 
                 # Execute order
@@ -446,11 +406,9 @@ def live_bot():
                 
                 if result.retcode == mt5.TRADE_RETCODE_DONE:
                     print(f"✅ Trade Executed: {signal} @ {current_price}")
-                    print(f"   Trend Context: {trend_analysis['trend_name']}")
-                    print(
-                        f"   Confidence: Pattern={signal_result['pattern_prediction']['confidence']:.2f}, "
-                        f"Trend={trend_conf:.2f}"
-                    )
+                    print(f"   Trend: {trend}")
+                    print(f"   Confidence: {confidence:.2%}")
+                    print(f"   Volume: {vol}, SL: {sl:.5f}, TP: {tp:.5f}")
                     logger.info(f"Trade Executed: {result}")
                 else:
                     print(f"❌ Trade Failed: {result.comment}")
@@ -476,4 +434,19 @@ def live_bot():
 
 
 if __name__ == "__main__":
-    live_bot()
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="Live Trading Bot with TCN + MTF")
+    parser.add_argument('--tcn-profile', type=str, default='INTRADAY',
+                        choices=['SCALP', 'INTRADAY', 'SWING'],
+                        help='TCN model profile')
+    parser.add_argument('--mtf-profile', type=str, default='SWING',
+                        choices=['SCALP', 'INTRADAY', 'SWING'],
+                        help='MTF analysis profile')
+    
+    args = parser.parse_args()
+    
+    live_bot(
+        tcn_profile=args.tcn_profile,
+        mtf_profile=args.mtf_profile,
+    )
