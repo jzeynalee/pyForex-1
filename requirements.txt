@@ -80,3 +80,7 @@ mplfinance     #>=0.13.0
 # --- Testing & Quality Assurance ---
 pytest     #>=8.3.0
 pytest-cov     #>=5.0.0
+pytest-mock>=3.10.0
+pytest-xdist>=3.0.0
+pytest-html>=3.2.0
+coverage>=7.0.0

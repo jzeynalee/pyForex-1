@@ -1,452 +1,654 @@
 # trading/live_trading_bot.py
 """
-Live trading bot with integrated trend detection.
+Live Trading Bot with Risk Management Integration
 
-UPDATED:
-- Uses TCN instead of LSTM for sequence modeling
-- Full MTF integration with configurable profiles
-- Enhanced signal generation with trend context
+Production-ready trading bot that:
+- Runs continuous trading loop
+- Integrates TCN predictions with risk management
+- Manages positions with ML-based SL/TP
+- Enforces hard rules and limits
+- Provides real-time monitoring
+
+Usage:
+    bot = LiveTradingBot(config)
+    bot.initialize()
+    bot.run()  # Blocking
+    # or
+    bot.start()  # Non-blocking (thread)
 """
 
-import sys
-import os
-from pathlib import Path
-from datetime import datetime
-import logging
 import time
-import pandas as pd
-import torch
-from typing import Optional, Dict, Any
+import threading
+import logging
+from datetime import datetime, timedelta
+from typing import Dict, List, Optional, Callable
+from dataclasses import dataclass, field
+from enum import Enum
+import json
+from pathlib import Path
 
-from utils.config import settings
-
-# Setup logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('trading.log'),
-        logging.StreamHandler()
-    ]
+# Strategy imports
+from strategies.neural_hybrid import (
+    NeuralHybridStrategy, StrategyConfig, create_strategy, Order
 )
+from trading.decision_engine import TradeDecision
+
+# Risk management imports
+try:
+    from risk_management import (
+        TradeGatekeeper, HardRulesConfig, TradingSession,
+        generate_performance_report, PerformanceMetrics
+    )
+    HAS_RISK_MANAGEMENT = True
+except ImportError:
+    HAS_RISK_MANAGEMENT = False
+
 logger = logging.getLogger(__name__)
 
-# Configuration
-SYMBOL = settings.SYMBOL
-ACCOUNT = settings.MT5_ACCOUNT
-PASSWORD = settings.MT5_PASSWORD
-SERVER = settings.MT5_SERVER
-PATH = settings.MT5_PATH
 
-# Model paths - UPDATED: TCN instead of LSTM
-MODEL_DIR = Path(__file__).parent.parent / 'models'
-TCN_MODEL_PATH = MODEL_DIR / 'tcn_best.pt'
-FUSION_MODEL_PATH = MODEL_DIR / 'fusion_best.pt'
-TREND_CLASSIFIER_PATH = MODEL_DIR / 'trend_classifier.joblib'
+class BotState(Enum):
+    """Bot operational states."""
+    STOPPED = "stopped"
+    INITIALIZING = "initializing"
+    RUNNING = "running"
+    PAUSED = "paused"
+    ERROR = "error"
 
 
-def load_production_models(
-    tcn_profile: str = "INTRADAY",
-    mtf_profile: str = "SWING",
-):
+@dataclass
+class BotConfig:
+    """Configuration for live trading bot."""
+    # Trading settings
+    symbol: str = 'EURUSD'
+    profile: str = 'INTRADAY'
+    
+    # Timing
+    check_interval_seconds: int = 60     # How often to check for signals
+    market_open_hour: int = 0            # UTC hour market opens (Sunday)
+    market_close_hour: int = 22          # UTC hour market closes (Friday)
+    
+    # Model paths
+    tcn_weights: str = 'models/weights/tcn_best.pt'
+    vit_weights: Optional[str] = None
+    yolo_weights: Optional[str] = None
+    meta_model_path: Optional[str] = None
+    
+    # Risk settings
+    base_risk_percent: float = 1.0
+    max_daily_loss_percent: float = 3.0
+    max_weekly_loss_percent: float = 6.0
+    max_open_trades: int = 3
+    
+    # Notifications
+    enable_notifications: bool = True
+    telegram_config: Optional[Dict] = None
+    
+    # Logging
+    log_trades: bool = True
+    trades_log_file: str = 'logs/trades.json'
+    performance_log_file: str = 'logs/performance.json'
+    
+    # Safety
+    dry_run: bool = False               # Paper trading mode
+    require_confirmation: bool = False   # Require manual confirmation
+    max_consecutive_losses: int = 5      # Pause after N losses
+    cooldown_minutes: int = 30           # Cooldown after loss streak
+
+
+class LiveTradingBot:
     """
-    Load all models including TCN and MTF trend detector.
+    Production live trading bot with full risk management.
     
-    Args:
-        tcn_profile: TCN profile ('SCALP', 'INTRADAY', 'SWING')
-        mtf_profile: MTF analysis profile
+    Features:
+    - Continuous market monitoring
+    - ML-based signal generation
+    - Automated risk management
+    - Position tracking
+    - Performance monitoring
+    - Notification system
+    - Graceful shutdown handling
     
-    Returns:
-        Dict with all loaded components
-    """
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    logger.info(f"Using device: {device}")
-    
-    # Import model classes
-    from models.fusion import FusionNet
-    from models.tcn import TCNModel  # UPDATED: TCN instead of LSTM
-    from models.vit import ViTExtractor
-    from models.yolo_detector import YOLOPatternDetector
-    from trading.decision_engine import MTFDecisionEngine
-    
-    # Initialize models - UPDATED: Use TCN
-    tcn = TCNModel.from_profile(tcn_profile).to(device).eval()
-    vit = ViTExtractor().to(device).eval()
-    yolo = YOLOPatternDetector()
-    fusion = FusionNet().to(device).eval()
-    
-    # Load weights
-    if TCN_MODEL_PATH.exists():
-        tcn.load_state_dict(torch.load(TCN_MODEL_PATH, map_location=device))
-        logger.info(f"Loaded TCN weights from {TCN_MODEL_PATH}")
-    else:
-        logger.warning(f"TCN weights not found at {TCN_MODEL_PATH}")
-    
-    if FUSION_MODEL_PATH.exists():
-        fusion.load_state_dict(torch.load(FUSION_MODEL_PATH, map_location=device))
-        logger.info(f"Loaded Fusion weights from {FUSION_MODEL_PATH}")
-    
-    # Load TrendClassifier for Step 4 (optional)
-    trend_classifier = None
-    if TREND_CLASSIFIER_PATH.exists():
-        try:
-            from models.trend_classifier import TrendClassifier
-            trend_classifier = TrendClassifier.load(TREND_CLASSIFIER_PATH)
-            logger.info(f"Loaded TrendClassifier from {TREND_CLASSIFIER_PATH}")
-        except Exception as e:
-            logger.warning(f"Failed to load TrendClassifier: {e}")
-    else:
-        logger.warning(
-            f"TrendClassifier not found at {TREND_CLASSIFIER_PATH}. "
-            "Step 4 will use neutral defaults."
+    Example:
+        from trading.mt5_executor import MT5Executor
+        from data.mt5_provider import MT5DataProvider
+        
+        bot = LiveTradingBot(
+            config=BotConfig(symbol='EURUSD', profile='INTRADAY'),
+            data_provider=MT5DataProvider(),
+            executor=MT5Executor()
         )
-    
-    # Initialize MTF-enabled decision engine
-    decision_engine = MTFDecisionEngine(
-        profile=mtf_profile,
-        ml_model=trend_classifier,
-    )
-    
-    return {
-        'tcn': tcn,
-        'vit': vit,
-        'yolo': yolo,
-        'fusion': fusion,
-        'decision_engine': decision_engine,
-        'device': device,
-    }
-
-
-class RiskManager:
-    """Simple risk manager for position sizing."""
-    
-    def __init__(self, risk_per_trade: float = 0.01):
-        self.risk = risk_per_trade
-    
-    def calculate_volatility(self, df: pd.DataFrame, period: int = 14) -> float:
-        """Calculate ATR for volatility."""
-        import numpy as np
         
-        high = df['high'].values
-        low = df['low'].values
-        close = df['close'].values
-        
-        tr1 = high[1:] - low[1:]
-        tr2 = np.abs(high[1:] - close[:-1])
-        tr3 = np.abs(low[1:] - close[:-1])
-        tr = np.maximum(np.maximum(tr1, tr2), tr3)
-        
-        return float(np.mean(tr[-period:]))
+        bot.initialize()
+        bot.run()
+    """
     
-    def get_trade_params(
+    def __init__(
         self,
-        balance: float,
-        current_price: float,
-        atr: float,
-        direction: str,
-        confidence: float = 0.7,
-    ) -> tuple:
-        """
-        Calculate volume, SL, TP.
+        config: BotConfig,
+        data_provider,
+        executor,
+        on_signal: Optional[Callable[[TradeDecision], None]] = None,
+        on_trade: Optional[Callable[[Order, Dict], None]] = None,
+        on_error: Optional[Callable[[Exception], None]] = None
+    ):
+        self.config = config
+        self.data_provider = data_provider
+        self.executor = executor
         
-        Args:
-            balance: Account balance
-            current_price: Current price
-            atr: ATR value
-            direction: 'BUY' or 'SELL'
-            confidence: Signal confidence (adjusts position size)
+        # Callbacks
+        self.on_signal = on_signal
+        self.on_trade = on_trade
+        self.on_error = on_error
+        
+        # State
+        self.state = BotState.STOPPED
+        self._stop_event = threading.Event()
+        self._thread: Optional[threading.Thread] = None
+        
+        # Components
+        self.strategy: Optional[NeuralHybridStrategy] = None
+        self.gatekeeper: Optional[TradeGatekeeper] = None
+        
+        # Tracking
+        self._daily_pnl = 0.0
+        self._weekly_pnl = 0.0
+        self._consecutive_losses = 0
+        self._last_trade_time: Optional[datetime] = None
+        self._cooldown_until: Optional[datetime] = None
+        self._trade_count = 0
+        
+        # Performance
+        self._session_start: Optional[datetime] = None
+        self._signals_generated = 0
+        self._trades_executed = 0
+        self._trades_rejected = 0
+        
+        # Notifications
+        self._notifier = None
+        if config.enable_notifications:
+            self._init_notifier()
+    
+    def initialize(self) -> bool:
+        """
+        Initialize all bot components.
         
         Returns:
-            Tuple of (volume, sl_price, tp_price)
+            True if successful
         """
-        # Adjust risk based on confidence
-        adjusted_risk = self.risk
-        if confidence > 0.80:
-            adjusted_risk = self.risk * 1.2
-        elif confidence < 0.60:
-            adjusted_risk = self.risk * 0.8
+        self.state = BotState.INITIALIZING
+        logger.info("Initializing trading bot...")
         
-        risk_amount = balance * adjusted_risk
-        
-        # SL = 1.5 ATR, TP = 3 ATR
-        sl_dist = atr * 1.5
-        tp_dist = atr * 3.0
-        
-        if direction == "BUY":
-            sl = current_price - sl_dist
-            tp = current_price + tp_dist
-        else:
-            sl = current_price + sl_dist
-            tp = current_price - tp_dist
-        
-        # Calculate volume
-        pip_value = 10.0  # $10 per pip per lot
-        pips_at_risk = sl_dist / 0.0001
-        volume = risk_amount / (pips_at_risk * pip_value) if pips_at_risk > 0 else 0.01
-        volume = max(0.01, min(1.0, round(volume, 2)))
-        
-        return volume, sl, tp
-
-
-def build_features(df: pd.DataFrame, models: Dict, device: str):
-    """
-    Build feature vectors from price data.
-    
-    Args:
-        df: Price DataFrame
-        models: Dict with tcn, vit, yolo, fusion
-        device: Torch device
-    
-    Returns:
-        Tuple of (seq_features, vit_features, yolo_features)
-    """
-    import numpy as np
-    
-    # TCN features from price sequence
-    seq_len = min(60, len(df))
-    cols = ['open', 'high', 'low', 'close', 'tick_volume']
-    price_seq = df[cols].tail(seq_len).values.astype(np.float32)
-    
-    # Normalize
-    mean = price_seq.mean(axis=0)
-    std = price_seq.std(axis=0) + 1e-8
-    price_seq = (price_seq - mean) / std
-    
-    seq_tensor = torch.tensor(price_seq).float().unsqueeze(0).to(device)
-    
-    # ViT features from chart image (placeholder if not available)
-    try:
-        from utils.candle_to_image import candle_image, normalize_for_model
-        img = candle_image(df.tail(60), target_size=224)
-        img_norm = normalize_for_model(img, use_imagenet_stats=True)
-        vit_tensor = torch.tensor(img_norm).float().unsqueeze(0).to(device)
-    except ImportError:
-        vit_tensor = torch.zeros(1, 3, 224, 224).to(device)
-    
-    # YOLO features
-    yolo_features = models['yolo'].detect(
-        np.zeros((224, 224, 3), dtype=np.uint8)
-    )
-    yolo_tensor = torch.tensor(yolo_features).float().unsqueeze(0).to(device)
-    
-    return seq_tensor, vit_tensor, yolo_tensor
-
-
-def get_candles(symbol: str, timeframe: str, n: int = 200) -> list:
-    """Fetch candles from MT5."""
-    try:
-        import MetaTrader5 as mt5
-        
-        tf_map = {
-            'M1': mt5.TIMEFRAME_M1,
-            'M5': mt5.TIMEFRAME_M5,
-            'M15': mt5.TIMEFRAME_M15,
-            'M30': mt5.TIMEFRAME_M30,
-            'H1': mt5.TIMEFRAME_H1,
-            'H4': mt5.TIMEFRAME_H4,
-            'D1': mt5.TIMEFRAME_D1,
-        }
-        
-        rates = mt5.copy_rates_from_pos(symbol, tf_map.get(timeframe, mt5.TIMEFRAME_H1), 0, n)
-        return rates if rates is not None else []
-        
-    except ImportError:
-        logger.warning("MT5 not available, returning empty data")
-        return []
-
-
-def connect(account: int, password: str, server: str) -> bool:
-    """Connect to MT5."""
-    try:
-        import MetaTrader5 as mt5
-        
-        if not mt5.initialize():
-            return False
-        
-        if account and password:
-            return mt5.login(account, password=password, server=server)
-        
-        return True
-        
-    except ImportError:
-        logger.error("MetaTrader5 not installed")
-        return False
-
-
-def send_order(symbol: str, volume: float, order_type: int, sl: float, tp: float):
-    """Send order to MT5."""
-    import MetaTrader5 as mt5
-    
-    tick = mt5.symbol_info_tick(symbol)
-    price = tick.ask if order_type == mt5.ORDER_TYPE_BUY else tick.bid
-    
-    request = {
-        "action": mt5.TRADE_ACTION_DEAL,
-        "symbol": symbol,
-        "volume": volume,
-        "type": order_type,
-        "price": price,
-        "sl": sl,
-        "tp": tp,
-        "magic": 123456,
-        "comment": "PyForex TCN+MTF",
-        "type_time": mt5.ORDER_TIME_GTC,
-        "type_filling": mt5.ORDER_FILLING_IOC,
-    }
-    
-    return mt5.order_send(request)
-
-
-def live_bot(
-    tcn_profile: str = "INTRADAY",
-    mtf_profile: str = "SWING",
-):
-    """
-    Main trading loop.
-    
-    Args:
-        tcn_profile: TCN model profile
-        mtf_profile: MTF analysis profile
-    """
-    print("🚀 Starting Enhanced Trading System (TCN + MTF)...")
-    print(f"   TCN Profile: {tcn_profile}")
-    print(f"   MTF Profile: {mtf_profile}")
-    
-    if not connect(ACCOUNT, PASSWORD, SERVER):
-        print("❌ MT5 Connection Failed")
-        return
-    
-    import MetaTrader5 as mt5
-    
-    risk_manager = RiskManager(risk_per_trade=0.01)
-    models = load_production_models(tcn_profile, mtf_profile)
-    device = models['device']
-    
-    current_candle_time = None
-    
-    while True:
         try:
-            # Get multi-timeframe data
-            if mtf_profile == "SCALP":
-                tfs = ["M5", "M15", "H1"]
-            elif mtf_profile == "SWING":
-                tfs = ["H1", "H4", "D1"]
-            else:  # INTRADAY
-                tfs = ["M15", "H1", "H4"]
-            
-            dfs_dict = {}
-            for tf in tfs:
-                candles = get_candles(SYMBOL, tf, n=200)
-                if candles is not None and len(candles) > 0:
-                    dfs_dict[tf] = pd.DataFrame(candles)
-                    dfs_dict[tf]['time'] = pd.to_datetime(dfs_dict[tf]['time'], unit='s')
-            
-            # Primary TF for candle check
-            primary_tf = tfs[1]  # Middle timeframe
-            if primary_tf not in dfs_dict:
-                logger.warning(f"No {primary_tf} data received")
-                time.sleep(10)
-                continue
-            
-            df_primary = dfs_dict[primary_tf]
-            
-            # Check for new candle
-            last_time = df_primary['time'].iloc[-1]
-            if current_candle_time == last_time:
-                time.sleep(1)
-                continue
-            
-            current_candle_time = last_time
-            print(f"🔎 Analyzing candle: {last_time}")
-            
-            # Pattern prediction (TCN + ViT + YOLO + Fusion)
-            with torch.no_grad():
-                seq_v, vit_v, yolo_v = build_features(df_primary, models, device)
-                
-                # Get TCN features
-                tcn_feat = models['tcn'](seq_v, mode='features')
-                
-                # Get ViT features
-                vit_feat = models['vit'](vit_v)
-                
-                # Fusion
-                preds = models['fusion'](tcn_feat, vit_feat, yolo_v)
-                probs = preds.softmax(dim=1).cpu().numpy()[0]
-            
-            # Get recommendation from MTF decision engine
-            recommendation = models['decision_engine'].get_recommendation(
-                pattern_probs=probs.tolist(),
-                dfs_dict=dfs_dict,
+            # Create strategy config
+            strategy_config = StrategyConfig(
+                profile=self.config.profile,
+                symbol=self.config.symbol,
+                tcn_weights=self.config.tcn_weights,
+                vit_weights=self.config.vit_weights,
+                yolo_weights=self.config.yolo_weights,
+                meta_model_path=self.config.meta_model_path,
+                base_risk_percent=self.config.base_risk_percent,
+                max_daily_loss_percent=self.config.max_daily_loss_percent,
+                max_open_trades=self.config.max_open_trades
             )
             
-            signal = recommendation['signal']
-            confidence = recommendation['confidence']
-            reason = recommendation['reason']
-            trend = recommendation['trend']
+            # Initialize strategy
+            self.strategy = NeuralHybridStrategy(
+                config=strategy_config,
+                data_provider=self.data_provider,
+                executor=self.executor
+            )
             
-            logger.info(f"Signal: {signal} | Confidence: {confidence:.2f} | Trend: {trend}")
-            logger.info(f"Reason: {reason}")
+            if not self.strategy.initialize():
+                raise RuntimeError("Strategy initialization failed")
             
-            if signal in ("BUY", "SELL"):
-                # Risk calculation
-                account_info = mt5.account_info()
-                balance = account_info.balance
-                tick = mt5.symbol_info_tick(SYMBOL)
-                current_price = tick.ask if signal == "BUY" else tick.bid
-                atr = risk_manager.calculate_volatility(df_primary)
-                
-                # Get trade parameters
-                vol, sl, tp = risk_manager.get_trade_params(
-                    balance, current_price, atr, signal, confidence
-                )
-                
-                # Execute order
-                order_type = mt5.ORDER_TYPE_BUY if signal == "BUY" else mt5.ORDER_TYPE_SELL
-                result = send_order(SYMBOL, vol, order_type, sl, tp)
-                
-                if result.retcode == mt5.TRADE_RETCODE_DONE:
-                    print(f"✅ Trade Executed: {signal} @ {current_price}")
-                    print(f"   Trend: {trend}")
-                    print(f"   Confidence: {confidence:.2%}")
-                    print(f"   Volume: {vol}, SL: {sl:.5f}, TP: {tp:.5f}")
-                    logger.info(f"Trade Executed: {result}")
-                else:
-                    print(f"❌ Trade Failed: {result.comment}")
-                    logger.error(f"Trade Failed: {result}")
+            # Initialize gatekeeper for additional rules
+            if HAS_RISK_MANAGEMENT:
+                self.gatekeeper = TradeGatekeeper(HardRulesConfig(
+                    max_total_exposure=20.0,
+                    max_single_pair_exposure=5.0
+                ))
             
-        except KeyboardInterrupt:
-            print("\n🛑 Shutting down...")
-            break
+            # Verify connections
+            if not self._verify_connections():
+                raise RuntimeError("Connection verification failed")
+            
+            self._session_start = datetime.utcnow()
+            self.state = BotState.STOPPED
+            
+            logger.info("Bot initialized successfully")
+            return True
             
         except Exception as e:
-            print(f"⚠️ Error: {e}")
-            logger.error(f"Error: {e}", exc_info=True)
-            time.sleep(5)
+            self.state = BotState.ERROR
+            logger.error(f"Initialization failed: {e}", exc_info=True)
+            if self.on_error:
+                self.on_error(e)
+            return False
+    
+    def start(self) -> bool:
+        """
+        Start bot in background thread.
         
-        time.sleep(10)
+        Returns:
+            True if started successfully
+        """
+        if self.state == BotState.RUNNING:
+            logger.warning("Bot already running")
+            return False
+        
+        if self.strategy is None:
+            logger.error("Bot not initialized")
+            return False
+        
+        self._stop_event.clear()
+        self._thread = threading.Thread(target=self._run_loop, daemon=True)
+        self._thread.start()
+        
+        logger.info("Bot started in background")
+        return True
     
-    # Cleanup
-    try:
-        import MetaTrader5 as mt5
-        mt5.shutdown()
-    except:
-        pass
+    def run(self):
+        """Run bot in main thread (blocking)."""
+        if self.strategy is None:
+            logger.error("Bot not initialized")
+            return
+        
+        self._stop_event.clear()
+        self._run_loop()
+    
+    def stop(self):
+        """Stop the bot gracefully."""
+        logger.info("Stopping bot...")
+        self._stop_event.set()
+        
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=30)
+        
+        self.state = BotState.STOPPED
+        self._save_performance_log()
+        
+        logger.info("Bot stopped")
+    
+    def pause(self):
+        """Pause trading (keep running but don't execute)."""
+        self.state = BotState.PAUSED
+        logger.info("Bot paused")
+    
+    def resume(self):
+        """Resume trading."""
+        if self.state == BotState.PAUSED:
+            self.state = BotState.RUNNING
+            logger.info("Bot resumed")
+    
+    def _run_loop(self):
+        """Main trading loop."""
+        self.state = BotState.RUNNING
+        logger.info(f"Trading loop started for {self.config.symbol}")
+        
+        while not self._stop_event.is_set():
+            try:
+                current_time = datetime.utcnow()
+                
+                # Check if market is open
+                if not self._is_market_open(current_time):
+                    logger.debug("Market closed, waiting...")
+                    self._wait(60)
+                    continue
+                
+                # Check cooldown
+                if self._in_cooldown(current_time):
+                    logger.debug(f"In cooldown until {self._cooldown_until}")
+                    self._wait(60)
+                    continue
+                
+                # Check daily/weekly limits
+                if not self._check_limits():
+                    self._wait(60)
+                    continue
+                
+                # Evaluate market
+                if self.state == BotState.RUNNING:
+                    self._evaluate_and_trade(current_time)
+                
+                # Wait for next check
+                self._wait(self.config.check_interval_seconds)
+                
+            except Exception as e:
+                logger.error(f"Error in trading loop: {e}", exc_info=True)
+                if self.on_error:
+                    self.on_error(e)
+                self._wait(60)  # Wait before retrying
+        
+        self.state = BotState.STOPPED
+    
+    def _evaluate_and_trade(self, current_time: datetime):
+        """Evaluate market and execute trades if appropriate."""
+        # Get trading decision
+        decision = self.strategy.evaluate(current_time)
+        self._signals_generated += 1
+        
+        if decision is None:
+            return
+        
+        # Callback for signal
+        if self.on_signal:
+            self.on_signal(decision)
+        
+        if not decision.should_trade:
+            self._trades_rejected += 1
+            logger.debug(f"Signal rejected: {decision.rejection_reasons}")
+            return
+        
+        # Additional gatekeeper check
+        if self.gatekeeper:
+            validation = self.gatekeeper.validate_trade(
+                pair=self.config.symbol,
+                direction=decision.direction,
+                position_size=decision.position_size,
+                entry_price=self.data_provider.get_price(self.config.symbol),
+                stop_loss=decision.stop_loss,
+                take_profit=decision.take_profit,
+                account_balance=self.executor.get_account_balance(),
+                current_spread=self.data_provider.get_spread(self.config.symbol),
+                current_time=current_time
+            )
+            
+            if not validation['allowed']:
+                self._trades_rejected += 1
+                logger.info(f"Gatekeeper rejected: {[v['message'] for v in validation['violations']]}")
+                return
+        
+        # Create and execute order
+        order = self.strategy.create_order(decision)
+        
+        if order is None:
+            return
+        
+        # Dry run mode
+        if self.config.dry_run:
+            logger.info(f"[DRY RUN] Would execute: {order.direction} {order.volume} {order.symbol}")
+            self._trades_executed += 1
+            return
+        
+        # Manual confirmation
+        if self.config.require_confirmation:
+            logger.info(f"[CONFIRM] Signal: {order.direction} {order.volume} {order.symbol}")
+            # In a real implementation, wait for user confirmation
+            return
+        
+        # Execute trade
+        success = self.strategy.execute(order)
+        
+        if success:
+            self._trades_executed += 1
+            self._trade_count += 1
+            self._last_trade_time = current_time
+            
+            # Log trade
+            if self.config.log_trades:
+                self._log_trade(order, decision)
+            
+            # Notify
+            if self._notifier:
+                self._send_trade_notification(order, decision)
+            
+            # Callback
+            if self.on_trade:
+                self.on_trade(order, decision.to_dict())
+        else:
+            logger.warning("Trade execution failed")
+    
+    def on_position_closed(self, ticket: str, pnl: float):
+        """Handle position close event."""
+        # Update strategy
+        self.strategy.on_trade_closed(ticket, pnl)
+        
+        # Update tracking
+        self._daily_pnl += pnl
+        self._weekly_pnl += pnl
+        
+        # Track consecutive losses
+        if pnl < 0:
+            self._consecutive_losses += 1
+            
+            if self._consecutive_losses >= self.config.max_consecutive_losses:
+                self._cooldown_until = datetime.utcnow() + timedelta(
+                    minutes=self.config.cooldown_minutes
+                )
+                logger.warning(
+                    f"Consecutive losses ({self._consecutive_losses}), "
+                    f"entering cooldown until {self._cooldown_until}"
+                )
+                
+                if self._notifier:
+                    self._send_alert_notification(
+                        f"⚠️ Entering cooldown after {self._consecutive_losses} losses"
+                    )
+        else:
+            self._consecutive_losses = 0
+        
+        # Log
+        logger.info(f"Position closed: {ticket} | PnL: {pnl:.2f} | Daily: {self._daily_pnl:.2f}")
+    
+    def reset_daily_stats(self):
+        """Reset daily statistics."""
+        self._daily_pnl = 0.0
+        self.strategy.reset_daily_stats()
+        logger.info("Daily stats reset")
+    
+    def reset_weekly_stats(self):
+        """Reset weekly statistics."""
+        self._weekly_pnl = 0.0
+        logger.info("Weekly stats reset")
+    
+    def get_status(self) -> Dict:
+        """Get current bot status."""
+        return {
+            'state': self.state.value,
+            'symbol': self.config.symbol,
+            'profile': self.config.profile,
+            'session_start': self._session_start.isoformat() if self._session_start else None,
+            'signals_generated': self._signals_generated,
+            'trades_executed': self._trades_executed,
+            'trades_rejected': self._trades_rejected,
+            'daily_pnl': self._daily_pnl,
+            'weekly_pnl': self._weekly_pnl,
+            'consecutive_losses': self._consecutive_losses,
+            'in_cooldown': self._in_cooldown(datetime.utcnow()),
+            'cooldown_until': self._cooldown_until.isoformat() if self._cooldown_until else None,
+            'open_positions': len(self.strategy._open_positions) if self.strategy else 0,
+            'dry_run': self.config.dry_run
+        }
+    
+    def get_performance(self) -> Dict:
+        """Get performance statistics."""
+        if self.strategy:
+            return self.strategy.get_performance_stats()
+        return {}
+    
+    # =========================================================================
+    # Private Methods
+    # =========================================================================
+    
+    def _verify_connections(self) -> bool:
+        """Verify data provider and executor connections."""
+        try:
+            # Check data provider
+            data = self.data_provider.get_data(self.config.symbol, 'M1', 1)
+            if data is None or len(data) == 0:
+                logger.error("Data provider not returning data")
+                return False
+            
+            # Check executor
+            balance = self.executor.get_account_balance()
+            if balance <= 0:
+                logger.error("Invalid account balance")
+                return False
+            
+            logger.info(f"Connections verified. Balance: {balance:.2f}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Connection verification failed: {e}")
+            return False
+    
+    def _is_market_open(self, current_time: datetime) -> bool:
+        """Check if forex market is open."""
+        weekday = current_time.weekday()
+        hour = current_time.hour
+        
+        # Closed Saturday
+        if weekday == 5:
+            return False
+        
+        # Closed Sunday until open hour
+        if weekday == 6 and hour < self.config.market_open_hour:
+            return False
+        
+        # Closed Friday after close hour
+        if weekday == 4 and hour >= self.config.market_close_hour:
+            return False
+        
+        return True
+    
+    def _in_cooldown(self, current_time: datetime) -> bool:
+        """Check if in cooldown period."""
+        if self._cooldown_until is None:
+            return False
+        return current_time < self._cooldown_until
+    
+    def _check_limits(self) -> bool:
+        """Check if daily/weekly loss limits exceeded."""
+        balance = self.executor.get_account_balance()
+        
+        # Daily limit
+        max_daily = balance * (self.config.max_daily_loss_percent / 100)
+        if self._daily_pnl <= -max_daily:
+            logger.warning(f"Daily loss limit reached: {self._daily_pnl:.2f}")
+            return False
+        
+        # Weekly limit
+        max_weekly = balance * (self.config.max_weekly_loss_percent / 100)
+        if self._weekly_pnl <= -max_weekly:
+            logger.warning(f"Weekly loss limit reached: {self._weekly_pnl:.2f}")
+            return False
+        
+        return True
+    
+    def _wait(self, seconds: int):
+        """Wait with early exit capability."""
+        self._stop_event.wait(seconds)
+    
+    def _init_notifier(self):
+        """Initialize notification system."""
+        try:
+            from notifications import SocialMediaNotifier
+            self._notifier = SocialMediaNotifier(self.config.telegram_config)
+        except ImportError:
+            logger.debug("Notifications module not available")
+    
+    def _send_trade_notification(self, order: Order, decision: TradeDecision):
+        """Send trade notification."""
+        if self._notifier:
+            try:
+                self._notifier.send_trade(
+                    symbol=order.symbol,
+                    direction=order.direction,
+                    volume=order.volume,
+                    sl=order.stop_loss,
+                    tp=order.take_profit,
+                    confidence=order.confidence
+                )
+            except Exception as e:
+                logger.warning(f"Notification failed: {e}")
+    
+    def _send_alert_notification(self, message: str):
+        """Send alert notification."""
+        if self._notifier:
+            try:
+                self._notifier.send_alert(message)
+            except:
+                pass
+    
+    def _log_trade(self, order: Order, decision: TradeDecision):
+        """Log trade to file."""
+        try:
+            log_path = Path(self.config.trades_log_file)
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            trade_log = {
+                'timestamp': datetime.utcnow().isoformat(),
+                'symbol': order.symbol,
+                'direction': order.direction,
+                'volume': order.volume,
+                'stop_loss': order.stop_loss,
+                'take_profit': order.take_profit,
+                'confidence': order.confidence,
+                'meta_score': order.meta_score,
+                'risk_percent': order.risk_percent,
+                'risk_reward': order.risk_reward,
+                'decision': decision.to_dict()
+            }
+            
+            # Append to log file
+            with open(log_path, 'a') as f:
+                f.write(json.dumps(trade_log) + '\n')
+                
+        except Exception as e:
+            logger.warning(f"Trade logging failed: {e}")
+    
+    def _save_performance_log(self):
+        """Save performance log on shutdown."""
+        try:
+            log_path = Path(self.config.performance_log_file)
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            performance = {
+                'session_start': self._session_start.isoformat() if self._session_start else None,
+                'session_end': datetime.utcnow().isoformat(),
+                'signals_generated': self._signals_generated,
+                'trades_executed': self._trades_executed,
+                'trades_rejected': self._trades_rejected,
+                'daily_pnl': self._daily_pnl,
+                'performance': self.get_performance()
+            }
+            
+            with open(log_path, 'w') as f:
+                json.dump(performance, f, indent=2)
+                
+        except Exception as e:
+            logger.warning(f"Performance log save failed: {e}")
 
 
-if __name__ == "__main__":
-    import argparse
+# Factory function
+def create_bot(
+    symbol: str = 'EURUSD',
+    profile: str = 'INTRADAY',
+    data_provider=None,
+    executor=None,
+    dry_run: bool = True,
+    **kwargs
+) -> LiveTradingBot:
+    """
+    Create configured trading bot.
     
-    parser = argparse.ArgumentParser(description="Live Trading Bot with TCN + MTF")
-    parser.add_argument('--tcn-profile', type=str, default='INTRADAY',
-                        choices=['SCALP', 'INTRADAY', 'SWING'],
-                        help='TCN model profile')
-    parser.add_argument('--mtf-profile', type=str, default='SWING',
-                        choices=['SCALP', 'INTRADAY', 'SWING'],
-                        help='MTF analysis profile')
+    Args:
+        symbol: Trading symbol
+        profile: Trading profile
+        data_provider: Data provider instance
+        executor: Order executor instance
+        dry_run: Paper trading mode
+        **kwargs: Additional config options
     
-    args = parser.parse_args()
-    
-    live_bot(
-        tcn_profile=args.tcn_profile,
-        mtf_profile=args.mtf_profile,
+    Returns:
+        Configured LiveTradingBot
+    """
+    config = BotConfig(
+        symbol=symbol,
+        profile=profile,
+        dry_run=dry_run,
+        **kwargs
     )
+    
+    return LiveTradingBot(config, data_provider, executor)

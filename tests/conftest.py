@@ -3,6 +3,69 @@ import pytest
 import numpy as np
 import pandas as pd
 from datetime import datetime
+import sys
+import os
+from pathlib import Path
+
+
+#############################################
+"""
+conftest.py - Pytest configuration and fixtures
+"""
+
+import pytest
+import sys
+import os
+from pathlib import Path
+
+# Add project root to path
+PROJECT_ROOT = Path(__file__).parent
+sys.path.insert(0, str(PROJECT_ROOT))
+
+
+@pytest.fixture(autouse=True)
+def cleanup_imports():
+    """Clean up imports after each test."""
+    # Store original modules
+    original_modules = set(sys.modules.keys())
+    
+    yield
+    
+    # Remove any new modules imported during test
+    new_modules = set(sys.modules.keys()) - original_modules
+    for module in new_modules:
+        if module.startswith('main'):
+            del sys.modules[module]
+
+
+@pytest.fixture
+def temp_dir():
+    """Create temporary directory for tests."""
+    import tempfile
+    import shutil
+    
+    temp_dir = tempfile.mkdtemp()
+    yield Path(temp_dir)
+    shutil.rmtree(temp_dir)
+
+
+@pytest.fixture
+def mock_logger():
+    """Create a mock logger."""
+    import logging
+    from unittest.mock import MagicMock
+    
+    logger = MagicMock(spec=logging.Logger)
+    return logger
+
+
+
+
+
+
+
+
+###########################################
 
 @pytest.fixture(scope="module")
 def sample_ohlcv_data():
