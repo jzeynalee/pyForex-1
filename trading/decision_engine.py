@@ -1,11 +1,13 @@
 # trading/decision_engine.py
 """
-Enhanced Decision Engine with Full Risk Management Integration
+Enhanced Decision Engine with Full Risk Management Integration (v2)
 
-Integrates:
+Integrates ALL 5 Phases:
 - Phase 1: Multi-head TCN predictions (direction, volatility, quantiles)
 - Phase 2: SL/TP calculation, position sizing, hard rules
 - Phase 3: Meta-labeling filter for signal quality
+- Phase 4: RL exit recommendations (via ExitAdvisor)
+- Phase 5: Capital protection (final safety layer)
 
 This replaces the previous MTFDecisionEngine with comprehensive risk management.
 """
@@ -18,7 +20,7 @@ from datetime import datetime
 from enum import IntEnum
 import logging
 
-# Risk Management imports
+# Risk Management imports - Phases 1-3
 from risk_management import (
     # Phase 1
     MultiHeadTCN, create_tcn_for_profile, RiskPrediction,
@@ -26,11 +28,16 @@ from risk_management import (
     SLTPCalculator, SLTPConfig, SLTPResult,
     PositionSizingCalculator, PositionSizingConfig, PositionSizeResult,
     TradeGatekeeper, HardRulesConfig, MarketRegime, TradeDirection,
-    calculate_sl_tp_from_predictions, calculate_position_from_predictions,
     # Phase 3
     MetaLabelingModel, TradeFilter,
     # Utils
     RegimeDetector
+)
+
+# Phase 5: Capital Protection
+from risk_management import (
+    CapitalProtector, ProtectionConfig, ProtectionManager,
+    ProtectionLevel, ProtectionAction
 )
 
 # Existing pyForex imports
@@ -81,6 +88,12 @@ class TradeDecision:
     # Meta-labeling (Phase 3)
     meta_score: float = 0.0
     
+    # Capital protection (Phase 5)
+    protection_level: str = 'normal'
+    protection_warnings: List[str] = field(default_factory=list)
+    size_adjusted_by_protection: bool = False
+    original_position_size: float = 0.0
+    
     # Market context
     regime: str = ''
     volatility: float = 0.0
@@ -98,7 +111,6 @@ class TradeDecision:
             'signal': self.signal.value,
             'signal_name': self.signal_name,
             'should_trade': self.should_trade,
-            'rejection_reasons': self.rejection_reasons,
             'direction': self.direction,
             'direction_confidence': self.direction_confidence,
             'stop_loss': self.stop_loss,
@@ -107,16 +119,22 @@ class TradeDecision:
             'tp_pips': self.tp_pips,
             'risk_reward_ratio': self.risk_reward_ratio,
             'position_size': self.position_size,
+            'position_units': self.position_units,
+            'risk_amount': self.risk_amount,
             'risk_percent': self.risk_percent,
             'meta_score': self.meta_score,
+            'protection_level': self.protection_level,
+            'protection_warnings': self.protection_warnings,
             'regime': self.regime,
-            'mtf_alignment': self.mtf_alignment
+            'volatility': self.volatility,
+            'mtf_alignment': self.mtf_alignment,
+            'rejection_reasons': self.rejection_reasons
         }
 
 
 @dataclass
 class DecisionEngineConfig:
-    """Configuration for enhanced decision engine."""
+    """Configuration for decision engine."""
     # Trading profile
     profile: str = 'INTRADAY'
     
@@ -133,21 +151,32 @@ class DecisionEngineConfig:
     # Regime restrictions
     allow_volatile_regime: bool = False
     reduce_size_low_vol: bool = True
+    
+    # Capital protection settings (Phase 5)
+    enable_capital_protection: bool = True
+    max_daily_loss_pct: float = 3.0
+    max_weekly_loss_pct: float = 6.0
+    max_drawdown_pct: float = 10.0
+    max_consecutive_losses: int = 5
+    cooldown_minutes: int = 30
 
 
 class EnhancedDecisionEngine:
     """
-    Decision engine with full risk management integration.
+    Decision engine with full risk management integration (v2).
     
-    Combines:
+    Combines ALL 5 Phases:
     1. Direction prediction (TCN/existing model)
     2. MTF trend analysis (existing)
-    3. Risk calculations (new Phase 2)
-    4. Trade filtering (new Phase 3)
-    5. Hard rules enforcement (new Phase 2)
+    3. Risk calculations (Phase 2)
+    4. Trade filtering (Phase 3)
+    5. Hard rules enforcement (Phase 2)
+    6. Capital protection (Phase 5) - FINAL SAFETY CHECK
     
     Usage:
         engine = EnhancedDecisionEngine(config)
+        engine.initialize(starting_balance=10000)
+        
         decision = engine.evaluate(
             predictions=model_predictions,
             entry_price=1.1234,
@@ -158,6 +187,9 @@ class EnhancedDecisionEngine:
         
         if decision.should_trade:
             execute_trade(decision)
+        
+        # After trade closes:
+        engine.record_trade_result(pnl=150, is_win=True)
     """
     
     def __init__(
@@ -188,6 +220,18 @@ class EnhancedDecisionEngine:
             min_meta_score=self.config.min_meta_score
         ) if meta_model else None
         
+        # Phase 5: Capital Protection
+        self.capital_protector: Optional[CapitalProtector] = None
+        if self.config.enable_capital_protection:
+            protection_config = ProtectionConfig(
+                max_daily_loss_pct=self.config.max_daily_loss_pct,
+                max_weekly_loss_pct=self.config.max_weekly_loss_pct,
+                max_drawdown_pct=self.config.max_drawdown_pct,
+                max_consecutive_losses=self.config.max_consecutive_losses,
+                losing_streak_cooldown_minutes=self.config.cooldown_minutes
+            )
+            self.capital_protector = CapitalProtector(protection_config)
+        
         # Utilities
         self.regime_detector = RegimeDetector()
         
@@ -199,7 +243,25 @@ class EnhancedDecisionEngine:
             except Exception as e:
                 logger.warning(f"Could not initialize MTF detector: {e}")
         
-        logger.info(f"EnhancedDecisionEngine initialized for {self.config.profile}")
+        # Tracking
+        self._initialized = False
+        self._current_balance = 0.0
+        
+        logger.info(f"EnhancedDecisionEngine v2 initialized for {self.config.profile}")
+    
+    def initialize(self, starting_balance: float):
+        """Initialize engine with starting balance (required for capital protection)."""
+        self._current_balance = starting_balance
+        if self.capital_protector:
+            self.capital_protector.initialize(starting_balance)
+        self._initialized = True
+        logger.info(f"Engine initialized with balance: {starting_balance:.2f}")
+    
+    def record_trade_result(self, pnl: float, is_win: bool, size: float = 0.0):
+        """Record trade result for capital protection tracking."""
+        self._current_balance += pnl
+        if self.capital_protector:
+            self.capital_protector.record_trade(pnl, is_win, size)
     
     def evaluate(
         self,
@@ -218,7 +280,6 @@ class EnhancedDecisionEngine:
         
         Args:
             predictions: Dict with 'direction_probs', 'volatility', 'quantiles'
-                        (from TCN or converted from existing model)
             entry_price: Current price / intended entry
             pair: Currency pair (e.g., 'EURUSD')
             account_balance: Current account balance
@@ -241,6 +302,25 @@ class EnhancedDecisionEngine:
         )
         
         # =================================================================
+        # Phase 5 PRE-CHECK: Capital Protection
+        # =================================================================
+        if self.capital_protector:
+            # Early check - is trading even allowed?
+            pre_check = self.capital_protector.check_trade(
+                proposed_size=0.01,  # Minimal check
+                account_balance=account_balance
+            )
+            
+            if not pre_check['allowed']:
+                decision.rejection_reasons.append(
+                    f"Capital protection: {pre_check['reason']}"
+                )
+                decision.protection_level = pre_check.get('protection_level', 'critical')
+                return decision
+            
+            decision.protection_level = pre_check.get('protection_level', 'normal')
+        
+        # =================================================================
         # Step 1: Extract direction from predictions
         # =================================================================
         direction_probs = predictions.get('direction_probs')
@@ -248,143 +328,109 @@ class EnhancedDecisionEngine:
             decision.rejection_reasons.append("No direction predictions available")
             return decision
         
-        if isinstance(direction_probs, np.ndarray) and direction_probs.ndim > 1:
-            direction_probs = direction_probs[0]
-        
-        predicted_class = int(np.argmax(direction_probs))
-        confidence = float(np.max(direction_probs))
-        
-        decision.signal = Signal(predicted_class)
-        decision.signal_name = ['BEAR', 'SIDEWAYS', 'BULL'][predicted_class]
-        decision.direction_confidence = confidence
-        decision.direction_probs = {
-            'bear': float(direction_probs[0]),
-            'sideways': float(direction_probs[1]),
-            'bull': float(direction_probs[2])
-        }
-        
-        # Determine trade direction
-        if predicted_class == Signal.BULL:
-            decision.direction = 'BUY'
-        elif predicted_class == Signal.BEAR:
-            decision.direction = 'SELL'
+        # Handle different formats
+        if isinstance(direction_probs, np.ndarray):
+            if direction_probs.ndim > 1:
+                direction_probs = direction_probs.flatten()
+            probs = {
+                'BEAR': float(direction_probs[0]),
+                'SIDEWAYS': float(direction_probs[1]),
+                'BULL': float(direction_probs[2])
+            }
         else:
-            decision.rejection_reasons.append("Sideways prediction - no trade")
-            return decision
+            probs = direction_probs
+        
+        decision.direction_probs = probs
+        
+        # Get predicted direction and confidence
+        direction_idx = np.argmax(list(probs.values()))
+        direction_names = ['BEAR', 'SIDEWAYS', 'BULL']
+        predicted_direction = direction_names[direction_idx]
+        confidence = list(probs.values())[direction_idx]
+        
+        decision.signal = Signal(direction_idx)
+        decision.signal_name = predicted_direction
+        decision.direction_confidence = confidence
         
         # Check confidence threshold
         if confidence < self.config.min_direction_confidence:
             decision.rejection_reasons.append(
-                f"Low confidence: {confidence:.2f} < {self.config.min_direction_confidence}"
+                f"Low confidence: {confidence:.2%} < {self.config.min_direction_confidence:.2%}"
+            )
+            return decision
+        
+        # Skip if sideways
+        if predicted_direction == 'SIDEWAYS':
+            decision.rejection_reasons.append("Sideways prediction - no trade")
+            return decision
+        
+        decision.direction = 'BUY' if predicted_direction == 'BULL' else 'SELL'
+        
+        # =================================================================
+        # Step 2: Market Regime Detection
+        # =================================================================
+        regime = self._detect_regime(market_data)
+        decision.regime = regime.value if hasattr(regime, 'value') else str(regime)
+        
+        # Extract volatility
+        volatility = predictions.get('volatility')
+        if volatility is not None:
+            if isinstance(volatility, np.ndarray):
+                volatility = float(volatility.flatten()[0])
+            decision.volatility = volatility
+        
+        # Get ATR if available
+        if 'atr' in market_data.columns:
+            decision.atr = float(market_data['atr'].iloc[-1])
+        
+        # =================================================================
+        # Step 3: Calculate SL/TP (Phase 2)
+        # =================================================================
+        quantiles = predictions.get('quantiles')
+        trade_dir = TradeDirection.LONG if decision.direction == 'BUY' else TradeDirection.SHORT
+        
+        sltp_result = self.sltp_calculator.calculate(
+            entry_price=entry_price,
+            direction=trade_dir,
+            quantiles=quantiles,
+            volatility=volatility,
+            regime=regime,
+            atr=decision.atr if decision.atr > 0 else None
+        )
+        
+        decision.stop_loss = sltp_result.stop_loss
+        decision.take_profit = sltp_result.take_profit
+        decision.sl_pips = sltp_result.sl_pips
+        decision.tp_pips = sltp_result.tp_pips
+        decision.risk_reward_ratio = sltp_result.risk_reward_ratio
+        
+        # Check risk-reward
+        if sltp_result.risk_reward_ratio < self.config.min_risk_reward:
+            decision.rejection_reasons.append(
+                f"Low R:R ratio: {sltp_result.risk_reward_ratio:.2f} < {self.config.min_risk_reward}"
             )
             return decision
         
         # =================================================================
-        # Step 2: Detect market regime
+        # Step 4: Position Sizing (Phase 2)
         # =================================================================
-        if 'high' in market_data.columns and 'low' in market_data.columns:
-            regime_info = self.regime_detector.detect(
-                market_data['high'].values,
-                market_data['low'].values,
-                market_data['close'].values
-            )
-            decision.regime = regime_info.regime.value
-            
-            # Block volatile regime if configured
-            if decision.regime == 'volatile' and not self.config.allow_volatile_regime:
-                decision.rejection_reasons.append("Volatile regime - trading blocked")
-                return decision
-        
-        # =================================================================
-        # Step 3: Extract volatility and quantiles
-        # =================================================================
-        volatility = predictions.get('volatility')
-        if volatility is not None:
-            if hasattr(volatility, 'item'):
-                volatility = volatility.item()
-            decision.volatility = float(volatility)
-        
-        # Calculate ATR if not provided
-        if 'atr' in market_data.columns:
-            decision.atr = float(market_data['atr'].iloc[-1])
-        elif decision.volatility > 0:
-            decision.atr = decision.volatility
-        
-        # =================================================================
-        # Step 4: MTF Analysis (if available)
-        # =================================================================
-        if self.mtf_detector and mtf_data:
-            try:
-                mtf_result = self.mtf_detector.analyze(mtf_data)
-                decision.mtf_alignment = mtf_result.get('alignment_score', 0)
-                decision.mtf_trend = mtf_result.get('trend', 'unknown')
-                
-                # Check MTF alignment
-                if decision.mtf_alignment < self.config.min_mtf_alignment:
-                    decision.rejection_reasons.append(
-                        f"Low MTF alignment: {decision.mtf_alignment:.2f}"
-                    )
-            except Exception as e:
-                logger.warning(f"MTF analysis failed: {e}")
-        
-        # =================================================================
-        # Step 5: Calculate SL/TP (Phase 2)
-        # =================================================================
-        quantiles = predictions.get('quantiles')
-        if quantiles is not None:
-            sltp_result = calculate_sl_tp_from_predictions(
-                entry_price=entry_price,
-                direction=decision.direction,
-                predictions=predictions,
-                regime=decision.regime,
-                atr=decision.atr
-            )
-            
-            decision.stop_loss = sltp_result.stop_loss
-            decision.take_profit = sltp_result.take_profit
-            decision.sl_pips = self._price_to_pips(sltp_result.sl_distance, pair)
-            decision.tp_pips = self._price_to_pips(sltp_result.tp_distance, pair)
-            decision.risk_reward_ratio = sltp_result.risk_reward_ratio
-        else:
-            # Fallback: ATR-based SL/TP
-            atr = decision.atr or decision.volatility or entry_price * 0.001
-            sl_distance = atr * 1.5
-            tp_distance = atr * 2.5
-            
-            if decision.direction == 'BUY':
-                decision.stop_loss = entry_price - sl_distance
-                decision.take_profit = entry_price + tp_distance
-            else:
-                decision.stop_loss = entry_price + sl_distance
-                decision.take_profit = entry_price - tp_distance
-            
-            decision.sl_pips = self._price_to_pips(sl_distance, pair)
-            decision.tp_pips = self._price_to_pips(tp_distance, pair)
-            decision.risk_reward_ratio = tp_distance / sl_distance if sl_distance > 0 else 0
-        
-        # =================================================================
-        # Step 6: Position Sizing (Phase 2)
-        # =================================================================
-        position_result = self.position_calculator.calculate(
+        size_result = self.position_calculator.calculate(
             account_balance=account_balance,
             entry_price=entry_price,
             stop_loss=decision.stop_loss,
-            pair=pair,
-            direction_confidence=confidence,
-            volatility=decision.volatility
+            volatility=volatility,
+            regime=regime,
+            direction_confidence=confidence
         )
         
-        decision.position_size = position_result.position_size
-        decision.position_units = position_result.units
-        decision.risk_amount = position_result.risk_amount
-        decision.risk_percent = position_result.risk_percent
-        
-        if position_result.warnings:
-            for warning in position_result.warnings:
-                decision.rejection_reasons.append(warning)
+        decision.position_size = size_result.position_size
+        decision.position_units = size_result.position_units
+        decision.risk_amount = size_result.risk_amount
+        decision.risk_percent = size_result.risk_percent
+        decision.original_position_size = size_result.position_size
         
         # =================================================================
-        # Step 7: Hard Rules Check (Phase 2)
+        # Step 5: Hard Rules Check (Phase 2)
         # =================================================================
         validation = self.gatekeeper.validate_trade(
             pair=pair,
@@ -395,117 +441,261 @@ class EnhancedDecisionEngine:
             take_profit=decision.take_profit,
             account_balance=account_balance,
             current_spread=current_spread,
-            current_time=current_time,
-            regime=decision.regime
+            current_time=current_time
         )
         
-        decision.rule_violations = validation['violations']
-        
         if not validation['allowed']:
-            for violation in validation['violations']:
-                if violation['severity'] in ('block', 'critical'):
-                    decision.rejection_reasons.append(violation['message'])
-        
-        # Apply adjustments
-        if 'position_size' in validation['adjustments']:
-            decision.position_size = validation['adjustments']['position_size']
-            decision.position_units = int(decision.position_size * 100000)
-        
-        # =================================================================
-        # Step 8: Meta-Labeling Filter (Phase 3)
-        # =================================================================
-        if self.trade_filter and self.meta_model:
-            try:
-                meta_features = self.meta_model.feature_extractor.extract_features(
-                    primary_predictions={
-                        'direction_probs': direction_probs.reshape(1, -1),
-                        'volatility': np.array([decision.volatility]),
-                        'quantiles': predictions.get('quantiles', np.zeros((1, 5)))
-                    },
-                    market_data=market_data,
-                    timestamps=None
-                )
-                
-                meta_score = self.meta_model.predict_proba(meta_features)[0]
-                decision.meta_score = float(meta_score)
-                
-                if meta_score < self.config.min_meta_score:
-                    decision.rejection_reasons.append(
-                        f"Meta-filter rejected: {meta_score:.2f} < {self.config.min_meta_score}"
-                    )
-            except Exception as e:
-                logger.warning(f"Meta-labeling failed: {e}")
-        
-        # =================================================================
-        # Final Decision
-        # =================================================================
-        decision.should_trade = len(decision.rejection_reasons) == 0
-        
-        if decision.should_trade:
-            logger.info(
-                f"Trade approved: {pair} {decision.direction} | "
-                f"Size: {decision.position_size:.2f} lots | "
-                f"SL: {decision.sl_pips:.1f} pips | "
-                f"TP: {decision.tp_pips:.1f} pips | "
-                f"R:R: {decision.risk_reward_ratio:.2f}"
+            decision.rule_violations = validation['violations']
+            decision.rejection_reasons.extend(
+                [v['message'] for v in validation['violations']]
             )
-        else:
-            logger.info(f"Trade rejected: {decision.rejection_reasons}")
+            return decision
+        
+        # =================================================================
+        # Step 6: Meta-labeling Filter (Phase 3)
+        # =================================================================
+        if self.trade_filter:
+            meta_features = self._build_meta_features(
+                predictions, market_data, decision
+            )
+            
+            filter_result = self.trade_filter.filter(
+                signal=decision.direction,
+                features=meta_features,
+                direction_confidence=confidence
+            )
+            
+            decision.meta_score = filter_result.meta_score
+            
+            if not filter_result.should_trade:
+                decision.rejection_reasons.append(
+                    f"Meta-filter rejected: score={filter_result.meta_score:.2f}"
+                )
+                return decision
+        
+        # =================================================================
+        # Step 7: MTF Alignment Check (Optional)
+        # =================================================================
+        if self.mtf_detector and mtf_data:
+            mtf_result = self._check_mtf_alignment(decision.direction, mtf_data)
+            decision.mtf_alignment = mtf_result['alignment']
+            decision.mtf_trend = mtf_result['trend']
+            
+            if mtf_result['alignment'] < self.config.min_mtf_alignment:
+                decision.rejection_reasons.append(
+                    f"Low MTF alignment: {mtf_result['alignment']:.2%}"
+                )
+                return decision
+        
+        # =================================================================
+        # Phase 5 FINAL CHECK: Capital Protection Size Adjustment
+        # =================================================================
+        if self.capital_protector:
+            final_check = self.capital_protector.check_trade(
+                proposed_size=decision.position_size,
+                account_balance=account_balance
+            )
+            
+            if not final_check['allowed']:
+                decision.rejection_reasons.append(
+                    f"Capital protection final check: {final_check['reason']}"
+                )
+                return decision
+            
+            # Apply size adjustment if needed
+            adjusted_size = final_check.get('adjusted_size', decision.position_size)
+            if adjusted_size != decision.position_size:
+                decision.size_adjusted_by_protection = True
+                decision.position_size = adjusted_size
+                decision.position_units = int(adjusted_size * 100000)  # Standard lot
+            
+            # Record warnings
+            decision.protection_warnings = final_check.get('warnings', [])
+            decision.protection_level = final_check.get('protection_level', 'normal')
+        
+        # =================================================================
+        # All checks passed - approve trade
+        # =================================================================
+        decision.should_trade = True
+        
+        logger.info(
+            f"Trade approved: {decision.direction} {pair} | "
+            f"Size: {decision.position_size:.4f} | "
+            f"SL: {decision.sl_pips:.1f} pips | "
+            f"TP: {decision.tp_pips:.1f} pips | "
+            f"R:R: {decision.risk_reward_ratio:.2f} | "
+            f"Protection: {decision.protection_level}"
+        )
         
         return decision
     
-    def _price_to_pips(self, price_diff: float, pair: str) -> float:
-        """Convert price difference to pips."""
-        if 'JPY' in pair.upper():
-            return price_diff * 100
-        return price_diff * 10000
+    def get_protection_status(self) -> Dict:
+        """Get current capital protection status."""
+        if not self.capital_protector:
+            return {'enabled': False}
+        
+        state = self.capital_protector.get_state()
+        metrics = self.capital_protector.get_metrics()
+        
+        return {
+            'enabled': True,
+            'level': state.level.value,
+            'action': state.action.value,
+            'size_multiplier': state.size_multiplier,
+            'trigger_reason': state.trigger_reason,
+            'metrics': {
+                'balance': metrics.current_balance,
+                'peak_balance': metrics.peak_balance,
+                'drawdown_pct': metrics.current_drawdown_pct,
+                'daily_pnl': metrics.daily_pnl,
+                'weekly_pnl': metrics.weekly_pnl,
+                'consecutive_losses': metrics.consecutive_losses,
+                'win_rate': metrics.recent_win_rate
+            }
+        }
+    
+    def reset_daily_protection(self):
+        """Reset daily protection counters."""
+        if self.capital_protector:
+            self.capital_protector.reset_daily()
+    
+    def reset_weekly_protection(self):
+        """Reset weekly protection counters."""
+        if self.capital_protector:
+            self.capital_protector.reset_weekly()
+    
+    def _detect_regime(self, market_data: pd.DataFrame) -> MarketRegime:
+        """Detect current market regime."""
+        try:
+            return self.regime_detector.detect(market_data)
+        except Exception:
+            return MarketRegime.NORMAL
     
     def _estimate_spread(self, pair: str) -> float:
-        """Estimate typical spread for a pair."""
+        """Estimate spread for a pair."""
         spreads = {
-            'EURUSD': 1.0, 'GBPUSD': 1.5, 'USDJPY': 1.0,
-            'USDCHF': 1.5, 'AUDUSD': 1.5, 'USDCAD': 1.5,
-            'NZDUSD': 2.0, 'EURJPY': 2.0, 'GBPJPY': 3.0
+            'EURUSD': 1.0,
+            'GBPUSD': 1.5,
+            'USDJPY': 1.0,
+            'USDCHF': 1.5,
+            'AUDUSD': 1.2,
+            'NZDUSD': 1.5,
+            'USDCAD': 1.5,
         }
         return spreads.get(pair.upper(), 2.0)
     
-    def update_positions(self, positions: Dict[str, Dict]):
-        """Update tracked positions for exposure calculations."""
-        self.gatekeeper.rules_engine.update_positions(positions)
+    def _build_meta_features(
+        self,
+        predictions: Dict,
+        market_data: pd.DataFrame,
+        decision: TradeDecision
+    ) -> np.ndarray:
+        """Build feature vector for meta-labeling."""
+        features = []
+        
+        # Direction confidence
+        features.append(decision.direction_confidence)
+        
+        # Volatility
+        features.append(decision.volatility if decision.volatility else 0.0)
+        
+        # ATR
+        features.append(decision.atr if decision.atr else 0.0)
+        
+        # Risk-reward
+        features.append(decision.risk_reward_ratio)
+        
+        # Quantiles spread
+        quantiles = predictions.get('quantiles')
+        if quantiles is not None:
+            if isinstance(quantiles, np.ndarray):
+                features.append(float(quantiles.flatten()[-1] - quantiles.flatten()[0]))
+            else:
+                features.append(0.0)
+        else:
+            features.append(0.0)
+        
+        # Recent returns
+        if 'close' in market_data.columns:
+            returns = market_data['close'].pct_change().iloc[-5:]
+            features.extend([
+                returns.mean() if len(returns) > 0 else 0.0,
+                returns.std() if len(returns) > 0 else 0.0
+            ])
+        else:
+            features.extend([0.0, 0.0])
+        
+        return np.array(features, dtype=np.float32)
     
-    def set_meta_model(self, meta_model: MetaLabelingModel):
-        """Set or update the meta-labeling model."""
-        self.meta_model = meta_model
-        self.trade_filter = TradeFilter(
-            meta_model=meta_model,
-            min_confidence=self.config.min_direction_confidence,
-            min_meta_score=self.config.min_meta_score
-        )
+    def _check_mtf_alignment(
+        self,
+        direction: str,
+        mtf_data: Dict[str, pd.DataFrame]
+    ) -> Dict:
+        """Check multi-timeframe trend alignment."""
+        if not self.mtf_detector:
+            return {'alignment': 1.0, 'trend': 'unknown'}
+        
+        try:
+            analysis = self.mtf_detector.analyze(mtf_data)
+            
+            # Calculate alignment with intended direction
+            aligned = 0
+            total = len(analysis.get('timeframes', {}))
+            
+            for tf, tf_data in analysis.get('timeframes', {}).items():
+                tf_direction = tf_data.get('direction', 'SIDEWAYS')
+                if (direction == 'BUY' and tf_direction == 'BULL') or \
+                   (direction == 'SELL' and tf_direction == 'BEAR'):
+                    aligned += 1
+            
+            alignment = aligned / total if total > 0 else 0.0
+            
+            return {
+                'alignment': alignment,
+                'trend': analysis.get('overall_trend', 'unknown')
+            }
+        except Exception as e:
+            logger.warning(f"MTF analysis error: {e}")
+            return {'alignment': 1.0, 'trend': 'unknown'}
+
+
+def convert_legacy_predictions(
+    direction_probs: np.ndarray,
+    volatility: Optional[float] = None,
+    entry_price: float = 1.0
+) -> Dict[str, np.ndarray]:
+    """
+    Convert legacy prediction format to new format.
+    
+    Args:
+        direction_probs: [P(bear), P(sideways), P(bull)]
+        volatility: Optional volatility estimate
+        entry_price: Current price for quantile estimation
+    
+    Returns:
+        Dict with 'direction_probs', 'volatility', 'quantiles'
+    """
+    result = {
+        'direction_probs': direction_probs
+    }
+    
+    # Estimate volatility if not provided
+    if volatility is None:
+        volatility = 0.001  # Default 10 pips
+    result['volatility'] = np.array([volatility])
+    
+    # Generate approximate quantiles
+    q5 = -2.0 * volatility
+    q25 = -0.67 * volatility
+    q50 = 0.0
+    q75 = 0.67 * volatility
+    q95 = 2.0 * volatility
+    
+    result['quantiles'] = np.array([q5, q25, q50, q75, q95])
+    
+    return result
 
 
 # Backward compatibility alias
 MTFDecisionEngine = EnhancedDecisionEngine
-
-
-def convert_legacy_predictions(probs: np.ndarray) -> Dict[str, np.ndarray]:
-    """
-    Convert legacy prediction format to new format.
-    
-    Legacy format: [P(BUY), P(SELL), P(HOLD)]
-    New format: [P(BEAR), P(SIDEWAYS), P(BULL)]
-    """
-    if probs.shape[-1] != 3:
-        raise ValueError(f"Expected 3 classes, got {probs.shape[-1]}")
-    
-    # Reorder: BUY->BULL, SELL->BEAR, HOLD->SIDEWAYS
-    # Legacy: [BUY, SELL, HOLD] -> New: [BEAR, SIDEWAYS, BULL]
-    if probs.ndim == 1:
-        new_probs = np.array([probs[1], probs[2], probs[0]])  # SELL, HOLD, BUY
-    else:
-        new_probs = np.stack([probs[:, 1], probs[:, 2], probs[:, 0]], axis=1)
-    
-    return {
-        'direction_probs': new_probs,
-        'volatility': None,
-        'quantiles': None
-    }

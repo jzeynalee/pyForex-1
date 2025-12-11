@@ -1,29 +1,52 @@
 # trading/__init__.py
 """
-Trading package for pyForex.
+Trading module with risk management integration.
+
+Includes:
+- EnhancedDecisionEngine: ML-powered trade decisions
+- LiveTradingBot: Production trading bot
+- PropFirmTradingBot: Prop firm challenge specialized bot
 """
 
-from .mtf_data_provider import (
-    MTFDataProvider,
-    BacktestMTFDataProvider,
-    MTFDataCache,
-    create_mock_mtf_data,
+from .decision_engine import (
+    EnhancedDecisionEngine,
+    DecisionEngineConfig,
+    TradeDecision,
+    Signal,
+    MTFDecisionEngine,  # Backward compatibility alias
+    convert_legacy_predictions
 )
 
-from .mtf_trading_bot import (
-    MTFTradingBot,
-    MTFBacktestBot,
-    MTFBotConfig,
-    run_mtf_bot,
+from .live_trading_bot import (
+    LiveTradingBot,
+    BotConfig,
+    BotState,
+    create_bot
+)
+
+from .prop_firm_bot import (
+    PropFirmTradingBot,
+    PropFirmBotConfig,
+    PropFirmBotState,
+    create_prop_firm_bot
 )
 
 __all__ = [
-    'MTFDataProvider',
-    'BacktestMTFDataProvider',
-    'MTFDataCache',
-    'create_mock_mtf_data',
-    'MTFTradingBot',
-    'MTFBacktestBot',
-    'MTFBotConfig',
-    'run_mtf_bot',
+    # Decision Engine
+    'EnhancedDecisionEngine',
+    'DecisionEngineConfig',
+    'TradeDecision',
+    'Signal',
+    'MTFDecisionEngine',
+    'convert_legacy_predictions',
+    # Standard Bot
+    'LiveTradingBot',
+    'BotConfig',
+    'BotState',
+    'create_bot',
+    # Prop Firm Bot
+    'PropFirmTradingBot',
+    'PropFirmBotConfig',
+    'PropFirmBotState',
+    'create_prop_firm_bot'
 ]

@@ -368,8 +368,8 @@ class HybridPredictor:
     def _init_yolo(self, weights_path: Optional[str]):
         """Initialize YOLO pattern detector."""
         try:
-            from models.yolo_detector import YOLOPatternDetector
-            self.yolo_model = YOLOPatternDetector(weights_path)
+            from models.yolo_pattern import YOLOPatternExtractor
+            self.yolo_model = YOLOPatternExtractor(weights_path)
             logger.info("YOLO model loaded")
         except (ImportError, Exception) as e:
             logger.warning(f"Could not load YOLO: {e}")

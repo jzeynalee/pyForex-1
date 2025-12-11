@@ -1,12 +1,13 @@
 # strategies/neural_hybrid.py
 """
-Neural Hybrid Strategy with Full Risk Management
+Neural Hybrid Strategy with Full Risk Management (v2)
 
-Integrates:
-- TCN/ViT/YOLO prediction pipeline
-- MTF trend analysis
-- Phase 1-3 risk management
-- Automated position sizing and SL/TP
+Integrates ALL 5 PHASES:
+- Phase 1: TCN/ViT/YOLO prediction pipeline
+- Phase 2: Risk calculations (via decision engine)
+- Phase 3: Meta-labeling (via decision engine)
+- Phase 4: Exit advisor integration hooks
+- Phase 5: Capital protection integration
 
 This is the main trading strategy for pyForex.
 """
@@ -28,16 +29,34 @@ from trading.decision_engine import (
     EnhancedDecisionEngine, DecisionEngineConfig, TradeDecision
 )
 
-# Risk management imports
+# Risk management imports - Phases 1-3
 try:
     from risk_management import (
         MetaLabelingModel, TradeFilter,
-        TripleBarrierLabeler, TripleBarrierConfig,
-        generate_performance_report
+        TripleBarrierLabeler, TripleBarrierConfig
     )
     HAS_RISK_MANAGEMENT = True
 except ImportError:
     HAS_RISK_MANAGEMENT = False
+
+# Phase 4: Exit Advisor
+try:
+    from risk_management import ExitAdvisor, ExitAction, Position
+    HAS_EXIT_ADVISOR = True
+except ImportError:
+    HAS_EXIT_ADVISOR = False
+    ExitAdvisor = None
+
+# Phase 5: Capital Protection
+try:
+    from risk_management import (
+        CapitalProtector, ProtectionConfig, ProtectionManager,
+        ProtectionLevel, ProtectionAction
+    )
+    HAS_CAPITAL_PROTECTION = True
+except ImportError:
+    HAS_CAPITAL_PROTECTION = False
+    CapitalProtector = None
 
 # MTF imports
 try:
@@ -64,17 +83,32 @@ class Order:
     order_type: OrderType
     direction: str           # 'BUY' or 'SELL'
     volume: float           # Lots
-    entry_price: float
+    price: float            # Entry price (0 for market)
     stop_loss: float
     take_profit: float
     comment: str = ""
     magic_number: int = 123456
+    ticket: Optional[str] = None
     
     # Risk info
     risk_percent: float = 0.0
     risk_reward: float = 0.0
     confidence: float = 0.0
     meta_score: float = 0.0
+    protection_level: str = 'normal'
+
+
+@dataclass
+class OpenPosition:
+    """Tracked open position."""
+    ticket: str
+    direction: int          # 1 = long, -1 = short
+    entry_price: float
+    entry_time: datetime
+    volume: float
+    stop_loss: float
+    take_profit: float
+    unrealized_pnl: float = 0.0
 
 
 @dataclass
@@ -90,6 +124,7 @@ class StrategyConfig:
     yolo_weights: Optional[str] = 'models/weights/yolo_patterns.pt'
     fusion_weights: Optional[str] = 'models/weights/fusion_best.pt'
     meta_model_path: Optional[str] = 'models/weights/meta_model.joblib'
+    exit_model_path: Optional[str] = None  # NEW: Phase 4
     
     # Feature settings
     sequence_length: int = 60
@@ -98,124 +133,146 @@ class StrategyConfig:
     
     # Risk settings
     base_risk_percent: float = 1.0
-    max_risk_percent: float = 2.0
     min_risk_reward: float = 1.5
-    max_daily_loss_percent: float = 3.0
     max_open_trades: int = 3
     
-    # Signal thresholds
-    min_confidence: float = 0.55
+    # Confidence thresholds
+    min_direction_confidence: float = 0.55
     min_meta_score: float = 0.5
     min_mtf_alignment: float = 0.6
     
-    # Session settings
-    allowed_sessions: List[str] = field(default_factory=lambda: ['london', 'new_york'])
-    avoid_news_minutes: int = 30
+    # Exit advisor settings (Phase 4)
+    enable_exit_advisor: bool = True
+    exit_confidence_threshold: float = 0.6
+    
+    # Capital protection settings (Phase 5)
+    enable_capital_protection: bool = True
+    max_daily_loss_percent: float = 3.0
+    max_weekly_loss_percent: float = 6.0
+    max_drawdown_percent: float = 10.0
+    
+    # Limits
+    max_daily_trades: int = 10
+    max_daily_loss: float = 500.0
 
 
 class NeuralHybridStrategy:
     """
-    Production trading strategy combining neural networks with risk management.
+    Neural hybrid strategy with full risk management (v2).
+    
+    New in v2:
+    - Phase 4: Exit advisor for active position management
+    - Phase 5: Capital protection integration
     
     Pipeline:
-    1. Fetch multi-timeframe data
-    2. Generate features
-    3. Get predictions from TCN (+ ViT + YOLO)
-    4. Analyze MTF trend alignment
-    5. Calculate SL/TP from quantile predictions
-    6. Calculate position size from volatility
-    7. Apply meta-labeling filter
-    8. Validate against hard rules
-    9. Execute or reject trade
-    
-    Usage:
-        strategy = NeuralHybridStrategy(config, data_provider, executor)
-        strategy.initialize()
-        
-        # In trading loop
-        signal = strategy.evaluate()
-        if signal and signal.should_trade:
-            order = strategy.create_order(signal)
-            strategy.execute(order)
+        1. Fetch market data
+        2. Generate features
+        3. Get predictions (TCN + Vision)
+        4. Evaluate with decision engine (Phases 1-3)
+        5. Apply capital protection (Phase 5)
+        6. Create and execute order
+        7. Monitor positions with exit advisor (Phase 4)
     """
     
     def __init__(
         self,
-        config: StrategyConfig,
-        data_provider,  # Your data provider class
-        executor,       # Your order executor class
-        risk_manager=None  # Optional legacy risk manager
+        config: Optional[StrategyConfig] = None,
+        data_provider = None,
+        executor = None
     ):
-        self.config = config
+        self.config = config or StrategyConfig()
         self.data_provider = data_provider
         self.executor = executor
-        self.legacy_risk_manager = risk_manager
         
-        # Components (initialized in initialize())
-        self.predictor = None
-        self.decision_engine = None
+        # Models
+        self.predictor: Optional[HybridPredictor] = None
+        self.decision_engine: Optional[EnhancedDecisionEngine] = None
+        self.meta_model: Optional[MetaLabelingModel] = None
+        self.exit_advisor: Optional[ExitAdvisor] = None  # Phase 4
+        self.capital_protector: Optional[CapitalProtector] = None  # Phase 5
         self.mtf_detector = None
-        self.meta_model = None
         
         # State
         self._initialized = False
-        self._daily_pnl = 0.0
+        self._starting_balance = 0.0
+        self._current_balance = 0.0
+        self._open_positions: Dict[str, OpenPosition] = {}
+        
+        # Daily tracking
         self._daily_trades = 0
-        self._open_positions: Dict[str, Dict] = {}
+        self._daily_pnl = 0.0
+        self._daily_wins = 0
+        self._daily_losses = 0
         
-        # Performance tracking
+        # Trade history
         self._trade_history: List[Dict] = []
-    
-    def initialize(self) -> bool:
-        """
-        Initialize all strategy components.
         
-        Returns:
-            True if initialization successful
-        """
+        logger.info(f"NeuralHybridStrategy v2 created for {self.config.symbol}")
+    
+    def initialize(self, starting_balance: Optional[float] = None) -> bool:
+        """Initialize strategy components."""
         try:
+            # Get starting balance
+            if starting_balance is not None:
+                self._starting_balance = starting_balance
+            elif self.executor:
+                self._starting_balance = self.executor.get_account_balance()
+            else:
+                self._starting_balance = 10000.0
+            
+            self._current_balance = self._starting_balance
+            
             # Initialize predictor
-            logger.info("Initializing predictor...")
             self.predictor = create_predictor(
                 profile=self.config.profile,
-                weights_path=self.config.tcn_weights,
-                use_vision=self.config.use_vision,
-                use_yolo=self.config.use_yolo
-            )
-            
-            # Load additional vision weights if hybrid
-            if isinstance(self.predictor, HybridPredictor):
-                if self.config.vit_weights:
-                    self.predictor._init_vision(self.config.vit_weights)
-                if self.config.yolo_weights:
-                    self.predictor._init_yolo(self.config.yolo_weights)
-                if self.config.fusion_weights:
-                    self.predictor._init_fusion(self.config.fusion_weights)
-            
-            # Initialize decision engine with risk management
-            logger.info("Initializing decision engine...")
-            engine_config = DecisionEngineConfig(
-                profile=self.config.profile,
-                min_direction_confidence=self.config.min_confidence,
-                min_meta_score=self.config.min_meta_score,
-                min_mtf_alignment=self.config.min_mtf_alignment,
-                base_risk_percent=self.config.base_risk_percent,
-                min_risk_reward=self.config.min_risk_reward
+                tcn_weights=self.config.tcn_weights,
+                vit_weights=self.config.vit_weights if self.config.use_vision else None,
+                yolo_weights=self.config.yolo_weights if self.config.use_yolo else None,
+                fusion_weights=self.config.fusion_weights
             )
             
             # Load meta-model if available
+            self.meta_model = None
             if HAS_RISK_MANAGEMENT and self.config.meta_model_path:
                 try:
                     self.meta_model = MetaLabelingModel.load(self.config.meta_model_path)
                     logger.info("Meta-labeling model loaded")
                 except Exception as e:
                     logger.warning(f"Could not load meta-model: {e}")
-                    self.meta_model = None
+            
+            # Initialize decision engine with Phase 5 config
+            engine_config = DecisionEngineConfig(
+                profile=self.config.profile,
+                min_direction_confidence=self.config.min_direction_confidence,
+                min_meta_score=self.config.min_meta_score,
+                min_mtf_alignment=self.config.min_mtf_alignment,
+                base_risk_percent=self.config.base_risk_percent,
+                min_risk_reward=self.config.min_risk_reward,
+                enable_capital_protection=self.config.enable_capital_protection,
+                max_daily_loss_pct=self.config.max_daily_loss_percent,
+                max_weekly_loss_pct=self.config.max_weekly_loss_percent,
+                max_drawdown_pct=self.config.max_drawdown_percent
+            )
             
             self.decision_engine = EnhancedDecisionEngine(
                 config=engine_config,
                 meta_model=self.meta_model
             )
+            
+            # Initialize decision engine with balance
+            self.decision_engine.initialize(self._starting_balance)
+            
+            # Initialize Phase 4: Exit Advisor
+            if self.config.enable_exit_advisor and HAS_EXIT_ADVISOR:
+                if self.config.exit_model_path:
+                    try:
+                        self.exit_advisor = ExitAdvisor.load(self.config.exit_model_path)
+                        logger.info("Phase 4: Exit Advisor loaded")
+                    except Exception as e:
+                        logger.warning(f"Could not load Exit Advisor: {e}")
+            
+            # Reference to decision engine's capital protector (Phase 5)
+            self.capital_protector = self.decision_engine.capital_protector
             
             # Initialize MTF detector
             if HAS_MTF:
@@ -226,7 +283,10 @@ class NeuralHybridStrategy:
                     logger.warning(f"Could not initialize MTF detector: {e}")
             
             self._initialized = True
-            logger.info(f"Strategy initialized for {self.config.symbol} ({self.config.profile})")
+            logger.info(
+                f"Strategy v2 initialized for {self.config.symbol} ({self.config.profile}) "
+                f"with balance: {self._starting_balance:.2f}"
+            )
             return True
             
         except Exception as e:
@@ -299,7 +359,7 @@ class NeuralHybridStrategy:
             # Get account balance
             account_balance = self._get_account_balance()
             
-            # Evaluate with decision engine
+            # Evaluate with decision engine (includes Phase 5 protection)
             decision = self.decision_engine.evaluate(
                 predictions=predictions,
                 entry_price=entry_price,
@@ -317,16 +377,94 @@ class NeuralHybridStrategy:
             logger.error(f"Evaluation error: {e}", exc_info=True)
             return None
     
-    def create_order(self, decision: TradeDecision) -> Optional[Order]:
+    def check_position_for_exit(
+        self,
+        ticket: str,
+        market_data: pd.DataFrame
+    ) -> Optional[Dict]:
         """
-        Create order from trade decision.
+        Check if a position should be exited (Phase 4).
         
         Args:
-            decision: TradeDecision from decision engine
+            ticket: Position ticket
+            market_data: Recent market data
         
         Returns:
-            Order object ready for execution
+            Exit recommendation dict or None
         """
+        if not self.exit_advisor:
+            return None
+        
+        if ticket not in self._open_positions:
+            return None
+        
+        pos = self._open_positions[ticket]
+        current_price = float(market_data['close'].iloc[-1])
+        
+        # Create Position object for advisor
+        rl_position = Position(
+            direction=pos.direction,
+            entry_price=pos.entry_price,
+            entry_time=0,
+            initial_size=pos.volume,
+            current_size=pos.volume,
+            stop_loss=pos.stop_loss,
+            take_profit=pos.take_profit,
+            initial_sl=pos.stop_loss,
+            initial_tp=pos.take_profit
+        )
+        
+        # Get recommendation
+        recommendation = self.exit_advisor.get_recommendation(
+            rl_position,
+            market_data,
+            deterministic=True
+        )
+        
+        # Check if exit is recommended
+        if recommendation['action'] == ExitAction.EXIT:
+            if recommendation['confidence'] >= self.config.exit_confidence_threshold:
+                return {
+                    'ticket': ticket,
+                    'action': 'EXIT',
+                    'confidence': recommendation['confidence'],
+                    'reason': 'rl_advisor'
+                }
+        
+        elif recommendation['action'] == ExitAction.TRAIL_STOP:
+            return {
+                'ticket': ticket,
+                'action': 'TRAIL_STOP',
+                'confidence': recommendation['confidence']
+            }
+        
+        elif recommendation['action'] in [ExitAction.PARTIAL_25, ExitAction.PARTIAL_50, ExitAction.PARTIAL_75]:
+            if recommendation['confidence'] >= self.config.exit_confidence_threshold:
+                fraction = {
+                    ExitAction.PARTIAL_25: 0.25,
+                    ExitAction.PARTIAL_50: 0.50,
+                    ExitAction.PARTIAL_75: 0.75
+                }.get(recommendation['action'], 0.5)
+                return {
+                    'ticket': ticket,
+                    'action': 'PARTIAL',
+                    'fraction': fraction,
+                    'confidence': recommendation['confidence']
+                }
+        
+        return None
+    
+    def check_all_positions(self, market_data: pd.DataFrame) -> List[Dict]:
+        """Check all open positions for exit recommendations."""
+        recommendations = []
+        for ticket in self._open_positions:
+            rec = self.check_position_for_exit(ticket, market_data)
+            if rec:
+                recommendations.append(rec)
+        return recommendations
+    
+    def create_order(self, decision: TradeDecision) -> Optional[Order]:
+        """Create order from trade decision."""
         if not decision.should_trade:
             return None
         
@@ -335,61 +473,59 @@ class NeuralHybridStrategy:
             order_type=OrderType.MARKET,
             direction=decision.direction,
             volume=decision.position_size,
-            entry_price=0.0,  # Market order
+            price=0.0,  # Market order
             stop_loss=decision.stop_loss,
             take_profit=decision.take_profit,
             comment=f"NeuralHybrid_{self.config.profile}",
             risk_percent=decision.risk_percent,
             risk_reward=decision.risk_reward_ratio,
             confidence=decision.direction_confidence,
-            meta_score=decision.meta_score
+            meta_score=decision.meta_score,
+            protection_level=decision.protection_level
         )
     
     def execute(self, order: Order) -> bool:
-        """
-        Execute order through executor.
+        """Execute order through executor."""
+        if not self.executor:
+            logger.warning("No executor configured")
+            return False
         
-        Args:
-            order: Order to execute
-        
-        Returns:
-            True if execution successful
-        """
         try:
-            # Execute through your executor
             result = self.executor.execute_order(
                 symbol=order.symbol,
                 order_type=order.order_type.value,
                 direction=order.direction,
                 volume=order.volume,
-                sl=order.stop_loss,
-                tp=order.take_profit,
+                stop_loss=order.stop_loss,
+                take_profit=order.take_profit,
                 comment=order.comment,
-                magic=order.magic_number
+                magic_number=order.magic_number
             )
             
-            if result.get('success', False):
+            if result.get('success'):
+                ticket = result.get('ticket', str(datetime.utcnow().timestamp()))
+                order.ticket = ticket
+                
                 # Track position
-                ticket = result.get('ticket', 0)
-                self._open_positions[str(ticket)] = {
-                    'symbol': order.symbol,
-                    'direction': order.direction,
-                    'volume': order.volume,
-                    'entry_price': result.get('price', 0),
-                    'stop_loss': order.stop_loss,
-                    'take_profit': order.take_profit,
-                    'open_time': datetime.utcnow()
-                }
+                self._open_positions[ticket] = OpenPosition(
+                    ticket=ticket,
+                    direction=1 if order.direction == 'BUY' else -1,
+                    entry_price=result.get('price', order.price),
+                    entry_time=datetime.utcnow(),
+                    volume=order.volume,
+                    stop_loss=order.stop_loss,
+                    take_profit=order.take_profit
+                )
                 
                 self._daily_trades += 1
                 
                 logger.info(
                     f"Order executed: {order.direction} {order.volume} {order.symbol} | "
-                    f"SL: {order.stop_loss:.5f} | TP: {order.take_profit:.5f}"
+                    f"Ticket: {ticket} | Protection: {order.protection_level}"
                 )
                 return True
             else:
-                logger.warning(f"Order execution failed: {result.get('error', 'Unknown')}")
+                logger.warning(f"Order execution failed: {result.get('error')}")
                 return False
                 
         except Exception as e:
@@ -397,91 +533,97 @@ class NeuralHybridStrategy:
             return False
     
     def on_trade_closed(self, ticket: str, pnl: float):
-        """
-        Handle closed trade notification.
+        """Handle trade close event."""
+        # Remove from open positions
+        pos = self._open_positions.pop(ticket, None)
         
-        Args:
-            ticket: Trade ticket number
-            pnl: Profit/loss amount
-        """
-        if ticket in self._open_positions:
-            position = self._open_positions.pop(ticket)
-            
-            # Update daily P&L
-            self._daily_pnl += pnl
-            
-            # Record trade
-            self._trade_history.append({
-                'ticket': ticket,
-                'symbol': position['symbol'],
-                'direction': position['direction'],
-                'volume': position['volume'],
-                'entry_price': position['entry_price'],
-                'pnl': pnl,
-                'close_time': datetime.utcnow(),
-                'holding_period': (datetime.utcnow() - position['open_time']).total_seconds() / 60
-            })
-            
-            # Update decision engine positions
-            self.decision_engine.update_positions(self._open_positions)
+        # Update daily stats
+        self._daily_pnl += pnl
+        self._current_balance += pnl
+        if pnl >= 0:
+            self._daily_wins += 1
+        else:
+            self._daily_losses += 1
+        
+        # Update decision engine's capital protection
+        if self.decision_engine:
+            self.decision_engine.record_trade_result(
+                pnl=pnl,
+                is_win=pnl >= 0,
+                size=pos.volume if pos else 0.0
+            )
+        
+        # Record in history
+        self._trade_history.append({
+            'ticket': ticket,
+            'pnl': pnl,
+            'is_win': pnl >= 0,
+            'close_time': datetime.utcnow().isoformat(),
+            'balance': self._current_balance
+        })
+        
+        logger.info(f"Trade closed: {ticket} | PnL: {pnl:.2f} | Balance: {self._current_balance:.2f}")
+    
+    def get_protection_status(self) -> Dict:
+        """Get capital protection status."""
+        if self.decision_engine:
+            return self.decision_engine.get_protection_status()
+        return {'enabled': False}
     
     def reset_daily_stats(self):
-        """Reset daily statistics (call at start of each day)."""
-        self._daily_pnl = 0.0
+        """Reset daily statistics."""
         self._daily_trades = 0
+        self._daily_pnl = 0.0
+        self._daily_wins = 0
+        self._daily_losses = 0
+        
+        if self.decision_engine:
+            self.decision_engine.reset_daily_protection()
+        
+        logger.info("Daily stats reset")
     
-    def get_performance_stats(self) -> Dict:
-        """Get strategy performance statistics."""
-        if not self._trade_history:
-            return {'total_trades': 0}
+    def get_stats(self) -> Dict:
+        """Get current strategy statistics."""
+        total_trades = self._daily_wins + self._daily_losses
+        win_rate = self._daily_wins / total_trades if total_trades > 0 else 0
         
-        pnls = [t['pnl'] for t in self._trade_history]
-        
-        if HAS_RISK_MANAGEMENT:
-            from risk_management.utils import generate_performance_report
-            report = generate_performance_report(self._trade_history)
-            return {
-                'total_trades': report.total_trades,
-                'win_rate': report.win_rate,
-                'profit_factor': report.profit_factor,
-                'sharpe_ratio': report.sharpe_ratio,
-                'max_drawdown': report.max_drawdown,
-                'total_return': report.total_return
-            }
-        
-        # Basic stats if risk management not available
-        wins = sum(1 for p in pnls if p > 0)
         return {
-            'total_trades': len(pnls),
-            'wins': wins,
-            'losses': len(pnls) - wins,
-            'win_rate': wins / len(pnls) if pnls else 0,
-            'total_pnl': sum(pnls),
-            'avg_pnl': np.mean(pnls) if pnls else 0
+            'symbol': self.config.symbol,
+            'profile': self.config.profile,
+            'initialized': self._initialized,
+            'starting_balance': self._starting_balance,
+            'current_balance': self._current_balance,
+            'daily_pnl': self._daily_pnl,
+            'daily_trades': self._daily_trades,
+            'daily_wins': self._daily_wins,
+            'daily_losses': self._daily_losses,
+            'daily_win_rate': win_rate,
+            'open_positions': len(self._open_positions),
+            'protection_status': self.get_protection_status()
         }
     
-    # =========================================================================
-    # Private Methods
-    # =========================================================================
-    
     def _check_daily_limits(self) -> bool:
-        """Check if daily loss limit reached."""
-        account_balance = self._get_account_balance()
-        max_loss = account_balance * (self.config.max_daily_loss_percent / 100)
+        """Check if daily limits allow trading."""
+        if self._daily_trades >= self.config.max_daily_trades:
+            logger.debug("Daily trade limit reached")
+            return False
         
-        if self._daily_pnl <= -max_loss:
-            logger.warning(f"Daily loss limit reached: {self._daily_pnl:.2f}")
+        if self._daily_pnl <= -self.config.max_daily_loss:
+            logger.warning("Daily loss limit reached")
             return False
         
         return True
     
     def _fetch_data(self) -> Optional[pd.DataFrame]:
-        """Fetch market data from data provider."""
+        """Fetch market data."""
+        if not self.data_provider:
+            logger.warning("No data provider")
+            return None
+        
         try:
-            return self.data_provider.get_data(
-                symbol=self.config.symbol,
-                timeframe=self._get_primary_timeframe(),
-                bars=self.config.sequence_length + 100
+            return self.data_provider.get_ohlcv(
+                self.config.symbol,
+                count=self.config.sequence_length + 50
             )
         except Exception as e:
             logger.error(f"Data fetch error: {e}")
@@ -489,121 +631,87 @@ class NeuralHybridStrategy:
     
     def _fetch_mtf_data(self) -> Optional[Dict[str, pd.DataFrame]]:
         """Fetch multi-timeframe data."""
-        if not HAS_MTF:
+        if not self.data_provider:
             return None
         
         try:
-            profile = get_profile(self.config.profile)
-            mtf_data = {}
-            
-            for tf in profile.timeframe_strings:
-                data = self.data_provider.get_data(
-                    symbol=self.config.symbol,
-                    timeframe=tf,
-                    bars=200
-                )
-                if data is not None:
-                    mtf_data[tf] = data
-            
-            return mtf_data if mtf_data else None
-            
+            timeframes = ['M5', 'M15', 'H1', 'H4']
+            return {
+                tf: self.data_provider.get_ohlcv(self.config.symbol, timeframe=tf)
+                for tf in timeframes
+            }
         except Exception as e:
-            logger.warning(f"MTF data fetch error: {e}")
+            logger.error(f"MTF data fetch error: {e}")
             return None
     
-    def _get_primary_timeframe(self) -> str:
-        """Get primary timeframe for profile."""
-        tf_map = {
-            'SCALP': 'M5',
-            'INTRADAY': 'M15',
-            'SWING': 'H1'
-        }
-        return tf_map.get(self.config.profile, 'M15')
-    
     def _prepare_features(self, data: pd.DataFrame) -> np.ndarray:
-        """Prepare features from market data."""
-        # This should use your existing feature engineering
-        # For now, return OHLCV + basic indicators
-        features = data[['open', 'high', 'low', 'close', 'volume']].copy()
+        """Prepare features for prediction."""
+        # Get feature columns from predictor
+        if hasattr(self.predictor, 'feature_columns'):
+            feature_cols = self.predictor.feature_columns
+            if all(col in data.columns for col in feature_cols):
+                return data[feature_cols].values[-self.config.sequence_length:]
         
-        # Add basic indicators if not present
-        if 'atr' not in data.columns:
-            features['atr'] = self._calculate_atr(data)
-        else:
-            features['atr'] = data['atr']
-        
-        # Normalize
-        features = (features - features.mean()) / (features.std() + 1e-8)
-        
-        return features.values[-self.config.sequence_length:]
-    
-    def _calculate_atr(self, data: pd.DataFrame, period: int = 14) -> pd.Series:
-        """Calculate ATR."""
-        high = data['high']
-        low = data['low']
-        close = data['close']
-        
-        tr1 = high - low
-        tr2 = abs(high - close.shift(1))
-        tr3 = abs(low - close.shift(1))
-        
-        tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-        return tr.ewm(span=period, adjust=False).mean()
+        # Fallback to OHLCV
+        return data[['open', 'high', 'low', 'close', 'volume']].values[-self.config.sequence_length:]
     
     def _generate_chart_image(self, data: pd.DataFrame) -> Optional[np.ndarray]:
         """Generate chart image for vision models."""
-        try:
-            # Use your chart generator
-            from utils.candle_to_image import CandlestickRenderer
-            return CandlestickRenderer(data, size=224)
-        except ImportError:
-            return None
+        # Placeholder - actual implementation would render candlestick chart
+        return None
     
     def _get_spread(self) -> float:
-        """Get current spread from data provider or estimate."""
-        try:
-            return self.data_provider.get_spread(self.config.symbol)
-        except:
-            # Estimate based on pair
-            spreads = {
-                'EURUSD': 1.0, 'GBPUSD': 1.5, 'USDJPY': 1.0,
-                'USDCHF': 1.5, 'AUDUSD': 1.5, 'NZDUSD': 2.0
-            }
-            return spreads.get(self.config.symbol, 2.0)
+        """Get current spread."""
+        if self.data_provider:
+            try:
+                return self.data_provider.get_spread(self.config.symbol)
+            except:
+                pass
+        
+        # Default spreads
+        spreads = {
+            'EURUSD': 1.0, 'GBPUSD': 1.5, 'USDJPY': 1.0,
+            'USDCHF': 1.5, 'AUDUSD': 1.2
+        }
+        return spreads.get(self.config.symbol, 2.0)
     
     def _get_account_balance(self) -> float:
         """Get current account balance."""
-        try:
-            return self.executor.get_account_balance()
-        except:
-            return 10000.0  # Default for testing
+        if self.executor:
+            try:
+                return self.executor.get_account_balance()
+            except:
+                pass
+        return self._current_balance
 
 
-# Factory function
 def create_strategy(
-    profile: str = 'INTRADAY',
-    symbol: str = 'EURUSD',
-    data_provider=None,
-    executor=None,
+    profile: str,
+    symbol: str,
+    data_provider = None,
+    executor = None,
+    tcn_weights: str = 'models/weights/tcn_best.pt',
+    meta_model_path: Optional[str] = None,
+    exit_model_path: Optional[str] = None,
+    starting_balance: Optional[float] = None,
     **kwargs
 ) -> NeuralHybridStrategy:
-    """
-    Create configured strategy instance.
-    
-    Args:
-        profile: Trading profile
-        symbol: Trading symbol
-        data_provider: Data provider instance
-        executor: Order executor instance
-        **kwargs: Additional config options
-    
-    Returns:
-        Configured NeuralHybridStrategy
-    """
+    """Factory function to create configured strategy."""
     config = StrategyConfig(
         profile=profile,
         symbol=symbol,
+        tcn_weights=tcn_weights,
+        meta_model_path=meta_model_path,
+        exit_model_path=exit_model_path,
         **kwargs
     )
     
-    return NeuralHybridStrategy(config, data_provider, executor)
+    strategy = NeuralHybridStrategy(
+        config=config,
+        data_provider=data_provider,
+        executor=executor
+    )
+    
+    strategy.initialize(starting_balance)
+    
+    return strategy

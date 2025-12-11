@@ -1,17 +1,22 @@
 # trading/live_trading_bot.py
 """
-Live Trading Bot with Risk Management Integration
+Live Trading Bot with Full Risk Management Integration (v2)
 
-Production-ready trading bot that:
-- Runs continuous trading loop
-- Integrates TCN predictions with risk management
-- Manages positions with ML-based SL/TP
-- Enforces hard rules and limits
-- Provides real-time monitoring
+Production-ready trading bot integrating ALL 5 PHASES:
+- Phase 1-3: TCN predictions, risk calculations, meta-labeling (via strategy)
+- Phase 4: RL Exit Advisor for active position management
+- Phase 5: Capital Protection with kill switch
+
+Features:
+- Continuous trading loop with ML signal generation
+- Active position monitoring with RL exit recommendations
+- Multi-level capital protection (daily/weekly/drawdown limits)
+- Real-time performance monitoring
+- Graceful shutdown handling
 
 Usage:
     bot = LiveTradingBot(config)
-    bot.initialize()
+    bot.initialize(starting_balance=10000)
     bot.run()  # Blocking
     # or
     bot.start()  # Non-blocking (thread)
@@ -33,15 +38,37 @@ from strategies.neural_hybrid import (
 )
 from trading.decision_engine import TradeDecision
 
-# Risk management imports
+# Risk management imports - Phases 1-3
 try:
     from risk_management import (
         TradeGatekeeper, HardRulesConfig, TradingSession,
-        generate_performance_report, PerformanceMetrics
+        RegimeDetector
     )
     HAS_RISK_MANAGEMENT = True
 except ImportError:
     HAS_RISK_MANAGEMENT = False
+
+# Phase 4: Exit Advisor
+try:
+    from risk_management import ExitAdvisor, ExitAction, Position
+    HAS_EXIT_ADVISOR = True
+except ImportError:
+    HAS_EXIT_ADVISOR = False
+    ExitAdvisor = None
+    ExitAction = None
+    Position = None
+
+# Phase 5: Capital Protection
+try:
+    from risk_management import (
+        CapitalProtector, ProtectionConfig, ProtectionManager,
+        ProtectionLevel, ProtectionAction
+    )
+    HAS_CAPITAL_PROTECTION = True
+except ImportError:
+    HAS_CAPITAL_PROTECTION = False
+    CapitalProtector = None
+    ProtectionManager = None
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +80,22 @@ class BotState(Enum):
     RUNNING = "running"
     PAUSED = "paused"
     ERROR = "error"
+    PROTECTION_HALT = "protection_halt"  # New: halted by capital protection
+
+
+@dataclass
+class OpenPosition:
+    """Represents an open trading position for exit management."""
+    ticket: str
+    symbol: str
+    direction: int          # 1 = long, -1 = short
+    entry_price: float
+    entry_time: datetime
+    volume: float
+    stop_loss: float
+    take_profit: float
+    current_pnl: float = 0.0
+    last_checked: Optional[datetime] = None
 
 
 @dataclass
@@ -64,6 +107,7 @@ class BotConfig:
     
     # Timing
     check_interval_seconds: int = 60     # How often to check for signals
+    position_check_seconds: int = 30     # How often to check open positions
     market_open_hour: int = 0            # UTC hour market opens (Sunday)
     market_close_hour: int = 22          # UTC hour market closes (Friday)
     
@@ -72,12 +116,24 @@ class BotConfig:
     vit_weights: Optional[str] = None
     yolo_weights: Optional[str] = None
     meta_model_path: Optional[str] = None
+    exit_model_path: Optional[str] = None  # NEW: Phase 4 exit model
     
     # Risk settings
     base_risk_percent: float = 1.0
     max_daily_loss_percent: float = 3.0
     max_weekly_loss_percent: float = 6.0
+    max_monthly_loss_percent: float = 10.0
+    max_drawdown_percent: float = 10.0
     max_open_trades: int = 3
+    
+    # Exit advisor settings (Phase 4)
+    enable_exit_advisor: bool = True
+    exit_confidence_threshold: float = 0.6
+    
+    # Capital protection settings (Phase 5)
+    enable_capital_protection: bool = True
+    max_consecutive_losses: int = 5
+    cooldown_minutes: int = 30
     
     # Notifications
     enable_notifications: bool = True
@@ -91,22 +147,15 @@ class BotConfig:
     # Safety
     dry_run: bool = False               # Paper trading mode
     require_confirmation: bool = False   # Require manual confirmation
-    max_consecutive_losses: int = 5      # Pause after N losses
-    cooldown_minutes: int = 30           # Cooldown after loss streak
 
 
 class LiveTradingBot:
     """
-    Production live trading bot with full risk management.
+    Production live trading bot with full risk management (v2).
     
-    Features:
-    - Continuous market monitoring
-    - ML-based signal generation
-    - Automated risk management
-    - Position tracking
-    - Performance monitoring
-    - Notification system
-    - Graceful shutdown handling
+    NEW in v2:
+    - Phase 4: Active exit management using RL advisor
+    - Phase 5: Multi-level capital protection with kill switch
     
     Example:
         from trading.mt5_executor import MT5Executor
@@ -118,197 +167,166 @@ class LiveTradingBot:
             executor=MT5Executor()
         )
         
-        bot.initialize()
+        bot.initialize(starting_balance=10000)
         bot.run()
     """
     
     def __init__(
         self,
-        config: BotConfig,
-        data_provider,
-        executor,
-        on_signal: Optional[Callable[[TradeDecision], None]] = None,
-        on_trade: Optional[Callable[[Order, Dict], None]] = None,
-        on_error: Optional[Callable[[Exception], None]] = None
+        config: Optional[BotConfig] = None,
+        data_provider = None,
+        executor = None,
+        strategy: Optional[NeuralHybridStrategy] = None
     ):
-        self.config = config
+        self.config = config or BotConfig()
         self.data_provider = data_provider
         self.executor = executor
-        
-        # Callbacks
-        self.on_signal = on_signal
-        self.on_trade = on_trade
-        self.on_error = on_error
         
         # State
         self.state = BotState.STOPPED
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
         
-        # Components
-        self.strategy: Optional[NeuralHybridStrategy] = None
-        self.gatekeeper: Optional[TradeGatekeeper] = None
+        # Strategy (created in initialize if not provided)
+        self.strategy = strategy
         
-        # Tracking
+        # Phase 4: Exit Advisor
+        self.exit_advisor: Optional[ExitAdvisor] = None
+        
+        # Phase 5: Capital Protection
+        self.capital_protector: Optional[CapitalProtector] = None
+        
+        # Position tracking
+        self._open_positions: Dict[str, OpenPosition] = {}
+        
+        # Performance tracking
+        self._starting_balance = 0.0
+        self._current_balance = 0.0
         self._daily_pnl = 0.0
         self._weekly_pnl = 0.0
-        self._consecutive_losses = 0
-        self._last_trade_time: Optional[datetime] = None
-        self._cooldown_until: Optional[datetime] = None
+        self._monthly_pnl = 0.0
         self._trade_count = 0
+        self._win_count = 0
+        self._consecutive_losses = 0
         
-        # Performance
-        self._session_start: Optional[datetime] = None
+        # Statistics
         self._signals_generated = 0
         self._trades_executed = 0
         self._trades_rejected = 0
+        self._exits_by_advisor = 0  # NEW: Track RL exit recommendations
+        self._protection_blocks = 0  # NEW: Track protection blocks
         
-        # Notifications
-        self._notifier = None
-        if config.enable_notifications:
-            self._init_notifier()
+        # Timing
+        self._last_trade_time: Optional[datetime] = None
+        self._last_position_check: Optional[datetime] = None
+        self._day_start: Optional[datetime] = None
+        self._week_start: Optional[datetime] = None
+        
+        # Callbacks
+        self.on_signal: Optional[Callable] = None
+        self.on_trade: Optional[Callable] = None
+        self.on_exit: Optional[Callable] = None  # NEW: Exit callback
+        self.on_protection_event: Optional[Callable] = None  # NEW
+        self.on_error: Optional[Callable] = None
+        
+        logger.info(f"LiveTradingBot v2 created for {self.config.symbol}")
     
-    def initialize(self) -> bool:
-        """
-        Initialize all bot components.
-        
-        Returns:
-            True if successful
-        """
+    def initialize(self, starting_balance: Optional[float] = None):
+        """Initialize bot with all components."""
         self.state = BotState.INITIALIZING
-        logger.info("Initializing trading bot...")
         
-        try:
-            # Create strategy config
-            strategy_config = StrategyConfig(
+        # Get starting balance
+        if starting_balance is not None:
+            self._starting_balance = starting_balance
+        elif self.executor:
+            self._starting_balance = self.executor.get_account_balance()
+        else:
+            self._starting_balance = 10000.0
+        
+        self._current_balance = self._starting_balance
+        
+        # Initialize strategy
+        if self.strategy is None:
+            self.strategy = create_strategy(
                 profile=self.config.profile,
                 symbol=self.config.symbol,
-                tcn_weights=self.config.tcn_weights,
-                vit_weights=self.config.vit_weights,
-                yolo_weights=self.config.yolo_weights,
-                meta_model_path=self.config.meta_model_path,
-                base_risk_percent=self.config.base_risk_percent,
-                max_daily_loss_percent=self.config.max_daily_loss_percent,
-                max_open_trades=self.config.max_open_trades
-            )
-            
-            # Initialize strategy
-            self.strategy = NeuralHybridStrategy(
-                config=strategy_config,
                 data_provider=self.data_provider,
-                executor=self.executor
+                executor=self.executor,
+                tcn_weights=self.config.tcn_weights,
+                meta_model_path=self.config.meta_model_path
             )
-            
-            if not self.strategy.initialize():
-                raise RuntimeError("Strategy initialization failed")
-            
-            # Initialize gatekeeper for additional rules
-            if HAS_RISK_MANAGEMENT:
-                self.gatekeeper = TradeGatekeeper(HardRulesConfig(
-                    max_total_exposure=20.0,
-                    max_single_pair_exposure=5.0
-                ))
-            
-            # Verify connections
-            if not self._verify_connections():
-                raise RuntimeError("Connection verification failed")
-            
-            self._session_start = datetime.utcnow()
-            self.state = BotState.STOPPED
-            
-            logger.info("Bot initialized successfully")
-            return True
-            
-        except Exception as e:
-            self.state = BotState.ERROR
-            logger.error(f"Initialization failed: {e}", exc_info=True)
-            if self.on_error:
-                self.on_error(e)
-            return False
-    
-    def start(self) -> bool:
-        """
-        Start bot in background thread.
         
-        Returns:
-            True if started successfully
-        """
-        if self.state == BotState.RUNNING:
-            logger.warning("Bot already running")
-            return False
+        self.strategy.initialize()
         
-        if self.strategy is None:
-            logger.error("Bot not initialized")
-            return False
+        # Initialize Phase 4: Exit Advisor
+        if self.config.enable_exit_advisor and HAS_EXIT_ADVISOR:
+            if self.config.exit_model_path and Path(self.config.exit_model_path).exists():
+                try:
+                    self.exit_advisor = ExitAdvisor.load(self.config.exit_model_path)
+                    logger.info("Phase 4: Exit Advisor loaded")
+                except Exception as e:
+                    logger.warning(f"Could not load Exit Advisor: {e}")
+            else:
+                logger.info("Phase 4: Exit Advisor not configured (no model path)")
         
-        self._stop_event.clear()
-        self._thread = threading.Thread(target=self._run_loop, daemon=True)
-        self._thread.start()
+        # Initialize Phase 5: Capital Protection
+        if self.config.enable_capital_protection and HAS_CAPITAL_PROTECTION:
+            protection_config = ProtectionConfig(
+                max_daily_loss_pct=self.config.max_daily_loss_percent,
+                max_weekly_loss_pct=self.config.max_weekly_loss_percent,
+                max_monthly_loss_pct=self.config.max_monthly_loss_percent,
+                max_drawdown_pct=self.config.max_drawdown_percent,
+                max_consecutive_losses=self.config.max_consecutive_losses,
+                losing_streak_cooldown_minutes=self.config.cooldown_minutes
+            )
+            self.capital_protector = CapitalProtector(protection_config)
+            self.capital_protector.initialize(self._starting_balance)
+            logger.info("Phase 5: Capital Protection initialized")
         
-        logger.info("Bot started in background")
-        return True
+        # Time tracking
+        now = datetime.utcnow()
+        self._day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        self._week_start = now - timedelta(days=now.weekday())
+        
+        self.state = BotState.RUNNING
+        logger.info(f"Bot initialized with balance: {self._starting_balance:.2f}")
     
     def run(self):
-        """Run bot in main thread (blocking)."""
-        if self.strategy is None:
-            logger.error("Bot not initialized")
-            return
+        """Run the trading bot (blocking)."""
+        if self.state != BotState.RUNNING:
+            raise RuntimeError("Bot must be initialized before running")
         
-        self._stop_event.clear()
-        self._run_loop()
-    
-    def stop(self):
-        """Stop the bot gracefully."""
-        logger.info("Stopping bot...")
-        self._stop_event.set()
-        
-        if self._thread and self._thread.is_alive():
-            self._thread.join(timeout=30)
-        
-        self.state = BotState.STOPPED
-        self._save_performance_log()
-        
-        logger.info("Bot stopped")
-    
-    def pause(self):
-        """Pause trading (keep running but don't execute)."""
-        self.state = BotState.PAUSED
-        logger.info("Bot paused")
-    
-    def resume(self):
-        """Resume trading."""
-        if self.state == BotState.PAUSED:
-            self.state = BotState.RUNNING
-            logger.info("Bot resumed")
-    
-    def _run_loop(self):
-        """Main trading loop."""
-        self.state = BotState.RUNNING
-        logger.info(f"Trading loop started for {self.config.symbol}")
+        logger.info("Starting trading loop...")
         
         while not self._stop_event.is_set():
             try:
                 current_time = datetime.utcnow()
                 
-                # Check if market is open
+                # Check for day/week rollover
+                self._check_time_periods(current_time)
+                
+                # Check capital protection status
+                if self.capital_protector:
+                    protection_state = self.capital_protector.get_state()
+                    if protection_state.level == ProtectionLevel.KILLED:
+                        self.state = BotState.PROTECTION_HALT
+                        logger.critical("KILL SWITCH ACTIVE - Trading halted")
+                        if self.on_protection_event:
+                            self.on_protection_event('kill_switch', protection_state)
+                        self._wait(60)
+                        continue
+                
+                # Skip if market closed
                 if not self._is_market_open(current_time):
-                    logger.debug("Market closed, waiting...")
                     self._wait(60)
                     continue
                 
-                # Check cooldown
-                if self._in_cooldown(current_time):
-                    logger.debug(f"In cooldown until {self._cooldown_until}")
-                    self._wait(60)
-                    continue
+                # Phase 4: Check open positions for exit
+                if self.exit_advisor and self._open_positions:
+                    self._check_positions_for_exit(current_time)
                 
-                # Check daily/weekly limits
-                if not self._check_limits():
-                    self._wait(60)
-                    continue
-                
-                # Evaluate market
-                if self.state == BotState.RUNNING:
+                # Evaluate market for new signals (if allowed)
+                if self.state == BotState.RUNNING and self._can_open_new_trade():
                     self._evaluate_and_trade(current_time)
                 
                 # Wait for next check
@@ -318,13 +336,53 @@ class LiveTradingBot:
                 logger.error(f"Error in trading loop: {e}", exc_info=True)
                 if self.on_error:
                     self.on_error(e)
-                self._wait(60)  # Wait before retrying
+                self._wait(60)
         
         self.state = BotState.STOPPED
+        logger.info("Trading loop stopped")
+    
+    def start(self):
+        """Start bot in background thread."""
+        if self._thread and self._thread.is_alive():
+            raise RuntimeError("Bot already running")
+        
+        self._stop_event.clear()
+        self._thread = threading.Thread(target=self.run, daemon=True)
+        self._thread.start()
+        logger.info("Bot started in background")
+    
+    def stop(self):
+        """Stop the bot gracefully."""
+        logger.info("Stopping bot...")
+        self._stop_event.set()
+        
+        if self._thread:
+            self._thread.join(timeout=10)
+        
+        self.state = BotState.STOPPED
+        logger.info("Bot stopped")
+    
+    def _can_open_new_trade(self) -> bool:
+        """Check if we can open a new trade."""
+        # Check max open trades
+        if len(self._open_positions) >= self.config.max_open_trades:
+            return False
+        
+        # Check capital protection
+        if self.capital_protector:
+            check = self.capital_protector.check_trade(
+                proposed_size=0.01,
+                account_balance=self._current_balance
+            )
+            if not check['allowed']:
+                self._protection_blocks += 1
+                return False
+        
+        return True
     
     def _evaluate_and_trade(self, current_time: datetime):
         """Evaluate market and execute trades if appropriate."""
-        # Get trading decision
+        # Get trading decision from strategy
         decision = self.strategy.evaluate(current_time)
         self._signals_generated += 1
         
@@ -340,28 +398,31 @@ class LiveTradingBot:
             logger.debug(f"Signal rejected: {decision.rejection_reasons}")
             return
         
-        # Additional gatekeeper check
-        if self.gatekeeper:
-            validation = self.gatekeeper.validate_trade(
-                pair=self.config.symbol,
-                direction=decision.direction,
-                position_size=decision.position_size,
-                entry_price=self.data_provider.get_price(self.config.symbol),
-                stop_loss=decision.stop_loss,
-                take_profit=decision.take_profit,
-                account_balance=self.executor.get_account_balance(),
-                current_spread=self.data_provider.get_spread(self.config.symbol),
-                current_time=current_time
+        # Phase 5: Final capital protection check
+        if self.capital_protector:
+            final_check = self.capital_protector.check_trade(
+                proposed_size=decision.position_size,
+                account_balance=self._current_balance
             )
             
-            if not validation['allowed']:
+            if not final_check['allowed']:
                 self._trades_rejected += 1
-                logger.info(f"Gatekeeper rejected: {[v['message'] for v in validation['violations']]}")
+                self._protection_blocks += 1
+                logger.info(f"Capital protection blocked: {final_check['reason']}")
+                if self.on_protection_event:
+                    self.on_protection_event('trade_blocked', final_check)
                 return
+            
+            # Apply size adjustment
+            if final_check['adjusted_size'] != decision.position_size:
+                logger.info(
+                    f"Size adjusted by protection: {decision.position_size:.4f} -> "
+                    f"{final_check['adjusted_size']:.4f}"
+                )
+                decision.position_size = final_check['adjusted_size']
         
         # Create and execute order
         order = self.strategy.create_order(decision)
-        
         if order is None:
             return
         
@@ -369,12 +430,6 @@ class LiveTradingBot:
         if self.config.dry_run:
             logger.info(f"[DRY RUN] Would execute: {order.direction} {order.volume} {order.symbol}")
             self._trades_executed += 1
-            return
-        
-        # Manual confirmation
-        if self.config.require_confirmation:
-            logger.info(f"[CONFIRM] Signal: {order.direction} {order.volume} {order.symbol}")
-            # In a real implementation, wait for user confirmation
             return
         
         # Execute trade
@@ -385,13 +440,22 @@ class LiveTradingBot:
             self._trade_count += 1
             self._last_trade_time = current_time
             
+            # Track open position
+            ticket = order.ticket if hasattr(order, 'ticket') else str(current_time.timestamp())
+            self._open_positions[ticket] = OpenPosition(
+                ticket=ticket,
+                symbol=order.symbol,
+                direction=1 if order.direction == 'BUY' else -1,
+                entry_price=order.price,
+                entry_time=current_time,
+                volume=order.volume,
+                stop_loss=order.stop_loss,
+                take_profit=order.take_profit
+            )
+            
             # Log trade
             if self.config.log_trades:
                 self._log_trade(order, decision)
-            
-            # Notify
-            if self._notifier:
-                self._send_trade_notification(order, decision)
             
             # Callback
             if self.on_trade:
@@ -399,256 +463,315 @@ class LiveTradingBot:
         else:
             logger.warning("Trade execution failed")
     
-    def on_position_closed(self, ticket: str, pnl: float):
-        """Handle position close event."""
-        # Update strategy
-        self.strategy.on_trade_closed(ticket, pnl)
+    def _check_positions_for_exit(self, current_time: datetime):
+        """Check open positions for exit recommendations (Phase 4)."""
+        if not self.exit_advisor:
+            return
         
-        # Update tracking
-        self._daily_pnl += pnl
-        self._weekly_pnl += pnl
+        # Rate limit position checks
+        if self._last_position_check:
+            time_since = (current_time - self._last_position_check).total_seconds()
+            if time_since < self.config.position_check_seconds:
+                return
         
-        # Track consecutive losses
-        if pnl < 0:
-            self._consecutive_losses += 1
-            
-            if self._consecutive_losses >= self.config.max_consecutive_losses:
-                self._cooldown_until = datetime.utcnow() + timedelta(
-                    minutes=self.config.cooldown_minutes
-                )
-                logger.warning(
-                    f"Consecutive losses ({self._consecutive_losses}), "
-                    f"entering cooldown until {self._cooldown_until}"
+        self._last_position_check = current_time
+        
+        for ticket, pos in list(self._open_positions.items()):
+            try:
+                # Get current market data
+                market_data = self.data_provider.get_ohlcv(
+                    pos.symbol,
+                    timeframe='M5',
+                    count=50
                 )
                 
-                if self._notifier:
-                    self._send_alert_notification(
-                        f"⚠️ Entering cooldown after {self._consecutive_losses} losses"
-                    )
-        else:
-            self._consecutive_losses = 0
+                # Create Position object for advisor
+                current_price = self.data_provider.get_price(pos.symbol)
+                rl_position = Position(
+                    direction=pos.direction,
+                    entry_price=pos.entry_price,
+                    entry_time=0,
+                    initial_size=pos.volume,
+                    current_size=pos.volume,
+                    stop_loss=pos.stop_loss,
+                    take_profit=pos.take_profit,
+                    initial_sl=pos.stop_loss,
+                    initial_tp=pos.take_profit
+                )
+                
+                # Get exit recommendation
+                recommendation = self.exit_advisor.get_recommendation(
+                    rl_position,
+                    market_data,
+                    deterministic=True
+                )
+                
+                # Process recommendation
+                if recommendation['action'] == ExitAction.EXIT:
+                    if recommendation['confidence'] >= self.config.exit_confidence_threshold:
+                        logger.info(
+                            f"Exit Advisor recommends EXIT for {ticket} "
+                            f"(confidence: {recommendation['confidence']:.2%})"
+                        )
+                        self._execute_exit(ticket, 'rl_advisor')
+                
+                elif recommendation['action'] == ExitAction.TRAIL_STOP:
+                    logger.debug(f"Exit Advisor recommends trailing stop for {ticket}")
+                    # Could implement trailing stop adjustment here
+                
+                elif recommendation['action'] in [ExitAction.PARTIAL_25, ExitAction.PARTIAL_50, ExitAction.PARTIAL_75]:
+                    if recommendation['confidence'] >= self.config.exit_confidence_threshold:
+                        fraction = {
+                            ExitAction.PARTIAL_25: 0.25,
+                            ExitAction.PARTIAL_50: 0.50,
+                            ExitAction.PARTIAL_75: 0.75
+                        }.get(recommendation['action'], 0.5)
+                        logger.info(
+                            f"Exit Advisor recommends partial close ({fraction:.0%}) for {ticket}"
+                        )
+                        # Could implement partial close here
+                
+            except Exception as e:
+                logger.error(f"Error checking position {ticket}: {e}")
+    
+    def _execute_exit(self, ticket: str, reason: str):
+        """Execute position exit."""
+        if ticket not in self._open_positions:
+            return
         
-        # Log
-        logger.info(f"Position closed: {ticket} | PnL: {pnl:.2f} | Daily: {self._daily_pnl:.2f}")
-    
-    def reset_daily_stats(self):
-        """Reset daily statistics."""
-        self._daily_pnl = 0.0
-        self.strategy.reset_daily_stats()
-        logger.info("Daily stats reset")
-    
-    def reset_weekly_stats(self):
-        """Reset weekly statistics."""
-        self._weekly_pnl = 0.0
-        logger.info("Weekly stats reset")
-    
-    def get_status(self) -> Dict:
-        """Get current bot status."""
-        return {
-            'state': self.state.value,
-            'symbol': self.config.symbol,
-            'profile': self.config.profile,
-            'session_start': self._session_start.isoformat() if self._session_start else None,
-            'signals_generated': self._signals_generated,
-            'trades_executed': self._trades_executed,
-            'trades_rejected': self._trades_rejected,
-            'daily_pnl': self._daily_pnl,
-            'weekly_pnl': self._weekly_pnl,
-            'consecutive_losses': self._consecutive_losses,
-            'in_cooldown': self._in_cooldown(datetime.utcnow()),
-            'cooldown_until': self._cooldown_until.isoformat() if self._cooldown_until else None,
-            'open_positions': len(self.strategy._open_positions) if self.strategy else 0,
-            'dry_run': self.config.dry_run
-        }
-    
-    def get_performance(self) -> Dict:
-        """Get performance statistics."""
-        if self.strategy:
-            return self.strategy.get_performance_stats()
-        return {}
-    
-    # =========================================================================
-    # Private Methods
-    # =========================================================================
-    
-    def _verify_connections(self) -> bool:
-        """Verify data provider and executor connections."""
+        pos = self._open_positions[ticket]
+        
+        if self.config.dry_run:
+            logger.info(f"[DRY RUN] Would close {ticket} ({reason})")
+            return
+        
+        # Execute close
         try:
-            # Check data provider
-            data = self.data_provider.get_data(self.config.symbol, 'M1', 1)
-            if data is None or len(data) == 0:
-                logger.error("Data provider not returning data")
-                return False
-            
-            # Check executor
-            balance = self.executor.get_account_balance()
-            if balance <= 0:
-                logger.error("Invalid account balance")
-                return False
-            
-            logger.info(f"Connections verified. Balance: {balance:.2f}")
-            return True
-            
+            result = self.executor.close_position(ticket)
+            if result.get('success'):
+                pnl = result.get('pnl', 0.0)
+                self._on_position_closed(ticket, pnl, reason)
+                self._exits_by_advisor += 1
+                
+                if self.on_exit:
+                    self.on_exit(ticket, pnl, reason)
         except Exception as e:
-            logger.error(f"Connection verification failed: {e}")
-            return False
+            logger.error(f"Failed to close position {ticket}: {e}")
+    
+    def _on_position_closed(self, ticket: str, pnl: float, reason: str = 'normal'):
+        """Handle position close event."""
+        # Remove from tracking
+        pos = self._open_positions.pop(ticket, None)
+        
+        # Update P&L
+        self._daily_pnl += pnl
+        self._weekly_pnl += pnl
+        self._monthly_pnl += pnl
+        self._current_balance += pnl
+        
+        # Update win/loss tracking
+        if pnl >= 0:
+            self._win_count += 1
+            self._consecutive_losses = 0
+        else:
+            self._consecutive_losses += 1
+        
+        # Update capital protector (Phase 5)
+        if self.capital_protector:
+            self.capital_protector.record_trade(
+                pnl=pnl,
+                is_win=pnl >= 0,
+                trade_size=pos.volume if pos else 0.0
+            )
+            
+            # Check if protection status changed
+            state = self.capital_protector.get_state()
+            if state.level in [ProtectionLevel.CRITICAL, ProtectionLevel.KILLED]:
+                logger.warning(f"Capital protection activated: {state.level.value}")
+                if self.on_protection_event:
+                    self.on_protection_event('level_change', state)
+        
+        # Update strategy
+        if self.strategy:
+            self.strategy.on_trade_closed(ticket, pnl)
+        
+        logger.info(
+            f"Position closed: {ticket} | PnL: {pnl:.2f} | Reason: {reason} | "
+            f"Daily: {self._daily_pnl:.2f} | Balance: {self._current_balance:.2f}"
+        )
+    
+    def on_position_closed(self, ticket: str, pnl: float):
+        """Public method for external position close notifications."""
+        self._on_position_closed(ticket, pnl, 'external')
+    
+    def _check_time_periods(self, current_time: datetime):
+        """Check and reset time period counters."""
+        # Check day rollover
+        current_day = current_time.replace(hour=0, minute=0, second=0, microsecond=0)
+        if self._day_start and current_day > self._day_start:
+            self.reset_daily_stats()
+            self._day_start = current_day
+        
+        # Check week rollover
+        current_week = current_time - timedelta(days=current_time.weekday())
+        current_week = current_week.replace(hour=0, minute=0, second=0, microsecond=0)
+        if self._week_start and current_week > self._week_start:
+            self.reset_weekly_stats()
+            self._week_start = current_week
     
     def _is_market_open(self, current_time: datetime) -> bool:
         """Check if forex market is open."""
         weekday = current_time.weekday()
         hour = current_time.hour
         
-        # Closed Saturday
-        if weekday == 5:
+        # Market closed Saturday and most of Sunday
+        if weekday == 5:  # Saturday
             return False
-        
-        # Closed Sunday until open hour
-        if weekday == 6 and hour < self.config.market_open_hour:
+        if weekday == 6 and hour < self.config.market_open_hour:  # Sunday before open
             return False
-        
-        # Closed Friday after close hour
-        if weekday == 4 and hour >= self.config.market_close_hour:
-            return False
-        
-        return True
-    
-    def _in_cooldown(self, current_time: datetime) -> bool:
-        """Check if in cooldown period."""
-        if self._cooldown_until is None:
-            return False
-        return current_time < self._cooldown_until
-    
-    def _check_limits(self) -> bool:
-        """Check if daily/weekly loss limits exceeded."""
-        balance = self.executor.get_account_balance()
-        
-        # Daily limit
-        max_daily = balance * (self.config.max_daily_loss_percent / 100)
-        if self._daily_pnl <= -max_daily:
-            logger.warning(f"Daily loss limit reached: {self._daily_pnl:.2f}")
-            return False
-        
-        # Weekly limit
-        max_weekly = balance * (self.config.max_weekly_loss_percent / 100)
-        if self._weekly_pnl <= -max_weekly:
-            logger.warning(f"Weekly loss limit reached: {self._weekly_pnl:.2f}")
+        if weekday == 4 and hour >= self.config.market_close_hour:  # Friday after close
             return False
         
         return True
     
     def _wait(self, seconds: int):
-        """Wait with early exit capability."""
+        """Wait with stop check."""
         self._stop_event.wait(seconds)
     
-    def _init_notifier(self):
-        """Initialize notification system."""
-        try:
-            from notifications import SocialMediaNotifier
-            self._notifier = SocialMediaNotifier(self.config.telegram_config)
-        except ImportError:
-            logger.debug("Notifications module not available")
-    
-    def _send_trade_notification(self, order: Order, decision: TradeDecision):
-        """Send trade notification."""
-        if self._notifier:
-            try:
-                self._notifier.send_trade(
-                    symbol=order.symbol,
-                    direction=order.direction,
-                    volume=order.volume,
-                    sl=order.stop_loss,
-                    tp=order.take_profit,
-                    confidence=order.confidence
-                )
-            except Exception as e:
-                logger.warning(f"Notification failed: {e}")
-    
-    def _send_alert_notification(self, message: str):
-        """Send alert notification."""
-        if self._notifier:
-            try:
-                self._notifier.send_alert(message)
-            except:
-                pass
-    
-    def _log_trade(self, order: Order, decision: TradeDecision):
+    def _log_trade(self, order, decision):
         """Log trade to file."""
         try:
             log_path = Path(self.config.trades_log_file)
             log_path.parent.mkdir(parents=True, exist_ok=True)
             
-            trade_log = {
+            entry = {
                 'timestamp': datetime.utcnow().isoformat(),
                 'symbol': order.symbol,
                 'direction': order.direction,
                 'volume': order.volume,
+                'price': order.price,
                 'stop_loss': order.stop_loss,
                 'take_profit': order.take_profit,
-                'confidence': order.confidence,
-                'meta_score': order.meta_score,
-                'risk_percent': order.risk_percent,
-                'risk_reward': order.risk_reward,
-                'decision': decision.to_dict()
+                'decision': decision.to_dict() if hasattr(decision, 'to_dict') else str(decision)
             }
             
-            # Append to log file
-            with open(log_path, 'a') as f:
-                f.write(json.dumps(trade_log) + '\n')
-                
-        except Exception as e:
-            logger.warning(f"Trade logging failed: {e}")
-    
-    def _save_performance_log(self):
-        """Save performance log on shutdown."""
-        try:
-            log_path = Path(self.config.performance_log_file)
-            log_path.parent.mkdir(parents=True, exist_ok=True)
+            # Append to file
+            trades = []
+            if log_path.exists():
+                with open(log_path, 'r') as f:
+                    trades = json.load(f)
             
-            performance = {
-                'session_start': self._session_start.isoformat() if self._session_start else None,
-                'session_end': datetime.utcnow().isoformat(),
-                'signals_generated': self._signals_generated,
-                'trades_executed': self._trades_executed,
-                'trades_rejected': self._trades_rejected,
-                'daily_pnl': self._daily_pnl,
-                'performance': self.get_performance()
-            }
+            trades.append(entry)
             
             with open(log_path, 'w') as f:
-                json.dump(performance, f, indent=2)
+                json.dump(trades, f, indent=2)
                 
         except Exception as e:
-            logger.warning(f"Performance log save failed: {e}")
+            logger.error(f"Failed to log trade: {e}")
+    
+    def reset_daily_stats(self):
+        """Reset daily statistics."""
+        self._daily_pnl = 0.0
+        if self.strategy:
+            self.strategy.reset_daily_stats()
+        if self.capital_protector:
+            self.capital_protector.reset_daily()
+        logger.info("Daily stats reset")
+    
+    def reset_weekly_stats(self):
+        """Reset weekly statistics."""
+        self._weekly_pnl = 0.0
+        if self.capital_protector:
+            self.capital_protector.reset_weekly()
+        logger.info("Weekly stats reset")
+    
+    def get_status(self) -> Dict:
+        """Get current bot status."""
+        status = {
+            'state': self.state.value,
+            'symbol': self.config.symbol,
+            'profile': self.config.profile,
+            'balance': self._current_balance,
+            'starting_balance': self._starting_balance,
+            'daily_pnl': self._daily_pnl,
+            'weekly_pnl': self._weekly_pnl,
+            'monthly_pnl': self._monthly_pnl,
+            'open_positions': len(self._open_positions),
+            'trade_count': self._trade_count,
+            'win_rate': self._win_count / self._trade_count if self._trade_count > 0 else 0,
+            'consecutive_losses': self._consecutive_losses,
+            'signals_generated': self._signals_generated,
+            'trades_executed': self._trades_executed,
+            'trades_rejected': self._trades_rejected,
+            'exits_by_advisor': self._exits_by_advisor,
+            'protection_blocks': self._protection_blocks
+        }
+        
+        # Add Phase 5 protection status
+        if self.capital_protector:
+            prot_state = self.capital_protector.get_state()
+            status['protection'] = {
+                'level': prot_state.level.value,
+                'action': prot_state.action.value,
+                'size_multiplier': prot_state.size_multiplier,
+                'trigger_reason': prot_state.trigger_reason
+            }
+        
+        return status
+    
+    def get_open_positions(self) -> List[Dict]:
+        """Get list of open positions."""
+        return [
+            {
+                'ticket': pos.ticket,
+                'symbol': pos.symbol,
+                'direction': 'BUY' if pos.direction == 1 else 'SELL',
+                'entry_price': pos.entry_price,
+                'entry_time': pos.entry_time.isoformat(),
+                'volume': pos.volume,
+                'stop_loss': pos.stop_loss,
+                'take_profit': pos.take_profit,
+                'current_pnl': pos.current_pnl
+            }
+            for pos in self._open_positions.values()
+        ]
+    
+    def force_close_all(self, reason: str = "Manual close"):
+        """Force close all open positions."""
+        logger.warning(f"Force closing all positions: {reason}")
+        
+        for ticket in list(self._open_positions.keys()):
+            self._execute_exit(ticket, reason)
+    
+    def activate_kill_switch(self, reason: str = "Manual activation"):
+        """Manually activate kill switch."""
+        if self.capital_protector:
+            self.capital_protector.activate_kill_switch(reason)
+            self.state = BotState.PROTECTION_HALT
+            logger.critical(f"KILL SWITCH ACTIVATED: {reason}")
 
 
-# Factory function
 def create_bot(
-    symbol: str = 'EURUSD',
-    profile: str = 'INTRADAY',
-    data_provider=None,
-    executor=None,
-    dry_run: bool = True,
+    symbol: str,
+    profile: str,
+    data_provider,
+    executor,
+    starting_balance: Optional[float] = None,
     **kwargs
 ) -> LiveTradingBot:
-    """
-    Create configured trading bot.
-    
-    Args:
-        symbol: Trading symbol
-        profile: Trading profile
-        data_provider: Data provider instance
-        executor: Order executor instance
-        dry_run: Paper trading mode
-        **kwargs: Additional config options
-    
-    Returns:
-        Configured LiveTradingBot
-    """
+    """Factory function to create configured bot."""
     config = BotConfig(
         symbol=symbol,
         profile=profile,
-        dry_run=dry_run,
         **kwargs
     )
     
-    return LiveTradingBot(config, data_provider, executor)
+    bot = LiveTradingBot(
+        config=config,
+        data_provider=data_provider,
+        executor=executor
+    )
+    
+    bot.initialize(starting_balance)
+    
+    return bot
