@@ -15,13 +15,26 @@ Supports configurable timeframe profiles:
 """
 
 import logging
-from typing import Dict, Optional, Any, Tuple
+from typing import Dict, Optional, Any, Tuple, TYPE_CHECKING
 from dataclasses import dataclass
 import pandas as pd
 import numpy as np
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+# MTF analyzer implementations are imported at module level so they are
+# defined for use during initialization and by other methods. Importing
+# here avoids undefined name errors and keeps lazy imports for analyzers
+# unnecessary while still preserving circular-import safety via
+# TYPE_CHECKING for heavier type hints.
+from trend_detection.mtf_analyzer_v2 import MTFAnalyzerV2, MTFConfluenceScorer, MTFAnalysisResult
+
+if TYPE_CHECKING:
+    # Imported only for type hints to avoid runtime circular imports
+    from utils.mtf_config import MTFProfile
+    from trend_detection.structural_analyzer import StructuralAnalyzer
+    from trend_detection.regime_classifier import RegimeClassifier
 
 
 @dataclass
@@ -123,8 +136,6 @@ class MTFTrendDetector:
         self.ml_model = ml_model
         
         # Initialize components
-        from trend_detection.mtf_analyzer_v2 import MTFAnalyzerV2, MTFConfluenceScorer
-        
         self.mtf_analyzer = MTFAnalyzerV2.from_profile(profile)
         self.confluence_scorer = MTFConfluenceScorer()
         
