@@ -17,7 +17,7 @@ from .mtf_config import (
 from .mtf_features import (
     MTFFeatureBuilder,
     MTFFeatureSet,
-    build_mtf_features_for_training,
+    build_ml_features,
 )
 
 __all__ = [
@@ -31,5 +31,5 @@ __all__ = [
     # 'MTFAnalysisConfig',  # REMOVE THIS LINE
     'MTFFeatureBuilder',
     'MTFFeatureSet',
-    'build_mtf_features_for_training',
+    'build_ml_features',
 ]

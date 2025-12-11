@@ -237,11 +237,11 @@ def normalize_for_model(
     img_chw = img_float.transpose(2, 0, 1)
     
     if use_imagenet_stats:
-        mean = np.array([0.485, 0.456, 0.406]).reshape(3, 1, 1)
-        std = np.array([0.229, 0.224, 0.225]).reshape(3, 1, 1)
+        mean = np.array([0.485, 0.456, 0.406], dtype=np.float32).reshape(3, 1, 1)
+        std = np.array([0.229, 0.224, 0.225], dtype=np.float32).reshape(3, 1, 1)
         img_chw = (img_chw - mean) / std
     
-    return img_chw
+    return img_chw.astype(np.float32)
 
 
 if __name__ == "__main__":
