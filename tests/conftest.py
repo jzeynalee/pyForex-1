@@ -1,193 +1,254 @@
-# tests/conftest.py
-import pytest
+#!/usr/bin/env python3
+"""
+Shared fixtures for utils module tests.
+"""
+
+import logging
+import tempfile
 import numpy as np
 import pandas as pd
-from datetime import datetime
-import sys
-import os
-from pathlib import Path
-
-
-#############################################
-"""
-conftest.py - Pytest configuration and fixtures
-"""
-
 import pytest
-import sys
-import os
 from pathlib import Path
+from unittest.mock import MagicMock
 
-# Add project root to path
-PROJECT_ROOT = Path(__file__).parent
-sys.path.insert(0, str(PROJECT_ROOT))
 
+# ============================================================================
+# LOGGING CLEANUP (Windows compatibility)
+# ============================================================================
 
 @pytest.fixture(autouse=True)
-def cleanup_imports():
-    """Clean up imports after each test."""
-    # Store original modules
-    original_modules = set(sys.modules.keys())
-    
+def cleanup_logging():
+    """Clean up logging handlers after each test."""
     yield
-    
-    # Remove any new modules imported during test
-    new_modules = set(sys.modules.keys()) - original_modules
-    for module in new_modules:
-        if module.startswith('main'):
-            del sys.modules[module]
+    root_logger = logging.getLogger()
+    for handler in root_logger.handlers[:]:
+        try:
+            handler.flush()
+            handler.close()
+        except Exception:
+            pass
+        root_logger.removeHandler(handler)
 
+
+# ============================================================================
+# TEMPORARY DIRECTORIES
+# ============================================================================
 
 @pytest.fixture
 def temp_dir():
-    """Create temporary directory for tests."""
-    import tempfile
-    import shutil
-    
-    temp_dir = tempfile.mkdtemp()
-    yield Path(temp_dir)
-    shutil.rmtree(temp_dir)
+    """Create a temporary directory for test files."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        yield Path(tmpdir)
 
+
+# ============================================================================
+# SAMPLE DATA FIXTURES
+# ============================================================================
 
 @pytest.fixture
-def mock_logger():
-    """Create a mock logger."""
-    import logging
-    from unittest.mock import MagicMock
-    
-    logger = MagicMock(spec=logging.Logger)
-    return logger
-
-
-
-
-
-
-
-
-###########################################
-
-@pytest.fixture(scope="module")
-def sample_ohlcv_data():
-    """Generate realistic OHLCV data."""
-    n = 200
+def sample_ohlcv_df():
+    """Create a sample OHLCV DataFrame for testing."""
     np.random.seed(42)
+    n = 200
     base_price = 1.1000
-    
-    # Use 'h' instead of 'H' (pandas deprecation fix)
-    dates = pd.date_range(end=datetime.now(), periods=n, freq='h')
-    returns = np.random.randn(n) * 0.001
-    prices = base_price * np.exp(np.cumsum(returns))
+    prices = base_price + np.cumsum(np.random.randn(n) * 0.001)
     
     df = pd.DataFrame({
-        'time': dates,
+        'time': pd.date_range('2024-01-01', periods=n, freq='1h'),
         'open': prices,
-        'high': prices * (1 + np.abs(np.random.randn(n)) * 0.002),
-        'low': prices * (1 - np.abs(np.random.randn(n)) * 0.002),
-        'close': prices * (1 + np.random.randn(n) * 0.001),
-        'volume': np.random.randint(100, 1000, n),
-        'tick_volume': np.random.randint(100, 1000, n),  # Added missing column
+        'high': prices + np.abs(np.random.randn(n) * 0.0005),
+        'low': prices - np.abs(np.random.randn(n) * 0.0005),
+        'close': prices + np.random.randn(n) * 0.0003,
+        'tick_volume': np.random.randint(100, 5000, n),
+        'volume': np.random.randint(100, 5000, n),
     })
     
-    # Fix OHLC constraints
-    df['high'] = df[['high', 'open', 'close']].max(axis=1)
-    df['low'] = df[['low', 'open', 'close']].min(axis=1)
+    # Ensure OHLC consistency
+    df['high'] = df[['open', 'high', 'close']].max(axis=1)
+    df['low'] = df[['open', 'low', 'close']].min(axis=1)
     
     return df
 
-@pytest.fixture(scope="module")
-def mtf_data(sample_ohlcv_data):
-    """Multi-timeframe data dict."""
+
+@pytest.fixture
+def small_ohlcv_df():
+    """Create a small OHLCV DataFrame for quick tests."""
+    np.random.seed(42)
+    n = 30
+    base_price = 100.0
+    prices = base_price + np.cumsum(np.random.randn(n) * 0.5)
+    
+    df = pd.DataFrame({
+        'time': pd.date_range('2024-01-01', periods=n, freq='1h'),
+        'open': prices,
+        'high': prices + np.abs(np.random.randn(n) * 0.3),
+        'low': prices - np.abs(np.random.randn(n) * 0.3),
+        'close': prices + np.random.randn(n) * 0.2,
+        'tick_volume': np.random.randint(100, 1000, n),
+        'volume': np.random.randint(100, 1000, n),
+    })
+    
+    df['high'] = df[['open', 'high', 'close']].max(axis=1)
+    df['low'] = df[['open', 'low', 'close']].min(axis=1)
+    
+    return df
+
+
+@pytest.fixture
+def bullish_trend_df():
+    """Create DataFrame with clear bullish trend."""
+    np.random.seed(42)
+    n = 100
+    prices = 100 + np.linspace(0, 10, n) + np.random.randn(n) * 0.2
+    
+    df = pd.DataFrame({
+        'open': prices,
+        'high': prices + np.abs(np.random.randn(n) * 0.3),
+        'low': prices - np.abs(np.random.randn(n) * 0.2),
+        'close': prices + 0.05,  # Slight bullish bias
+        'volume': np.random.randint(100, 1000, n),
+    })
+    
+    df['high'] = df[['open', 'high', 'close']].max(axis=1)
+    df['low'] = df[['open', 'low', 'close']].min(axis=1)
+    
+    return df
+
+
+@pytest.fixture
+def bearish_trend_df():
+    """Create DataFrame with clear bearish trend."""
+    np.random.seed(42)
+    n = 100
+    prices = 110 - np.linspace(0, 10, n) + np.random.randn(n) * 0.2
+    
+    df = pd.DataFrame({
+        'open': prices,
+        'high': prices + np.abs(np.random.randn(n) * 0.2),
+        'low': prices - np.abs(np.random.randn(n) * 0.3),
+        'close': prices - 0.05,  # Slight bearish bias
+        'volume': np.random.randint(100, 1000, n),
+    })
+    
+    df['high'] = df[['open', 'high', 'close']].max(axis=1)
+    df['low'] = df[['open', 'low', 'close']].min(axis=1)
+    
+    return df
+
+
+@pytest.fixture
+def sideways_df():
+    """Create DataFrame with sideways/ranging market."""
+    np.random.seed(42)
+    n = 100
+    prices = 100 + np.random.randn(n) * 0.5  # No trend
+    
+    df = pd.DataFrame({
+        'open': prices,
+        'high': prices + np.abs(np.random.randn(n) * 0.2),
+        'low': prices - np.abs(np.random.randn(n) * 0.2),
+        'close': prices + np.random.randn(n) * 0.1,
+        'volume': np.random.randint(100, 1000, n),
+    })
+    
+    df['high'] = df[['open', 'high', 'close']].max(axis=1)
+    df['low'] = df[['open', 'low', 'close']].min(axis=1)
+    
+    return df
+
+
+# ============================================================================
+# CSV FILE FIXTURES
+# ============================================================================
+
+@pytest.fixture
+def sample_csv_file(temp_dir, sample_ohlcv_df):
+    """Create a sample CSV file."""
+    csv_path = temp_dir / "test_data.csv"
+    sample_ohlcv_df.to_csv(csv_path, index=False)
+    return csv_path
+
+
+@pytest.fixture
+def minimal_csv_file(temp_dir):
+    """Create a minimal CSV file with just OHLCV."""
+    csv_path = temp_dir / "minimal.csv"
+    df = pd.DataFrame({
+        'open': [1.0, 1.1, 1.2],
+        'high': [1.1, 1.2, 1.3],
+        'low': [0.9, 1.0, 1.1],
+        'close': [1.05, 1.15, 1.25],
+        'tick_volume': [100, 200, 150],
+    })
+    df.to_csv(csv_path, index=False)
+    return csv_path
+
+
+# ============================================================================
+# MOCK FIXTURES
+# ============================================================================
+
+@pytest.fixture
+def mock_torch():
+    """Create mock torch module."""
+    mock = MagicMock()
+    mock.cuda.is_available.return_value = False
+    mock.__version__ = "2.0.0"
+    mock.device.return_value = MagicMock()
+    return mock
+
+
+@pytest.fixture
+def mock_checkpoint():
+    """Create mock model checkpoint data."""
     return {
-        'H4': sample_ohlcv_data.copy(),
-        'H1': sample_ohlcv_data.copy(),
-        'M15': sample_ohlcv_data.copy(),
+        'model_state': {'layer1.weight': np.random.randn(10, 10)},
+        'feature_columns': ['rsi_14', 'macd', 'ema_20', 'adx'],
+        'config': {
+            'model': {'input_dim': 4, 'hidden_dim': 64},
+            'training': {'num_classes': 3},
+        },
+        'metrics': {'best_val_acc': 0.75, 'test_accuracy': 0.72},
+        'profile': 'INTRADAY',
+        'created_at': '2024-01-01T00:00:00',
     }
 
-@pytest.fixture(scope="module")
-def bullish_trend_data():
-    """Data with clear uptrend."""
-    n = 200
-    np.random.seed(43)
-    dates = pd.date_range(end=datetime.now(), periods=n, freq='h')  # Fixed
-    prices = 1.1 + np.linspace(0, 0.05, n) + np.random.randn(n) * 0.001
-    
+
+# ============================================================================
+# PATTERN TEST DATA
+# ============================================================================
+
+@pytest.fixture
+def doji_candle_df():
+    """Create DataFrame with a doji pattern."""
     return pd.DataFrame({
-        'time': dates,
-        'open': prices,
-        'high': prices * 1.002,
-        'low': prices * 0.998,
-        'close': prices * 1.001,
-        'volume': np.random.randint(100, 1000, n),
-        'tick_volume': np.random.randint(100, 1000, n),
+        'open': [100.0],
+        'high': [100.5],
+        'low': [99.5],
+        'close': [100.02],  # Very small body
+        'volume': [1000],
     })
 
-@pytest.fixture(scope="module")
-def bearish_trend_data():
-    """Data with clear downtrend."""
-    n = 200
-    np.random.seed(44)
-    dates = pd.date_range(end=datetime.now(), periods=n, freq='h')  # Fixed
-    prices = 1.15 - np.linspace(0, 0.05, n) + np.random.randn(n) * 0.001
-    
+
+@pytest.fixture
+def hammer_candle_df():
+    """Create DataFrame with hammer pattern."""
     return pd.DataFrame({
-        'time': dates,
-        'open': prices,
-        'high': prices * 1.002,
-        'low': prices * 0.998,
-        'close': prices * 0.999,
-        'volume': np.random.randint(100, 1000, n),
-        'tick_volume': np.random.randint(100, 1000, n),
+        'open': [100.0],
+        'high': [100.2],
+        'low': [98.5],  # Long lower shadow
+        'close': [100.1],
+        'volume': [1000],
     })
 
-@pytest.fixture
-def temp_csv_file(tmp_path, sample_ohlcv_data):
-    """Create temporary CSV file with OHLCV data."""
-    filepath = tmp_path / "test_data.csv"
-    sample_ohlcv_data.to_csv(filepath, index=False)
-    return filepath
 
 @pytest.fixture
-def model_probabilities_buy():
-    return np.array([0.75, 0.15, 0.10])
-
-@pytest.fixture
-def model_probabilities_sell():
-    return np.array([0.10, 0.80, 0.10])
-
-@pytest.fixture
-def model_probabilities_uncertain():
-    return np.array([0.40, 0.35, 0.25])
-
-@pytest.fixture
-def mock_trend_analysis_bullish():
-    return {
-        'trend_class': 2,
-        'trend_name': 'Mature Bull Trend',
-        'direction': 'BULLISH',
-        'confidence': 0.75,
-        'trend_strength': 70,
-        'details': {}
-    }
-
-@pytest.fixture
-def mock_trend_analysis_bearish():
-    return {
-        'trend_class': 4,
-        'trend_name': 'Mature Bear Trend',
-        'direction': 'BEARISH',
-        'confidence': 0.75,
-        'trend_strength': 70,
-        'details': {}
-    }
-
-@pytest.fixture
-def mock_trend_analysis_sideways():
-    return {
-        'trend_class': 0,
-        'trend_name': 'Sideways/Compression',
-        'direction': 'SIDEWAYS',
-        'confidence': 0.60,
-        'trend_strength': 25,
-        'details': {}
-    }
+def engulfing_pattern_df():
+    """Create DataFrame with bullish engulfing pattern."""
+    return pd.DataFrame({
+        'open': [100.0, 99.0],
+        'high': [100.2, 101.5],
+        'low': [99.5, 98.8],
+        'close': [99.6, 101.2],  # Second candle engulfs first
+        'volume': [1000, 1500],
+    })

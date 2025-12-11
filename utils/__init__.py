@@ -11,7 +11,7 @@ from .mtf_config import (
     INTRADAY_PROFILE,
     get_profile,
     create_custom_profile,
-    MTFAnalysisConfig,
+    # MTFAnalysisConfig,  # REMOVE THIS LINE - class doesn't exist
 )
 
 from .mtf_features import (
@@ -28,7 +28,7 @@ __all__ = [
     'INTRADAY_PROFILE',
     'get_profile',
     'create_custom_profile',
-    'MTFAnalysisConfig',
+    # 'MTFAnalysisConfig',  # REMOVE THIS LINE
     'MTFFeatureBuilder',
     'MTFFeatureSet',
     'build_mtf_features_for_training',
