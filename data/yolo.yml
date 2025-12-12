@@ -1,0 +1,13 @@
+# Root directory of the dataset (optional, but helpful)
+path: ../datasets/my_yolo_dataset  # e.g., points to the root of your image/label folders
+
+# Train/Val/Test data directories
+train: images/train  # Relative to 'path'
+val: images/val      # Relative to 'path'
+# test: images/test  # Optional
+
+# Number of classes
+nc: 2
+
+# Class names
+names: ['class_a', 'class_b']

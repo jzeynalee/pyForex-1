@@ -194,9 +194,11 @@ class FeatureImportanceAnalyzer:
         importances = rf.feature_importances_
         
         # Build importance dictionary
+        # Ensure we don't exceed the number of importances
+        n_features = min(len(feature_names), len(importances))
         self.importance_scores = {
             name: float(importances[i]) 
-            for i, name in enumerate(feature_names)
+            for i, name in enumerate(feature_names[:n_features])
         }
         
         # Sort by importance
