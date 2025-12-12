@@ -24,13 +24,23 @@ if str(project_root) not in sys.path:
 
 try:
     import torch  # noqa: F401
+    TORCH_AVAILABLE = True
 except Exception:
+    TORCH_AVAILABLE = False
     fake_torch = types.ModuleType("torch")
 
     class _Cuda:
         @staticmethod
         def is_available():
             return False
+        
+        @staticmethod
+        def device_count():
+            return 0
+        
+        @staticmethod
+        def get_device_name(idx):
+            return "Mock GPU"
 
     fake_torch.cuda = _Cuda()
 
@@ -44,12 +54,85 @@ except Exception:
     fake_torch.nn = types.ModuleType('torch.nn')
     fake_torch.optim = types.ModuleType('torch.optim')
     fake_torch.nn.functional = types.ModuleType('torch.nn.functional')
+    fake_torch.utils = types.ModuleType('torch.utils')
+    fake_torch.utils.data = types.ModuleType('torch.utils.data')
+    
+    # Add common nn classes
+    fake_torch.nn.Module = object
+    fake_torch.nn.Linear = lambda *args, **kwargs: None
+    fake_torch.nn.LayerNorm = lambda *args, **kwargs: None
+    fake_torch.nn.Dropout = lambda *args, **kwargs: None
+    fake_torch.nn.Sequential = lambda *args, **kwargs: None
+    fake_torch.nn.GELU = lambda *args, **kwargs: None
+    fake_torch.nn.CrossEntropyLoss = lambda *args, **kwargs: None
+    
+    # Add common functions
+    fake_torch.no_grad = lambda: lambda f: f
+    fake_torch.tensor = lambda x: x
+    fake_torch.randn = lambda *args: None
+    fake_torch.save = lambda *args, **kwargs: None
+    fake_torch.load = lambda *args, **kwargs: {}
     
     # Register in sys.modules
     sys.modules['torch'] = fake_torch
     sys.modules['torch.nn'] = fake_torch.nn
     sys.modules['torch.optim'] = fake_torch.optim
     sys.modules['torch.nn.functional'] = fake_torch.nn.functional
+    sys.modules['torch.utils'] = fake_torch.utils
+    sys.modules['torch.utils.data'] = fake_torch.utils.data
+
+
+# =============================================================================
+# FAKE TIMM MODULE (for ViT models)
+# =============================================================================
+
+try:
+    import timm  # noqa: F401
+except Exception:
+    fake_timm = types.ModuleType('timm')
+    
+    def create_model(*args, **kwargs):
+        mock_model = type('MockViT', (), {
+            'embed_dim': 768,
+            'blocks': [type('MockBlock', (), {'parameters': lambda self: iter([])})() for _ in range(12)],
+            'norm': type('MockNorm', (), {'parameters': lambda self: iter([])})(),
+            'parameters': lambda self: iter([]),
+            '__call__': lambda self, x: x
+        })()
+        return mock_model
+    
+    fake_timm.create_model = create_model
+    sys.modules['timm'] = fake_timm
+
+
+# =============================================================================
+# FAKE ULTRALYTICS MODULE (for YOLO models)
+# =============================================================================
+
+try:
+    from ultralytics import YOLO  # noqa: F401
+except Exception:
+    fake_ultralytics = types.ModuleType('ultralytics')
+    
+    class MockYOLO:
+        """Mock YOLO class for testing."""
+        def __init__(self, weights_path):
+            self.weights_path = weights_path
+        
+        def train(self, **kwargs):
+            """Mock train method."""
+            return {'metrics': {'mAP50': 0.9}}
+        
+        def export(self, **kwargs):
+            """Mock export method."""
+            return kwargs.get('format', 'pt')
+        
+        def predict(self, *args, **kwargs):
+            """Mock predict method."""
+            return []
+    
+    fake_ultralytics.YOLO = MockYOLO
+    sys.modules['ultralytics'] = fake_ultralytics
 
 
 # =============================================================================
