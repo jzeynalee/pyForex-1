@@ -387,7 +387,7 @@ class EnhancedDecisionEngine:
         # Step 3: Calculate SL/TP (Phase 2)
         # =================================================================
         quantiles = predictions.get('quantiles')
-        trade_dir = TradeDirection.LONG if decision.direction == 'BUY' else TradeDirection.SHORT
+        trade_dir = TradeDirection.BUY if decision.direction == 'BUY' else TradeDirection.SELL
         
         sltp_result = self.sltp_calculator.calculate(
             entry_price=entry_price,
