@@ -9,6 +9,18 @@ import pytest
 from PIL import Image
 
 
+@pytest.fixture
+def small_ohlcv_df():
+    """Create a small OHLCV DataFrame for testing."""
+    return pd.DataFrame({
+        'open': [1.1000, 1.1010, 1.1020, 1.1015, 1.1025],
+        'high': [1.1015, 1.1025, 1.1030, 1.1020, 1.1035],
+        'low': [1.0995, 1.1005, 1.1015, 1.1010, 1.1020],
+        'close': [1.1010, 1.1020, 1.1025, 1.1015, 1.1030],
+        'volume': [1000, 1100, 1200, 1050, 1150],
+    })
+
+
 class TestCandlestickRenderer:
     """Tests for CandlestickRenderer class."""
 
