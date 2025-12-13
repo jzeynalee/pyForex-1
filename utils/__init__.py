@@ -17,19 +17,17 @@ from .mtf_config import (
 from .mtf_features import (
     MTFFeatureBuilder,
     MTFFeatureSet,
-    build_mtf_features_for_training,
 )
 
 __all__ = [
     'MTFProfile',
     'Timeframe',
     'SCALP_PROFILE',
-    'SWING_PROFILE', 
+    'SWING_PROFILE',
     'INTRADAY_PROFILE',
     'get_profile',
     'create_custom_profile',
     # 'MTFAnalysisConfig',  # REMOVE THIS LINE
     'MTFFeatureBuilder',
     'MTFFeatureSet',
-    'build_mtf_features_for_training',
 ]

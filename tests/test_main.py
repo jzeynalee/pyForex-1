@@ -244,14 +244,14 @@ class TestSystemChecker:
         assert len(system_checker.warnings) > 0
 
     def test_check_weights_files_exist(self, system_checker, temp_dir):
-        """Test check_weights when files exist."""
-        # Create mock weight files
-        (temp_dir / "lstm_best.pt").touch()
+        """Test check_weights when files exist (TCN only after LSTM removal)."""
+        # Create mock weight files (TCN-based now)
+        (temp_dir / "tcn_best.pt").touch()
         (temp_dir / "fusion_best.pt").touch()
-        
+
         with patch.object(CONFIG, 'weights_dir', temp_dir):
             result = system_checker.check_weights()
-        
+
         assert result is True
 
     def test_check_mt5_not_installed(self, system_checker):
@@ -412,19 +412,19 @@ class TestArgumentParser:
         assert args.interval == 10.0
 
     def test_live_command_all_options(self, parser):
-        """Test live command with all options."""
+        """Test live command with all options (TCN only after LSTM removal)."""
         args = parser.parse_args([
             "live",
             "--symbol", "USDJPY",
             "--timeframe", "M15",
-            "--strategy", "lstm",
+            "--strategy", "neural",  # Changed from 'lstm' to 'neural' (TCN-based)
             "--interval", "5.0",
             "--mock"
         ])
-        
+
         assert args.symbol == "USDJPY"
         assert args.timeframe == "M15"
-        assert args.strategy == "lstm"
+        assert args.strategy == "neural"  # TCN-based neural strategy
         assert args.interval == 5.0
         assert args.mock is True
 
@@ -444,16 +444,16 @@ class TestArgumentParser:
         assert args.balance == 10000.0
 
     def test_backtest_command_all_options(self, parser):
-        """Test backtest command with all options."""
+        """Test backtest command with all options (TCN only after LSTM removal)."""
         args = parser.parse_args([
             "backtest",
             "--data", "data.csv",
-            "--strategy", "lstm",
+            "--strategy", "neural",  # Changed from 'lstm' to 'neural' (TCN-based)
             "--balance", "50000",
             "--output", "results.json"
         ])
-        
-        assert args.strategy == "lstm"
+
+        assert args.strategy == "neural"  # TCN-based
         assert args.balance == 50000.0
         assert args.output == "results.json"
 
@@ -463,11 +463,11 @@ class TestArgumentParser:
         with pytest.raises(SystemExit):
             parser.parse_args(["train"])  # Missing model
 
-    @pytest.mark.parametrize("model", ["lstm", "vit", "vit-finetune", "fusion", "yolo", "trend"])
+    @pytest.mark.parametrize("model", ["tcn", "vit", "vit-finetune", "fusion", "yolo", "trend"])
     def test_train_command_valid_models(self, parser, model):
-        """Test train command accepts all valid models."""
+        """Test train command accepts all valid models (TCN instead of LSTM)."""
         args = parser.parse_args(["train", model])
-        
+
         assert args.command == "train"
         assert args.model == model
 
@@ -477,21 +477,19 @@ class TestArgumentParser:
             parser.parse_args(["train", "invalid_model"])
 
     def test_train_command_options(self, parser):
-        """Test train command with options."""
+        """Test train command with options (TCN instead of LSTM)."""
         args = parser.parse_args([
-            "train", "lstm",
+            "train", "tcn",  # Changed from 'lstm' to 'tcn'
             "--epochs", "100",
             "--batch-size", "32",
             "--lr", "0.0001",
-            "--seq-len", "120",
-            "--attention"
+            "--seq-len", "120"
         ])
-        
+
         assert args.epochs == 100
         assert args.batch_size == 32
         assert args.lr == 0.0001
         assert args.seq_len == 120
-        assert args.attention is True
 
     # --- Predict command ---
     def test_predict_command_defaults(self, parser):
@@ -708,10 +706,10 @@ class TestCommandHandlers:
 
     # --- cmd_train ---
     def test_cmd_train_dry_run(self, logger):
-        """Test cmd_train dry run mode."""
+        """Test cmd_train dry run mode (TCN instead of LSTM)."""
         args = argparse.Namespace(
             dry_run=True,
-            model="lstm",
+            model="tcn",  # Changed from 'lstm' to 'tcn'
             data="data.csv",
             data_dir=None,
             save_dir=None,
@@ -719,19 +717,18 @@ class TestCommandHandlers:
             batch_size=64,
             lr=0.001,
             seq_len=60,
-            attention=False,
             cache_path=None,
             synthetic=False,
         )
-        
+
         with patch.object(SystemChecker, 'run_all_checks', return_value=True):
             result = cmd_train(args, logger)
-        
+
         assert result == 0
 
-    @pytest.mark.parametrize("model", ["lstm", "vit", "fusion", "trend"])
+    @pytest.mark.parametrize("model", ["tcn", "vit", "fusion", "trend"])
     def test_cmd_train_dry_run_all_models(self, logger, model):
-        """Test cmd_train dry run for all models."""
+        """Test cmd_train dry run for all models (TCN instead of LSTM)."""
         args = argparse.Namespace(
             dry_run=True,
             model=model,
@@ -742,14 +739,13 @@ class TestCommandHandlers:
             batch_size=64,
             lr=0.001,
             seq_len=60,
-            attention=False,
             cache_path=None,
             synthetic=False,
         )
-        
+
         with patch.object(SystemChecker, 'run_all_checks', return_value=True):
             result = cmd_train(args, logger)
-        
+
         assert result == 0
 
     # --- cmd_generate ---
@@ -842,11 +838,11 @@ class TestMainFunction:
         assert result == 0
 
     def test_main_train_command(self):
-        """Test main dispatches train command."""
-        with patch('sys.argv', ['pyforex', '--dry-run', 'train', 'lstm']):
+        """Test main dispatches train command (TCN instead of LSTM)."""
+        with patch('sys.argv', ['pyforex', '--dry-run', 'train', 'tcn']):
             with patch('main.cmd_train', return_value=0) as mock_cmd:
                 result = main()
-        
+
         mock_cmd.assert_called_once()
         assert result == 0
 
@@ -947,14 +943,13 @@ class TestEdgeCases:
             batch_size=64,
             lr=0.001,
             seq_len=60,
-            attention=False,
             cache_path=None,
             synthetic=False,
         )
-        
+
         with patch.object(SystemChecker, 'run_all_checks', return_value=True):
             result = cmd_train(args, logger)
-        
+
         assert result == 1
 
     def test_system_checker_exception_in_mt5(self, system_checker):

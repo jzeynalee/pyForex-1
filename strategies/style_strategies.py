@@ -17,7 +17,7 @@ import numpy as np
 from strategies.base import Strategy, DataProvider, Executor
 from trading.style_config import StyleConfig, TradingStyle, SCALP_CONFIG, INTRADAY_CONFIG, SWING_CONFIG
 from trading.risk_manager import RiskManager
-from inference.predictor import HybridPredictor, SimpleLSTMPredictor, PredictionResult
+from inference.predictor import HybridPredictor, RiskAwareTCNPredictor, PredictionResult
 
 logger = logging.getLogger(__name__)
 

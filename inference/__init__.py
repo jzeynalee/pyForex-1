@@ -10,9 +10,7 @@ from .predictor import (
     PredictorConfig,
     Signal,
     create_predictor,
-    # Backward compatibility aliases
     TCNPredictor,
-    SimpleLSTMPredictor
 )
 
 __all__ = [
@@ -23,5 +21,4 @@ __all__ = [
     'Signal',
     'create_predictor',
     'TCNPredictor',
-    'SimpleLSTMPredictor'
 ]

@@ -11,7 +11,7 @@ from trading.signal_engine import (
     Signal, SignalResult, SignalConfig, 
     generate_signal, generate_signal_simple, SignalAggregator
 )
-from trading.risk_manager import RiskManager, RiskConfig, TradeParams
+from trading.risk_manager import RiskManager, RiskConfig
 from trading.decision_engine import DecisionEngine, DecisionResult
 from trading.backtest import BacktestExecutor, BacktestConfig
 

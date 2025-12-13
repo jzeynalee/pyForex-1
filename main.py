@@ -8,7 +8,7 @@ Unified CLI entry point for all operations:
     - Multi-style trading (scalp + intraday + swing simultaneously)
     - Live trading with MT5 (single strategy)
     - Backtesting on historical data
-    - Model training (LSTM, ViT, Fusion, YOLO, Trend Classifier)
+    - Model training (TCN, ViT, Fusion, YOLO, Trend Classifier)
     - Single predictions / inference
     - Dataset generation
 
@@ -27,7 +27,7 @@ Examples:
     python main.py multi --mock                             # Test with mock connector
     python main.py live --symbol EURUSD --timeframe H1      # Single strategy
     python main.py backtest --data data/EURUSD_H1.csv --strategy neural
-    python main.py train lstm --epochs 50 --data data/raw/eurusd.csv
+    python main.py train tcn --epochs 50 --data data/raw/eurusd.csv
     python main.py train vit --data-dir datasets/vit --epochs 30
     python main.py generate yolo --synthetic --samples 5000
     python main.py status --verbose
@@ -135,7 +135,7 @@ class SystemChecker:
             self.issues.append(f"Weights directory not found: {weights_dir}")
             return False
         
-        required = required or ["lstm_best.pt", "fusion_best.pt"]
+        required = required or ["tcn_best.pt", "fusion_best.pt"]
         missing = []
         
         for weight_file in required:
@@ -236,10 +236,10 @@ class SystemChecker:
         
         if mode == "live":
             self.check_mt5()
-            self.check_weights(["lstm_best.pt", "fusion_best.pt"])
-        
+            self.check_weights(["tcn_best.pt", "fusion_best.pt"])
+
         elif mode == "backtest":
-            self.check_weights(["lstm_best.pt"])
+            self.check_weights(["tcn_best.pt"])
         
         elif mode == "train":
             # Just check CUDA info
@@ -300,7 +300,7 @@ class SystemChecker:
         print("\n⚖️  Model Weights:")
         weights_dir = CONFIG.weights_dir
         weight_files = [
-            "lstm_best.pt", "vit_best.pt", "fusion_best.pt",
+            "tcn_best.pt", "vit_best.pt", "fusion_best.pt",
             "yolo_best.pt", "trend_classifier.joblib",
         ]
         for wf in weight_files:
@@ -442,22 +442,22 @@ def cmd_backtest(args, logger: logging.Logger):
     try:
         import pandas as pd
         from trading.bot import BacktestBot
-        from strategies.neural_hybrid import NeuralHybridStrategy, SimpleLSTMStrategy
-        
+        from strategies.neural_hybrid import NeuralHybridStrategy
+
         # Load data
         logger.info(f"Loading data from {args.data}")
         df = pd.read_csv(args.data)
         df.columns = df.columns.str.lower()
-        
+
         if 'time' in df.columns:
             df['time'] = pd.to_datetime(df['time'])
-        
+
         logger.info(f"Loaded {len(df)} candles")
-        
-        # Select strategy
+
+        # Select strategy (TCN-based neural hybrid)
         strategy_map = {
             "neural": NeuralHybridStrategy,
-            "lstm": SimpleLSTMStrategy,
+            "tcn": NeuralHybridStrategy,  # Alias for clarity
         }
         strategy_cls = strategy_map.get(args.strategy, NeuralHybridStrategy)
         
@@ -543,20 +543,7 @@ def cmd_train(args, logger: logging.Logger):
         return 0
     
     try:
-        if model == "lstm":
-            from training.train_lstm import train_lstm_model
-            
-            train_lstm_model(
-                data_path=args.data,
-                save_dir=args.save_dir or "models/weights",
-                epochs=args.epochs,
-                batch_size=args.batch_size,
-                learning_rate=args.lr,
-                seq_len=args.seq_len,
-                use_attention=args.attention,
-            )
-        
-        elif model == "vit":
+        if model == "vit":
             from training.train_vit import train_classifier, maybe_build_cache, get_args as get_vit_args
             
             # Build cache and train
@@ -646,7 +633,7 @@ def cmd_train(args, logger: logging.Logger):
         
         else:
             logger.error(f"Unknown model: {model}")
-            logger.info("Available models: lstm, vit, vit-finetune, fusion, yolo, trend")
+            logger.info("Available models: tcn, vit, vit-finetune, fusion, yolo, trend")
             return 1
         
         logger.info("✅ Training complete!")
@@ -668,8 +655,8 @@ def cmd_predict(args, logger: logging.Logger):
     try:
         import pandas as pd
         import torch
-        from inference.predictor import HybridPredictor, SimpleLSTMPredictor
-        
+        from inference.predictor import HybridPredictor, RiskAwareTCNPredictor
+
         # Load data
         if args.data:
             df = pd.read_csv(args.data)
@@ -686,42 +673,42 @@ def cmd_predict(args, logger: logging.Logger):
                 return 1
             df = connector.get_data(n=100)
             connector.disconnect()
-        
+
         if df.empty:
             logger.error("No data available")
             return 1
-        
+
         logger.info(f"Data: {len(df)} candles, last close: {df['close'].iloc[-1]:.5f}")
-        
+
         # Run prediction
         if args.simple:
-            predictor = SimpleLSTMPredictor(
-                weights_path=args.weights or "models/weights/lstm_best.pt"
+            predictor = RiskAwareTCNPredictor(
+                weights_path=args.weights or "models/weights/tcn_best.pt"
             )
         else:
             predictor = HybridPredictor(
                 weights_dir=args.weights or "models/weights"
             )
-        
+
         result = predictor.predict(df)
-        
+
         # Display results
         print("\n" + "=" * 50)
         print("  PREDICTION RESULT")
         print("=" * 50)
-        
+
         class_names = ['BUY', 'SELL', 'HOLD']
         print(f"\n  Signal: {class_names[result.predicted_class]}")
         print(f"  Confidence: {result.confidence:.2%}")
-        
+
         print(f"\n  Probabilities:")
         for i, name in enumerate(class_names):
             bar = "█" * int(result.probabilities[i] * 30)
             print(f"    {name:5}: {result.probabilities[i]:.2%} {bar}")
-        
+
         if result.gate_weights is not None:
             print(f"\n  Gate Weights (modality importance):")
-            modalities = ['LSTM', 'ViT', 'YOLO']
+            modalities = ['TCN', 'ViT', 'YOLO']
             for i, name in enumerate(modalities):
                 print(f"    {name}: {result.gate_weights[i]:.2%}")
         
@@ -838,7 +825,7 @@ Examples:
   %(prog)s multi --mock                           # Test with mock connector
   %(prog)s live --symbol EURUSD --timeframe H1    # Single strategy mode
   %(prog)s backtest --data data/EURUSD_H1.csv
-  %(prog)s train lstm --epochs 50
+  %(prog)s train tcn --epochs 50
   %(prog)s predict --symbol EURUSD
   %(prog)s generate vit --synthetic --samples 10000
   %(prog)s status --verbose
@@ -888,7 +875,7 @@ Examples:
     )
     live_parser.add_argument("--symbol", default="EURUSD", help="Trading symbol")
     live_parser.add_argument("--timeframe", default="H1", help="Timeframe (M1,M5,M15,M30,H1,H4,D1)")
-    live_parser.add_argument("--strategy", default="neural", help="Strategy (neural, lstm)")
+    live_parser.add_argument("--strategy", default="neural", help="Strategy (neural, tcn)")
     live_parser.add_argument("--interval", type=float, default=10.0, help="Check interval in seconds")
     live_parser.add_argument("--mock", action="store_true", help="Use mock connector (testing)")
     
@@ -901,7 +888,7 @@ Examples:
         description="Backtest strategy on historical OHLCV data",
     )
     bt_parser.add_argument("--data", required=True, help="Path to OHLCV CSV file")
-    bt_parser.add_argument("--strategy", default="neural", help="Strategy (neural, lstm)")
+    bt_parser.add_argument("--strategy", default="neural", help="Strategy (neural, tcn)")
     bt_parser.add_argument("--balance", type=float, default=10000.0, help="Initial balance")
     bt_parser.add_argument("--output", type=str, help="Save results to JSON file")
     
@@ -911,11 +898,11 @@ Examples:
     train_parser = subparsers.add_parser(
         "train",
         help="Train a model",
-        description="Train ML models (LSTM, ViT, Fusion, YOLO, Trend)",
+        description="Train ML models (TCN, ViT, Fusion, YOLO, Trend)",
     )
     train_parser.add_argument(
         "model",
-        choices=["lstm", "vit", "vit-finetune", "fusion", "yolo", "trend"],
+        choices=["tcn", "vit", "vit-finetune", "fusion", "yolo", "trend"],
         help="Model to train",
     )
     train_parser.add_argument("--data", type=str, help="Path to training data CSV")
@@ -924,8 +911,7 @@ Examples:
     train_parser.add_argument("--epochs", type=int, default=50, help="Training epochs")
     train_parser.add_argument("--batch-size", type=int, default=64, help="Batch size")
     train_parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate")
-    train_parser.add_argument("--seq-len", type=int, default=60, help="Sequence length (LSTM)")
-    train_parser.add_argument("--attention", action="store_true", help="Use attention (LSTM)")
+    train_parser.add_argument("--seq-len", type=int, default=60, help="Sequence length (TCN)")
     train_parser.add_argument("--cache-path", type=str, help="Feature cache path (ViT)")
     train_parser.add_argument("--synthetic", action="store_true", help="Use synthetic data (trend)")
     
@@ -940,7 +926,7 @@ Examples:
     pred_parser.add_argument("--data", type=str, help="Path to OHLCV CSV (or fetch from MT5)")
     pred_parser.add_argument("--symbol", default="EURUSD", help="Symbol for MT5 fetch")
     pred_parser.add_argument("--weights", type=str, help="Path to weights directory/file")
-    pred_parser.add_argument("--simple", action="store_true", help="Use simple LSTM predictor")
+    pred_parser.add_argument("--simple", action="store_true", help="Use simple TCN predictor")
     
     # -------------------------------------------------------------------------
     # GENERATE

@@ -55,9 +55,9 @@ class PredictorConfig:
     weights_dir: str = "models/weights"
     device: str = "auto"
     sequence_length: int = 60
-    
+
     # Model selection
-    model_type: str = "tcn"         # 'tcn' or 'lstm' (legacy)
+    model_type: str = "tcn"         # 'tcn' (Temporal Convolutional Network)
     profile: str = "INTRADAY"       # 'SCALP', 'INTRADAY', 'SWING'
     use_risk_heads: bool = True     # Enable volatility/quantile heads
     
@@ -511,9 +511,8 @@ class HybridPredictor:
         return probs.cpu().numpy()[0], gate_weights.cpu().numpy()[0]
 
 
-# Backward compatibility aliases
+# Alias for convenience
 TCNPredictor = RiskAwareTCNPredictor
-SimpleLSTMPredictor = RiskAwareTCNPredictor  # Legacy name
 
 
 def create_predictor(

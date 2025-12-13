@@ -1,9 +1,8 @@
 # models/tcn.py
 """
 Temporal Convolutional Network (TCN) for time-series feature extraction.
-Drop-in replacement for LSTMModel with same interface.
 
-TCN advantages over LSTM:
+TCN advantages:
 - Parallelizable (faster training/inference)
 - Stable gradients (no vanishing gradient problem)
 - Flexible receptive field via dilations
@@ -196,15 +195,15 @@ class TCNBackbone(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Args:
-            x: (batch, seq_len, input_dim) - same as LSTM input format
+            x: (batch, seq_len, input_dim) - standard sequence input
         Returns:
             (batch, seq_len, hidden_dim)
         """
         # TCN expects (batch, channels, seq_len)
         x = x.transpose(1, 2)  # (batch, input_dim, seq_len)
-        
+
         out = self.network(x)  # (batch, hidden_dim, seq_len)
-        
+
         # Back to (batch, seq_len, hidden_dim)
         return out.transpose(1, 2)
 
@@ -212,15 +211,14 @@ class TCNBackbone(nn.Module):
 class TCNModel(nn.Module):
     """
     Temporal Convolutional Network for time-series classification.
-    
-    DROP-IN REPLACEMENT for LSTMModel with identical interface:
-    - Same __init__ parameters
-    - Same forward(x, mode='features'|'classify') signature
-    - Same get_feature_dim() method
-    
+
+    Features:
+    - Causal dilated convolutions for long-range dependencies
+    - Residual connections for stable training
+    - Layer normalization for features
+    - Flexible classification head
+
     Usage:
-        # Replace LSTM with TCN
-        # model = LSTMModel(input_dim=5, hidden_dim=64, num_classes=3)
         model = TCNModel(input_dim=5, hidden_dim=64, num_classes=3)
         
         features = model(x, mode='features')  # (batch, hidden_dim)
@@ -260,7 +258,7 @@ class TCNModel(nn.Module):
         dropout: float = 0.2,
         kernel_size: int = 3,
         dilation_base: int = 2,
-        # Legacy params for LSTM compatibility (ignored)
+        # Note: bidirectional parameter exists for API compatibility but is ignored
         bidirectional: bool = False,
     ):
         super().__init__()
@@ -585,62 +583,50 @@ def create_tcn_model(
 # Backward compatibility alias
 # =============================================================================
 
-# This allows: from models.tcn import TCNModel as LSTMModel
-# For gradual migration without changing imports everywhere
-LSTMModelReplacement = TCNModel
-
-
 if __name__ == "__main__":
     # Quick test
     print("=" * 60)
     print("TCN Model Test")
     print("=" * 60)
-    
+
     # Test standard TCN
     model = TCNModel(input_dim=5, hidden_dim=64, num_layers=5, num_classes=3)
     x = torch.randn(8, 60, 5)  # (batch=8, seq_len=60, features=5)
-    
+
     features = model(x, mode='features')
     logits = model(x, mode='classify')
-    
+
     print(f"\nInput shape: {x.shape}")
     print(f"Features shape: {features.shape}")
     print(f"Logits shape: {logits.shape}")
     print(f"Feature dim: {model.get_feature_dim()}")
-    
+
     # Test profile presets
     print("\n" + "-" * 40)
     print("Profile Presets:")
     for profile in ['SCALP', 'INTRADAY', 'SWING']:
         m = TCNModel.from_profile(profile)
         print(f"  {profile}: RF={m.tcn.receptive_field} timesteps")
-    
+
     # Test attention variant
     print("\n" + "-" * 40)
     print("TCN with Attention:")
     model_attn = TCNWithAttention(input_dim=5, hidden_dim=64)
     feat_attn = model_attn(x, mode='features')
     print(f"  Features shape: {feat_attn.shape}")
-    
+
     # Test multi-scale
     print("\n" + "-" * 40)
     print("Multi-Scale TCN:")
     model_ms = MultiScaleTCN(input_dim=5, hidden_dim=64)
     feat_ms = model_ms(x, mode='features')
     print(f"  Features shape: {feat_ms.shape}")
-    
-    # Parameter count comparison
+
+    # Parameter count
     print("\n" + "-" * 40)
-    print("Parameter Counts:")
-    
-    from models.lstm import LSTMModel
-    lstm = LSTMModel(input_dim=5, hidden_dim=64, num_layers=2, num_classes=3)
+    print("Parameter Count:")
     tcn = TCNModel(input_dim=5, hidden_dim=64, num_layers=5, num_classes=3)
-    
-    lstm_params = sum(p.numel() for p in lstm.parameters())
     tcn_params = sum(p.numel() for p in tcn.parameters())
-    
-    print(f"  LSTM: {lstm_params:,} parameters")
     print(f"  TCN:  {tcn_params:,} parameters")
-    
+
     print("\n✅ All tests passed!")

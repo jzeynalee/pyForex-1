@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ModelInfo:
     """Information about a loaded model."""
-    model_type: str  # 'tcn', 'lstm', 'enhanced_tcn', etc.
+    model_type: str  # 'tcn', 'enhanced_tcn', etc.
     input_dim: int
     hidden_dim: int
     num_classes: int
@@ -49,12 +49,11 @@ class CheckpointFormatError(Exception):
 class ModelLoader:
     """
     Unified loader for pyForex model checkpoints.
-    
+
     Handles multiple checkpoint formats:
     - New format (train_tcn_enhanced.py): Contains feature_columns, config, etc.
-    - Old format (train_lstm_enhanced.py): May have model_state only
     - Legacy format: Direct state dict
-    
+
     Example:
         loader = ModelLoader("models/weights/tcn_enhanced_best.pt")
         
@@ -109,7 +108,7 @@ class ModelLoader:
                 if 'config' in self.checkpoint:
                     return 'enhanced_v2'  # Intermediate format
                 return 'enhanced_v1'  # Old format with model_state
-            elif any(k.startswith('tcn.') or k.startswith('lstm.') for k in self.checkpoint.keys()):
+            elif any(k.startswith('tcn.') for k in self.checkpoint.keys()):
                 return 'state_dict'  # Direct state dict
         
         return 'unknown'
@@ -141,24 +140,8 @@ class ModelLoader:
                 hidden_dim=info.hidden_dim,
                 num_classes=info.num_classes,
             )
-        elif info.model_type in ['lstm', 'enhanced_lstm']:
-            # Try to import EnhancedLSTM
-            try:
-                from training.train_lstm_enhanced import EnhancedLSTM
-                model = EnhancedLSTM(
-                    input_dim=info.input_dim,
-                    hidden_dim=info.hidden_dim,
-                    num_classes=info.num_classes,
-                )
-            except ImportError:
-                from models.lstm import LSTMModel
-                model = LSTMModel(
-                    input_dim=info.input_dim,
-                    hidden_dim=info.hidden_dim,
-                    num_classes=info.num_classes,
-                )
         else:
-            raise CheckpointFormatError(f"Unknown model type: {info.model_type}")
+            raise CheckpointFormatError(f"Unknown model type: {info.model_type}. Only TCN models are supported.")
         
         # Load state dict
         state_dict = self._get_state_dict()
@@ -263,17 +246,13 @@ class ModelLoader:
         # Infer type from checkpoint structure or config
         if 'tcn' in str(self.path).lower() or 'receptive_field' in model_config:
             model_type = 'enhanced_tcn'
-        elif 'lstm' in str(self.path).lower():
-            model_type = 'enhanced_lstm'
         else:
             # Try to detect from state dict keys
             state_dict = self._get_state_dict()
             if any('tcn' in k.lower() for k in state_dict.keys()):
                 model_type = 'tcn'
-            elif any('lstm' in k.lower() for k in state_dict.keys()):
-                model_type = 'lstm'
             else:
-                model_type = 'unknown'
+                model_type = 'enhanced_tcn'  # Default to TCN
         
         # Get dimensions
         try:
@@ -396,20 +375,15 @@ def print_checkpoint_summary(checkpoint_path: Union[str, Path]):
 # Backward Compatibility
 # =============================================================================
 
-# For code that imported TOP_FEATURES from train_lstm_enhanced
-# This provides a way to get features from a default checkpoint
+# Get features from default TCN checkpoint
 _DEFAULT_CHECKPOINT = "models/weights/tcn_enhanced_best.pt"
 
 def get_default_features() -> List[str]:
     """
-    Get features from default checkpoint.
-    
-    This is a compatibility shim for code that used:
-        from training.train_lstm_enhanced import TOP_FEATURES
-    
-    Replace with:
-        from utils.checkpoint_loader import get_default_features
-        TOP_FEATURES = get_default_features()
+    Get features from default TCN checkpoint.
+
+    Returns:
+        List of feature column names used in the default model.
     """
     try:
         return load_features(_DEFAULT_CHECKPOINT)
