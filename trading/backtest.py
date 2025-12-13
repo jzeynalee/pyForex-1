@@ -70,6 +70,25 @@ class BacktestExecutor:
         self.current_price = 0.0
         self.current_time = datetime.now()
     
+    def connect(self) -> bool:
+        """
+        Stub connect method for compatibility with MT5Connector interface.
+        BacktestExecutor is always connected by definition.
+        
+        Returns:
+            bool: Always True
+        """
+        return True
+    
+    def disconnect(self) -> bool:
+        """
+        Stub disconnect method for compatibility with MT5Connector interface.
+        
+        Returns:
+            bool: Always True
+        """
+        return True
+    
     def entry(
         self,
         signal: str,
