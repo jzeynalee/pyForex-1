@@ -505,6 +505,7 @@ class NeuralHybridStrategy:
             if result.get('success'):
                 ticket = result.get('ticket', str(datetime.utcnow().timestamp()))
                 order.ticket = ticket
+                order.price = float(result.get('price', order.price) or order.price)
                 
                 # Track position
                 self._open_positions[ticket] = OpenPosition(

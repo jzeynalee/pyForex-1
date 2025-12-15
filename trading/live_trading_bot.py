@@ -79,6 +79,7 @@ class BotState(Enum):
     INITIALIZING = "initializing"
     RUNNING = "running"
     PAUSED = "paused"
+    DISCONNECTED = "disconnected"
     ERROR = "error"
     PROTECTION_HALT = "protection_halt"  # New: halted by capital protection
 
@@ -147,6 +148,8 @@ class BotConfig:
     # Safety
     dry_run: bool = False               # Paper trading mode
     require_confirmation: bool = False   # Require manual confirmation
+    halt_on_disconnect: bool = True
+    min_order_interval_seconds: int = 2
 
 
 class LiveTradingBot:
@@ -221,6 +224,11 @@ class LiveTradingBot:
         self._last_position_check: Optional[datetime] = None
         self._day_start: Optional[datetime] = None
         self._week_start: Optional[datetime] = None
+
+        self._order_lock = threading.Lock()
+        self._order_in_flight = False
+        self._last_order_fingerprint: Optional[str] = None
+        self._last_order_time: Optional[datetime] = None
         
         # Callbacks
         self.on_signal: Optional[Callable] = None
@@ -304,6 +312,24 @@ class LiveTradingBot:
                 
                 # Check for day/week rollover
                 self._check_time_periods(current_time)
+
+                # Execution connectivity fail-safe
+                if self.config.halt_on_disconnect and self.executor:
+                    ensure = getattr(self.executor, 'ensure_connected', None)
+                    connected = True
+                    if callable(ensure):
+                        connected = bool(ensure())
+                    else:
+                        connected = bool(getattr(self.executor, 'connected', True))
+
+                    if not connected:
+                        self.state = BotState.DISCONNECTED
+                        logger.critical("EXECUTION DISCONNECTED - Trading halted")
+                        self._wait(60)
+                        continue
+
+                    if self.state == BotState.DISCONNECTED:
+                        self.state = BotState.RUNNING
                 
                 # Check capital protection status
                 if self.capital_protector:
@@ -433,7 +459,31 @@ class LiveTradingBot:
             return
         
         # Execute trade
-        success = self.strategy.execute(order)
+        fingerprint = (
+            f"{order.symbol}|{order.direction}|{order.volume:.6f}|"
+            f"{order.stop_loss:.8f}|{order.take_profit:.8f}"
+        )
+
+        with self._order_lock:
+            if self._order_in_flight:
+                return
+
+            if (
+                self._last_order_fingerprint == fingerprint
+                and self._last_order_time is not None
+                and (current_time - self._last_order_time).total_seconds() < self.config.min_order_interval_seconds
+            ):
+                return
+
+            self._order_in_flight = True
+            self._last_order_fingerprint = fingerprint
+            self._last_order_time = current_time
+
+        try:
+            success = self.strategy.execute(order)
+        finally:
+            with self._order_lock:
+                self._order_in_flight = False
         
         if success:
             self._trades_executed += 1
