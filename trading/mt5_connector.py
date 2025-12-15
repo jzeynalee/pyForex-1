@@ -484,14 +484,43 @@ class MockMT5Connector:
     
     def execute_order(self, signal: str, volume: float, sl: float, tp: float, **kwargs) -> OrderResult:
         self._ticket_counter += 1
+        ticket = self._ticket_counter
+        price = 1.1000
         logger.info(f"[MOCK] Order: {signal} {volume} lots, SL={sl}, TP={tp}")
-        return OrderResult(True, self._ticket_counter, 1.1000, volume, None)
+        self._positions.append(
+            {
+                'ticket': ticket,
+                'symbol': self.symbol,
+                'type': signal.upper(),
+                'volume': float(volume),
+                'price_open': price,
+                'price_current': price,
+                'sl': float(sl),
+                'tp': float(tp),
+                'profit': 0.0,
+                'magic': kwargs.get('magic', 123456),
+                'time': datetime.now(),
+            }
+        )
+        return OrderResult(True, ticket, price, volume, None)
     
     def entry(self, signal: str, volume: float, sl: float, tp: float) -> OrderResult:
         return self.execute_order(signal, volume, sl, tp)
     
     def get_open_positions(self, **kwargs) -> list:
-        return self._positions
+        symbol = kwargs.get('symbol')
+        if symbol:
+            return [p for p in self._positions if p.get('symbol') == symbol]
+        return list(self._positions)
+
+    def close_position(self, ticket: int) -> OrderResult:
+        for i, p in enumerate(self._positions):
+            if int(p.get('ticket')) == int(ticket):
+                volume = float(p.get('volume', 0.0))
+                price = float(p.get('price_current', p.get('price_open', 1.1000)))
+                del self._positions[i]
+                return OrderResult(True, int(ticket), price, volume, None)
+        return OrderResult(False, None, None, 0.0, f"Position {ticket} not found")
     
     def get_current_price(self, **kwargs) -> Dict[str, float]:
         return {'bid': 1.0999, 'ask': 1.1001, 'spread': 0.0002}

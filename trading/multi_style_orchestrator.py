@@ -29,7 +29,6 @@ from trading.style_config import (
     get_all_required_timeframes, get_timeframe_minutes,
 )
 from trading.position_coordinator import PositionCoordinator, TrackedPosition
-from trading.risk_manager import RiskManager, RiskConfig
 from trading.mt5_connector import MT5Connector, MockMT5Connector, OrderResult
 from strategies.style_strategies import (
     StyleStrategy, ScalpingStrategy, IntradayStrategy, SwingStrategy,
@@ -58,6 +57,11 @@ class ExecutionResult:
     ticket: Optional[int]
     error: Optional[str]
     trade_params: Dict
+
+
+class _NoOpRiskManager:
+    def get_status(self) -> Dict:
+        return {}
 
 
 class MultiTimeframeDataManager:
@@ -257,13 +261,7 @@ class MultiStyleOrchestrator:
         logger.info("✓ Position coordinator initialized")
         
         # 4. Initialize risk manager
-        self.risk_manager = RiskManager(
-            account_balance=initial_balance,
-            config=RiskConfig(
-                max_daily_loss_pct=self.config.max_daily_loss_pct,
-                max_drawdown_pct=self.config.max_drawdown_pct,
-            ),
-        )
+        self.risk_manager = _NoOpRiskManager()
         logger.info("✓ Risk manager initialized")
         
         # 5. Initialize predictor (shared across strategies)

@@ -40,6 +40,29 @@ class MT5Executor:
             return float(getattr(account, "balance", 0.0))
         return 0.0
 
+    def get_open_positions(self, symbol: Optional[str] = None):
+        fn = getattr(self.connector, "get_open_positions", None)
+        if callable(fn):
+            return fn(symbol=symbol)
+        return []
+
+    def close_position(self, ticket: str):
+        fn = getattr(self.connector, "close_position", None)
+        if callable(fn):
+            result = fn(int(ticket))
+            if isinstance(result, OrderResult):
+                return {
+                    "success": bool(result.success),
+                    "ticket": result.ticket,
+                    "price": result.price,
+                    "volume": float(result.volume),
+                    "error": result.error,
+                }
+            if isinstance(result, dict):
+                return result
+            return {"success": False, "error": "Unknown close result"}
+        return {"success": False, "error": "Connector has no close_position"}
+
     def execute_order(
         self,
         symbol: str,

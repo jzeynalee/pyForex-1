@@ -144,6 +144,9 @@ class BotConfig:
     log_trades: bool = True
     trades_log_file: str = 'logs/trades.json'
     performance_log_file: str = 'logs/performance.json'
+
+    persist_open_positions: bool = True
+    open_positions_file: str = 'logs/open_positions.json'
     
     # Safety
     dry_run: bool = False               # Paper trading mode
@@ -265,6 +268,9 @@ class LiveTradingBot:
             )
         
         self.strategy.initialize()
+
+        if self.config.persist_open_positions:
+            self._recover_open_positions()
         
         # Initialize Phase 4: Exit Advisor
         if self.config.enable_exit_advisor and HAS_EXIT_ADVISOR:
@@ -502,6 +508,9 @@ class LiveTradingBot:
                 stop_loss=order.stop_loss,
                 take_profit=order.take_profit
             )
+
+            if self.config.persist_open_positions:
+                self._save_open_positions()
             
             # Log trade
             if self.config.log_trades:
@@ -612,6 +621,9 @@ class LiveTradingBot:
         """Handle position close event."""
         # Remove from tracking
         pos = self._open_positions.pop(ticket, None)
+
+        if self.config.persist_open_positions:
+            self._save_open_positions()
         
         # Update P&L
         self._daily_pnl += pnl
@@ -718,6 +730,68 @@ class LiveTradingBot:
                 
         except Exception as e:
             logger.error(f"Failed to log trade: {e}")
+
+    def _save_open_positions(self):
+        try:
+            path = Path(self.config.open_positions_file)
+            path.parent.mkdir(parents=True, exist_ok=True)
+
+            data = []
+            for ticket, pos in self._open_positions.items():
+                data.append(
+                    {
+                        'ticket': ticket,
+                        'symbol': pos.symbol,
+                        'direction': pos.direction,
+                        'entry_price': pos.entry_price,
+                        'entry_time': pos.entry_time.isoformat(),
+                        'volume': pos.volume,
+                        'stop_loss': pos.stop_loss,
+                        'take_profit': pos.take_profit,
+                    }
+                )
+
+            with open(path, 'w') as f:
+                json.dump(data, f, indent=2)
+        except Exception as e:
+            logger.error(f"Failed to persist open positions: {e}")
+
+    def _recover_open_positions(self):
+        try:
+            path = Path(self.config.open_positions_file)
+            if not path.exists():
+                return
+
+            with open(path, 'r') as f:
+                data = json.load(f) or []
+
+            recovered = {}
+            for row in data:
+                ticket = str(row.get('ticket'))
+                recovered[ticket] = OpenPosition(
+                    ticket=ticket,
+                    symbol=row.get('symbol', self.config.symbol),
+                    direction=int(row.get('direction', 0)),
+                    entry_price=float(row.get('entry_price', 0.0)),
+                    entry_time=datetime.fromisoformat(row.get('entry_time')),
+                    volume=float(row.get('volume', 0.0)),
+                    stop_loss=float(row.get('stop_loss', 0.0)),
+                    take_profit=float(row.get('take_profit', 0.0)),
+                )
+
+            self._open_positions = recovered
+
+            if self.executor and hasattr(self.executor, 'get_open_positions'):
+                broker_positions = self.executor.get_open_positions(symbol=self.config.symbol)
+                broker_tickets = {str(p.get('ticket')) for p in broker_positions}
+                orphaned = [t for t in self._open_positions.keys() if t not in broker_tickets]
+                for t in orphaned:
+                    self._open_positions.pop(t, None)
+
+            self._save_open_positions()
+
+        except Exception as e:
+            logger.error(f"Failed to recover open positions: {e}")
     
     def reset_daily_stats(self):
         """Reset daily statistics."""
