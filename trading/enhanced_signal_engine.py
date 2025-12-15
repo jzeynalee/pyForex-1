@@ -17,12 +17,14 @@ from pathlib import Path
 from typing import Optional, Dict, Any, Union
 
 from trend_detection.structural_analyzer import StructuralAnalyzer
-from trend_detection.mtf_analyzer import MTFAnalyzer
+from trend_detection.mtf_analyzer_v2 import MTFAnalyzerV2
 from trend_detection.regime_classifier import RegimeClassifier
 from trend_detection.trend_features import TrendFeatureBuilder
 
 logger = logging.getLogger(__name__)
 
+# Backwards compatibility alias (older code/tests patch `MTFAnalyzer`)
+MTFAnalyzer = MTFAnalyzerV2
 
 class FusionFXTrendDetector:
     """
@@ -55,7 +57,7 @@ class FusionFXTrendDetector:
         If neither is provided, Step 4 uses neutral defaults.
         """
         self.structural_analyzer = StructuralAnalyzer()
-        self.mtf_analyzer = MTFAnalyzer()
+        self.mtf_analyzer = MTFAnalyzerV2()
         self.regime_classifier = RegimeClassifier()
         self.feature_builder = TrendFeatureBuilder()
         
@@ -116,8 +118,9 @@ class FusionFXTrendDetector:
             tf: result['score'] for tf, result in structural_results.items()
         }
         
-        mtf_result = self.mtf_analyzer.analyze(dfs_dict, structural_scores)
-        mtf_score = mtf_result['mtf_score']
+        mtf_result_obj = self.mtf_analyzer.analyze(dfs_dict=dfs_dict, structural_scores=structural_scores)
+        mtf_result = mtf_result_obj.to_dict()
+        mtf_score = mtf_result["mtf_score"]
         
         # ========================================
         # STEP 3: REGIME CONDITIONING

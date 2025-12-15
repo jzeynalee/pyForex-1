@@ -209,13 +209,13 @@ class MetaFeatureExtractor:
             time_features = []
             
             # Hour of day (cyclical encoding)
-            hour = timestamps.hour
+            hour = timestamps.hour.values
             time_features.append(np.sin(2 * np.pi * hour / 24).reshape(-1, 1))
             time_features.append(np.cos(2 * np.pi * hour / 24).reshape(-1, 1))
             self.feature_names.extend(['hour_sin', 'hour_cos'])
             
             # Day of week (cyclical)
-            day = timestamps.dayofweek
+            day = timestamps.dayofweek.values
             time_features.append(np.sin(2 * np.pi * day / 5).reshape(-1, 1))
             time_features.append(np.cos(2 * np.pi * day / 5).reshape(-1, 1))
             self.feature_names.extend(['day_sin', 'day_cos'])

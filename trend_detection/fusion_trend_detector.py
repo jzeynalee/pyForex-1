@@ -10,7 +10,7 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 import numpy as np
 from trend_detection.structural_analyzer import StructuralAnalyzer
-from trend_detection.mtf_analyzer import MTFAnalyzer
+from trend_detection.mtf_analyzer_v2 import MTFAnalyzerV2
 from trend_detection.regime_classifier import RegimeClassifier
 from trend_detection.trend_features import TrendFeatureBuilder
 
@@ -26,7 +26,7 @@ class FusionFXTrendDetector:
             ml_model: Your trained Fusion model (optional for Step 4)
         """
         self.structural_analyzer = StructuralAnalyzer()
-        self.mtf_analyzer = MTFAnalyzer()
+        self.mtf_analyzer = MTFAnalyzerV2()
         self.regime_classifier = RegimeClassifier()
         self.feature_builder = TrendFeatureBuilder()
         self.ml_model = ml_model
@@ -69,7 +69,8 @@ class FusionFXTrendDetector:
             tf: result['score'] for tf, result in structural_results.items()
         }
         
-        mtf_result = self.mtf_analyzer.analyze(dfs_dict, structural_scores)
+        mtf_result_obj = self.mtf_analyzer.analyze(dfs_dict=dfs_dict, structural_scores=structural_scores)
+        mtf_result = mtf_result_obj.to_dict()
         mtf_score = mtf_result['mtf_score']
         
         # ========================================
