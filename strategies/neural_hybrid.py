@@ -331,6 +331,10 @@ class NeuralHybridStrategy:
             
             # Generate features
             features = self._prepare_features(market_data)
+
+            if features is None or np.isnan(features).any():
+                logger.warning("Invalid features (NaNs) - skipping inference")
+                return None
             
             # Get chart image if using vision
             chart_image = None

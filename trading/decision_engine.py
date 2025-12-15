@@ -400,8 +400,9 @@ class EnhancedDecisionEngine:
         
         decision.stop_loss = sltp_result.stop_loss
         decision.take_profit = sltp_result.take_profit
-        decision.sl_pips = sltp_result.sl_pips
-        decision.tp_pips = sltp_result.tp_pips
+        pip_size = 0.01 if 'JPY' in pair.upper() else 0.0001
+        decision.sl_pips = float(sltp_result.sl_distance / pip_size) if pip_size > 0 else 0.0
+        decision.tp_pips = float(sltp_result.tp_distance / pip_size) if pip_size > 0 else 0.0
         decision.risk_reward_ratio = sltp_result.risk_reward_ratio
         
         # Check risk-reward
@@ -569,7 +570,7 @@ class EnhancedDecisionEngine:
         try:
             return self.regime_detector.detect(market_data)
         except Exception:
-            return MarketRegime.NORMAL
+            return MarketRegime.VOLATILE
     
     def _estimate_spread(self, pair: str) -> float:
         """Estimate spread for a pair."""

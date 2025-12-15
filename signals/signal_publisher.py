@@ -748,6 +748,12 @@ class SignalPublisher:
     def _check_rate_limits(self) -> bool:
         """Check if within rate limits."""
         now = datetime.utcnow()
+
+        # Global minimum spacing between any two signals
+        if self.config.min_seconds_between_signals > 0 and self._last_publish_time:
+            last_any = max(self._last_publish_time.values())
+            if (now - last_any).total_seconds() < self.config.min_seconds_between_signals:
+                return False
         
         # Reset hourly counter
         if (now - self._hour_start).total_seconds() >= 3600:
