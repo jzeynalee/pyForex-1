@@ -56,6 +56,77 @@ except Exception:
     fake_torch.nn.functional = types.ModuleType('torch.nn.functional')
     fake_torch.utils = types.ModuleType('torch.utils')
     fake_torch.utils.data = types.ModuleType('torch.utils.data')
+    fake_torch.distributions = types.ModuleType('torch.distributions')
+    
+    class _FakeTensor:
+        pass
+    
+    fake_torch.Tensor = _FakeTensor
+    
+    class _FakeDataset:
+        def __len__(self):
+            return 0
+        
+        def __getitem__(self, idx):
+            raise IndexError(idx)
+    
+    class _FakeTensorDataset(_FakeDataset):
+        def __init__(self, *tensors):
+            self.tensors = tensors
+            if tensors:
+                try:
+                    self._length = len(tensors[0])
+                except Exception:
+                    self._length = 0
+            else:
+                self._length = 0
+        
+        def __len__(self):
+            return self._length
+        
+        def __getitem__(self, idx):
+            return tuple(t[idx] for t in self.tensors)
+    
+    class _FakeDataLoader:
+        def __init__(self, dataset, batch_size=1, shuffle=False, **kwargs):
+            self.dataset = dataset
+            self.batch_size = batch_size
+            self.shuffle = shuffle
+        
+        def __iter__(self):
+            batch = []
+            for i in range(len(self.dataset)):
+                batch.append(self.dataset[i])
+                if len(batch) >= self.batch_size:
+                    yield batch
+                    batch = []
+            if batch:
+                yield batch
+        
+        def __len__(self):
+            if self.batch_size <= 0:
+                return 0
+            try:
+                return (len(self.dataset) + self.batch_size - 1) // self.batch_size
+            except Exception:
+                return 0
+    
+    fake_torch.utils.data.Dataset = _FakeDataset
+    fake_torch.utils.data.TensorDataset = _FakeTensorDataset
+    fake_torch.utils.data.DataLoader = _FakeDataLoader
+
+    class _FakeCategorical:
+        def __init__(self, *args, **kwargs):
+            self.args = args
+            self.kwargs = kwargs
+
+        def sample(self):
+            return 0
+
+        def log_prob(self, value):
+            return 0
+
+    fake_torch.distributions.Categorical = _FakeCategorical
     
     # Add common nn classes
     fake_torch.nn.Module = object
@@ -80,6 +151,55 @@ except Exception:
     sys.modules['torch.nn.functional'] = fake_torch.nn.functional
     sys.modules['torch.utils'] = fake_torch.utils
     sys.modules['torch.utils.data'] = fake_torch.utils.data
+    sys.modules['torch.distributions'] = fake_torch.distributions
+
+
+# =============================================================================
+# FAKE TORCHVISION MODULE (for ViT training)
+# =============================================================================
+
+try:
+    import torchvision  # noqa: F401
+except Exception:
+    fake_torchvision = types.ModuleType('torchvision')
+    fake_torchvision.datasets = types.ModuleType('torchvision.datasets')
+    fake_torchvision.transforms = types.ModuleType('torchvision.transforms')
+
+    class _IdentityTransform:
+        def __call__(self, x):
+            return x
+
+    class _Compose:
+        def __init__(self, transforms):
+            self.transforms = transforms or []
+
+        def __call__(self, x):
+            for t in self.transforms:
+                x = t(x)
+            return x
+
+    fake_torchvision.transforms.Compose = _Compose
+    fake_torchvision.transforms.ToTensor = _IdentityTransform
+    fake_torchvision.transforms.Normalize = lambda *args, **kwargs: _IdentityTransform()
+    fake_torchvision.transforms.Resize = lambda *args, **kwargs: _IdentityTransform()
+    fake_torchvision.transforms.CenterCrop = lambda *args, **kwargs: _IdentityTransform()
+
+    class _FakeDataset:
+        def __init__(self, *args, **kwargs):
+            self.args = args
+            self.kwargs = kwargs
+
+        def __len__(self):
+            return 0
+
+        def __getitem__(self, idx):
+            raise IndexError(idx)
+
+    fake_torchvision.datasets.ImageFolder = _FakeDataset
+
+    sys.modules['torchvision'] = fake_torchvision
+    sys.modules['torchvision.datasets'] = fake_torchvision.datasets
+    sys.modules['torchvision.transforms'] = fake_torchvision.transforms
 
 
 # =============================================================================

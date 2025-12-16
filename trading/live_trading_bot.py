@@ -79,6 +79,7 @@ class BotState(Enum):
     INITIALIZING = "initializing"
     RUNNING = "running"
     PAUSED = "paused"
+    DISCONNECTED = "disconnected"
     ERROR = "error"
     PROTECTION_HALT = "protection_halt"  # New: halted by capital protection
 
@@ -143,10 +144,15 @@ class BotConfig:
     log_trades: bool = True
     trades_log_file: str = 'logs/trades.json'
     performance_log_file: str = 'logs/performance.json'
+
+    persist_open_positions: bool = True
+    open_positions_file: str = 'logs/open_positions.json'
     
     # Safety
     dry_run: bool = False               # Paper trading mode
     require_confirmation: bool = False   # Require manual confirmation
+    halt_on_disconnect: bool = True
+    min_order_interval_seconds: int = 2
 
 
 class LiveTradingBot:
@@ -221,6 +227,11 @@ class LiveTradingBot:
         self._last_position_check: Optional[datetime] = None
         self._day_start: Optional[datetime] = None
         self._week_start: Optional[datetime] = None
+
+        self._order_lock = threading.Lock()
+        self._order_in_flight = False
+        self._last_order_fingerprint: Optional[str] = None
+        self._last_order_time: Optional[datetime] = None
         
         # Callbacks
         self.on_signal: Optional[Callable] = None
@@ -257,6 +268,9 @@ class LiveTradingBot:
             )
         
         self.strategy.initialize()
+
+        if self.config.persist_open_positions:
+            self._recover_open_positions()
         
         # Initialize Phase 4: Exit Advisor
         if self.config.enable_exit_advisor and HAS_EXIT_ADVISOR:
@@ -304,6 +318,24 @@ class LiveTradingBot:
                 
                 # Check for day/week rollover
                 self._check_time_periods(current_time)
+
+                # Execution connectivity fail-safe
+                if self.config.halt_on_disconnect and self.executor:
+                    ensure = getattr(self.executor, 'ensure_connected', None)
+                    connected = True
+                    if callable(ensure):
+                        connected = bool(ensure())
+                    else:
+                        connected = bool(getattr(self.executor, 'connected', True))
+
+                    if not connected:
+                        self.state = BotState.DISCONNECTED
+                        logger.critical("EXECUTION DISCONNECTED - Trading halted")
+                        self._wait(60)
+                        continue
+
+                    if self.state == BotState.DISCONNECTED:
+                        self.state = BotState.RUNNING
                 
                 # Check capital protection status
                 if self.capital_protector:
@@ -433,7 +465,31 @@ class LiveTradingBot:
             return
         
         # Execute trade
-        success = self.strategy.execute(order)
+        fingerprint = (
+            f"{order.symbol}|{order.direction}|{order.volume:.6f}|"
+            f"{order.stop_loss:.8f}|{order.take_profit:.8f}"
+        )
+
+        with self._order_lock:
+            if self._order_in_flight:
+                return
+
+            if (
+                self._last_order_fingerprint == fingerprint
+                and self._last_order_time is not None
+                and (current_time - self._last_order_time).total_seconds() < self.config.min_order_interval_seconds
+            ):
+                return
+
+            self._order_in_flight = True
+            self._last_order_fingerprint = fingerprint
+            self._last_order_time = current_time
+
+        try:
+            success = self.strategy.execute(order)
+        finally:
+            with self._order_lock:
+                self._order_in_flight = False
         
         if success:
             self._trades_executed += 1
@@ -452,6 +508,9 @@ class LiveTradingBot:
                 stop_loss=order.stop_loss,
                 take_profit=order.take_profit
             )
+
+            if self.config.persist_open_positions:
+                self._save_open_positions()
             
             # Log trade
             if self.config.log_trades:
@@ -562,6 +621,9 @@ class LiveTradingBot:
         """Handle position close event."""
         # Remove from tracking
         pos = self._open_positions.pop(ticket, None)
+
+        if self.config.persist_open_positions:
+            self._save_open_positions()
         
         # Update P&L
         self._daily_pnl += pnl
@@ -668,6 +730,68 @@ class LiveTradingBot:
                 
         except Exception as e:
             logger.error(f"Failed to log trade: {e}")
+
+    def _save_open_positions(self):
+        try:
+            path = Path(self.config.open_positions_file)
+            path.parent.mkdir(parents=True, exist_ok=True)
+
+            data = []
+            for ticket, pos in self._open_positions.items():
+                data.append(
+                    {
+                        'ticket': ticket,
+                        'symbol': pos.symbol,
+                        'direction': pos.direction,
+                        'entry_price': pos.entry_price,
+                        'entry_time': pos.entry_time.isoformat(),
+                        'volume': pos.volume,
+                        'stop_loss': pos.stop_loss,
+                        'take_profit': pos.take_profit,
+                    }
+                )
+
+            with open(path, 'w') as f:
+                json.dump(data, f, indent=2)
+        except Exception as e:
+            logger.error(f"Failed to persist open positions: {e}")
+
+    def _recover_open_positions(self):
+        try:
+            path = Path(self.config.open_positions_file)
+            if not path.exists():
+                return
+
+            with open(path, 'r') as f:
+                data = json.load(f) or []
+
+            recovered = {}
+            for row in data:
+                ticket = str(row.get('ticket'))
+                recovered[ticket] = OpenPosition(
+                    ticket=ticket,
+                    symbol=row.get('symbol', self.config.symbol),
+                    direction=int(row.get('direction', 0)),
+                    entry_price=float(row.get('entry_price', 0.0)),
+                    entry_time=datetime.fromisoformat(row.get('entry_time')),
+                    volume=float(row.get('volume', 0.0)),
+                    stop_loss=float(row.get('stop_loss', 0.0)),
+                    take_profit=float(row.get('take_profit', 0.0)),
+                )
+
+            self._open_positions = recovered
+
+            if self.executor and hasattr(self.executor, 'get_open_positions'):
+                broker_positions = self.executor.get_open_positions(symbol=self.config.symbol)
+                broker_tickets = {str(p.get('ticket')) for p in broker_positions}
+                orphaned = [t for t in self._open_positions.keys() if t not in broker_tickets]
+                for t in orphaned:
+                    self._open_positions.pop(t, None)
+
+            self._save_open_positions()
+
+        except Exception as e:
+            logger.error(f"Failed to recover open positions: {e}")
     
     def reset_daily_stats(self):
         """Reset daily statistics."""

@@ -331,6 +331,10 @@ class NeuralHybridStrategy:
             
             # Generate features
             features = self._prepare_features(market_data)
+
+            if features is None or np.isnan(features).any():
+                logger.warning("Invalid features (NaNs) - skipping inference")
+                return None
             
             # Get chart image if using vision
             chart_image = None
@@ -505,6 +509,7 @@ class NeuralHybridStrategy:
             if result.get('success'):
                 ticket = result.get('ticket', str(datetime.utcnow().timestamp()))
                 order.ticket = ticket
+                order.price = float(result.get('price', order.price) or order.price)
                 
                 # Track position
                 self._open_positions[ticket] = OpenPosition(
