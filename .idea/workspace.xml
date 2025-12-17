@@ -2,11 +2,17 @@
 <project version="4">
   <component name="ChangeListManager">
     <list default="true" id="2b98d5ed-b808-40be-b358-495afbfd9969" name="Changes" comment="">
-      <change beforePath="$PROJECT_DIR$/ml/risk_retraining/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/ml/risk_retraining/__init__.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/risk_management/phase3_filtering/meta_labeling.py" beforeDir="false" afterPath="$PROJECT_DIR$/risk_management/phase3_filtering/meta_labeling.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/conftest.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/conftest.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/trading/enhanced_signal_engine.py" beforeDir="false" afterPath="$PROJECT_DIR$/trading/enhanced_signal_engine.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/trend_detection/fusion_trend_detector.py" beforeDir="false" afterPath="$PROJECT_DIR$/trend_detection/fusion_trend_detector.py" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.idea/inspectionProfiles/profiles_settings.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.idea/misc.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.idea/modules.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.idea/pyForex-1.iml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.idea/vcs.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/coverage.xml" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/logs/open_positions.json" afterDir="false" />
+      <change afterPath="$PROJECT_DIR$/mock_backtest_data.csv" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tests/integration/conftest.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/integration/conftest.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/trading/bot.py" beforeDir="false" afterPath="$PROJECT_DIR$/trading/bot.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -16,9 +22,9 @@
   <component name="Git.Settings">
     <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
   </component>
-  <component name="ProjectColorInfo"><![CDATA[{
-  "associatedIndex": 1
-}]]></component>
+  <component name="ProjectColorInfo">{
+  &quot;associatedIndex&quot;: 1
+}</component>
   <component name="ProjectId" id="36sp3UXdO2j0S01mEaQ5yQc7XSf" />
   <component name="ProjectViewState">
     <option name="hideEmptyMiddlePackages" value="true" />
@@ -31,8 +37,10 @@
     "RunOnceActivity.git.unshallow": "true",
     "RunOnceActivity.typescript.service.memoryLimit.init": "true",
     "git-widget-placeholder": "main",
+    "ignore.virus.scanning.warn.message": "true",
     "last_opened_file_path": "E:/pyProject/pyForex-1",
     "nodejs_package_manager_path": "npm",
+    "settings.editor.selected.configurable": "com.intellij.aiplayground.settings.llm",
     "vue.rearranger.settings.migration": "true"
   }
 }]]></component>
@@ -52,7 +60,11 @@
       <option name="presentableId" value="Default" />
       <updated>1765804934563</updated>
       <workItem from="1765804935894" duration="154000" />
+      <workItem from="1765898983144" duration="292000" />
     </task>
     <servers />
+  </component>
+  <component name="TypeScriptGeneratedFilesManager">
+    <option name="version" value="3" />
   </component>
 </project>
