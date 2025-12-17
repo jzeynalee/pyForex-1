@@ -1,0 +1,12 @@
+[
+  {
+    "ticket": "1001",
+    "symbol": "EURUSD",
+    "direction": 1,
+    "entry_price": 1.1,
+    "entry_time": "2020-01-01T00:00:00",
+    "volume": 0.1,
+    "stop_loss": 1.095,
+    "take_profit": 1.11
+  }
+]

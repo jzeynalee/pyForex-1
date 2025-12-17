@@ -260,7 +260,6 @@ class BacktestBot:
         self.strategy = strategy_class(
             data_provider=self,  # Bot acts as data provider
             executor=self.executor,
-            risk_manager=self.risk_manager,
         )
         
         self.current_idx = 0
