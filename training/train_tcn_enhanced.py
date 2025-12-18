@@ -1126,12 +1126,10 @@ class TCNTrainer:
         
         return model, features, checkpoint
 
-
-# =============================================================================
 # Main Entry Point
 # =============================================================================
 
-def main():
+def main(args=None):
     parser = argparse.ArgumentParser(
         description="Train Enhanced TCN with Feature Discovery",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -1188,7 +1186,9 @@ Examples:
     parser.add_argument('--name', type=str, default='tcn_enhanced',
                         help='Model name for checkpoint')
     
-    args = parser.parse_args()
+    # Use provided args or parse from command line
+    if args is None:
+        args = parser.parse_args()
     
     print("=" * 60)
     print("🚀 Enhanced TCN Training with Feature Discovery")

@@ -35,6 +35,7 @@ scikit-learn     #>=1.7.2   # Released Sep 2025
 xgboost     #>=3.1.0        # Released Sep 2025
 lightgbm     #>=4.6.0
 catboost     #>=1.2.7
+hf_xet    #>=1.2.0
 
 # --- Deep Learning (Core Frameworks) ---
 # Torch 2.9 is current as of Nov 2025

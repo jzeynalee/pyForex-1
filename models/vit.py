@@ -125,3 +125,59 @@ class LightweightViT(nn.Module):
     
     def get_feature_dim(self) -> int:
         return self.feature_dim
+
+
+class ViTChartClassifier(nn.Module):
+    """
+    Vision Transformer classifier for candlestick chart patterns.
+    This is the class that the predictor expects to import.
+    """
+    
+    def __init__(
+        self,
+        model_name: str = "vit_tiny_patch16_224",
+        pretrained: bool = True,
+        num_classes: int = 3,  # Bear, Sideways, Bull
+        input_size: int = 224,
+    ):
+        super().__init__()
+        
+        if not TIMM_AVAILABLE:
+            raise ImportError("timm library required. Install with: pip install timm")
+        
+        # Load ViT model
+        self.vit = create_model(model_name, pretrained=pretrained)
+        
+        # Get feature dimension
+        self.feature_dim = self.vit.head.in_features
+        
+        # Replace head with our classifier
+        self.vit.head = nn.Sequential(
+            nn.Linear(self.feature_dim, 256),
+            nn.ReLU(),
+            nn.Dropout(0.1),
+            nn.Linear(256, num_classes)
+        )
+        
+        self.num_classes = num_classes
+        self.input_size = input_size
+    
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            x: Image tensor of shape (batch, 3, input_size, input_size)
+        
+        Returns:
+            logits: (batch, num_classes)
+        """
+        return self.vit(x)
+    
+    def predict(self, x: torch.Tensor) -> torch.Tensor:
+        """Return class predictions."""
+        logits = self.forward(x)
+        return torch.argmax(logits, dim=1)
+    
+    def predict_proba(self, x: torch.Tensor) -> torch.Tensor:
+        """Return class probabilities."""
+        logits = self.forward(x)
+        return torch.softmax(logits, dim=1)

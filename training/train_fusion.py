@@ -152,12 +152,12 @@ def train_fusion_model(
     
     tcn_path = weights_dir / "tcn_best.pt"
     if tcn_path.exists():
-        tcn.load_state_dict(torch.load(tcn_path, map_location=device))
+        tcn.load_state_dict(torch.load(tcn_path, map_location=device, weights_only=False))
         logger.info("Loaded pre-trained TCN")
     
     vit_path = weights_dir / "vit_best.pt"
     if vit_path.exists():
-        vit.load_state_dict(torch.load(vit_path, map_location=device))
+        vit.load_state_dict(torch.load(vit_path, map_location=device, weights_only=False))
         logger.info("Loaded pre-trained ViT")
     
     # YOLO (or mock)
