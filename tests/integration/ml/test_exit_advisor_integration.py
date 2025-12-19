@@ -24,8 +24,8 @@ def mock_exit_advisor():
     if not HAS_EXIT_ADVISOR:
         pytest.skip("Exit advisor not available")
     
-    advisor = Mock(spec=ExitAdvisor)
-    advisor.recommend.return_value = (ExitAction.HOLD, 0.7)
+    advisor = Mock()
+    advisor.recommend = Mock(return_value=(ExitAction.HOLD, 0.7))
     return advisor
 
 
