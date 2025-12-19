@@ -17,13 +17,13 @@ Key improvements over separate feature_importance.py + train scripts:
 Usage:
     # Auto-discover features and train
     python training/train_tcn_enhanced.py --data data/raw/eurusd_latest.csv
-    
+
     # Use specific profile
     python training/train_tcn_enhanced.py --data data/raw/eurusd_latest.csv --profile SCALP
-    
+
     # Skip feature discovery, use all features
     python training/train_tcn_enhanced.py --data data/raw/eurusd_latest.csv --skip-feature-selection
-    
+
     # Use custom feature list
     python training/train_tcn_enhanced.py --data data/raw/eurusd_latest.csv --features "close,rsi_14,atr_14"
 """
@@ -69,7 +69,7 @@ class FeatureConfig:
     rf_n_estimators: int = 100
     rf_max_depth: int = 12
     rf_random_state: int = 42
-    
+
     # Profile-specific feature preferences
     # These features are prioritized for each profile
     profile_priorities: Dict[str, List[str]] = field(default_factory=lambda: {
@@ -88,33 +88,33 @@ class FeatureConfig:
     })
 
 
-@dataclass 
+@dataclass
 class TrainingConfig:
     """Configuration for TCN training."""
     # Data
-    sequence_length: int = 30
-    trend_threshold: float = 0.05
-    train_split: float = 0.8
-    val_split: float = 0.1
-    
-    # Model
-    hidden_dim: int = 64
-    num_layers: int = 5
+    sequence_length: int = 30  # Shorter sequences work better
+    trend_threshold: float = 0.001  # 0.1% base threshold
+    train_split: float = 0.7
+    val_split: float = 0.15
+
+    # Model - SIMPLIFIED
+    hidden_dim: int = 64  # Smaller for less overfitting
+    num_layers: int = 4  # Fewer layers
     kernel_size: int = 3
-    dropout: float = 0.2
-    num_classes: int = 3
-    
+    dropout: float = 0.2  # Less dropout
+    num_classes: int = 3  # Bear=0, Sideways=1, Bull=2
+
     # Training
     epochs: int = 50
-    batch_size: int = 64
-    learning_rate: float = 1e-3
+    batch_size: int = 64  # Smaller batches
+    learning_rate: float = 1e-3  # Standard LR
     weight_decay: float = 1e-5
     early_stopping_patience: int = 10
-    
+
     # Scheduler
-    use_onecycle: bool = True
+    use_onecycle: bool = True  # OneCycle works well
     use_cosine: bool = False
-    
+
     # Misc
     device: str = 'auto'
     seed: int = 42
@@ -140,16 +140,16 @@ class CheckpointData:
 class FeatureImportanceAnalyzer:
     """
     Analyzes feature importance using Random Forest.
-    
+
     Integrated into training pipeline to ensure consistency between
     feature selection and model training.
     """
-    
+
     def __init__(self, config: FeatureConfig = None):
         self.config = config or FeatureConfig()
         self.importance_scores: Dict[str, float] = {}
         self.selected_features: List[str] = []
-    
+
     def analyze(
         self,
         X: np.ndarray,
@@ -159,26 +159,26 @@ class FeatureImportanceAnalyzer:
     ) -> List[str]:
         """
         Analyze feature importance and return top features.
-        
+
         Args:
             X: Feature matrix (samples, timesteps, features) - 3D for sequences
                or (samples, features) - 2D for flat
             y: Labels
             feature_names: List of feature names
             profile: Optional profile for prioritizing certain features
-            
+
         Returns:
             List of top feature names
         """
         logger.info("🔍 Running Feature Importance Analysis...")
-        
+
         # Flatten if 3D (take last timestep of each sequence)
         if X.ndim == 3:
             X_flat = X[:, -1, :]  # Shape: (samples, features)
             logger.info(f"   Flattened 3D data: {X.shape} -> {X_flat.shape}")
         else:
             X_flat = X
-        
+
         # Train Random Forest
         logger.info(f"   Training Random Forest on {len(y)} samples...")
         rf = RandomForestClassifier(
@@ -189,30 +189,30 @@ class FeatureImportanceAnalyzer:
             class_weight='balanced'
         )
         rf.fit(X_flat, y)
-        
+
         # Extract importance scores
         importances = rf.feature_importances_
-        
+
         # Build importance dictionary
         # Ensure we don't exceed the number of importances
         n_features = min(len(feature_names), len(importances))
         self.importance_scores = {
-            name: float(importances[i]) 
+            name: float(importances[i])
             for i, name in enumerate(feature_names[:n_features])
         }
-        
+
         # Sort by importance
         sorted_features = sorted(
             self.importance_scores.items(),
             key=lambda x: x[1],
             reverse=True
         )
-        
+
         # Apply profile prioritization if specified
         if profile and profile.upper() in self.config.profile_priorities:
             priority_features = self.config.profile_priorities[profile.upper()]
             sorted_features = self._apply_profile_boost(sorted_features, priority_features)
-        
+
         # Select top N features above threshold
         self.selected_features = []
         for name, score in sorted_features:
@@ -220,7 +220,38 @@ class FeatureImportanceAnalyzer:
                 break
             if score >= self.config.min_importance_threshold:
                 self.selected_features.append(name)
-        
+
+        # SAFETY FALLBACK: If no features selected, use core OHLCV features
+        if len(self.selected_features) == 0:
+            logger.warning("⚠️ No features met importance threshold. Using OHLCV fallback.")
+            # Try OHLCV first
+            core_features = ['open', 'high', 'low', 'close', 'volume']
+            available_core = [f for f in core_features if f in feature_names]
+
+            if available_core:
+                self.selected_features = available_core
+                logger.info(f"   Using core features: {self.selected_features}")
+            else:
+                # Use technical indicators as fallback
+                tech_features = ['rsi_14', 'atr_14', 'ema_20', 'ema_50', 'macd']
+                available_tech = [f for f in tech_features if f in feature_names]
+
+                if available_tech:
+                    self.selected_features = available_tech[:5]
+                    logger.info(f"   Using technical features: {self.selected_features}")
+                else:
+                    # Last resort: use first 5 available
+                    self.selected_features = feature_names[:5]
+                    logger.warning(f"   Using first 5 features: {self.selected_features}")
+
+        # Ensure we have at least 3 features minimum
+        while len(self.selected_features) < 3 and len(self.selected_features) < len(feature_names):
+            remaining = [f for f in feature_names if f not in self.selected_features]
+            if remaining:
+                self.selected_features.append(remaining[0])
+            else:
+                break
+
         # Log results
         logger.info(f"\n{'='*50}")
         logger.info(f"🏆 TOP {len(self.selected_features)} PREDICTIVE FEATURES")
@@ -230,9 +261,9 @@ class FeatureImportanceAnalyzer:
             logger.info(f"{i:2d}. {name:30s} : {score:.4f}")
         if len(self.selected_features) > 15:
             logger.info(f"   ... and {len(self.selected_features) - 15} more")
-        
+
         return self.selected_features
-    
+
     def _apply_profile_boost(
         self,
         sorted_features: List[Tuple[str, float]],
@@ -240,22 +271,22 @@ class FeatureImportanceAnalyzer:
     ) -> List[Tuple[str, float]]:
         """
         Boost priority features for specific trading profiles.
-        
+
         This ensures profile-relevant features are more likely to be selected
         even if they're slightly lower in raw importance.
         """
         BOOST_FACTOR = 1.2
-        
+
         boosted = []
         for name, score in sorted_features:
             if name in priority_features:
                 boosted.append((name, score * BOOST_FACTOR))
             else:
                 boosted.append((name, score))
-        
+
         # Re-sort after boosting
         return sorted(boosted, key=lambda x: x[1], reverse=True)
-    
+
     def get_importance_dict(self) -> Dict[str, float]:
         """Return full importance scores dictionary."""
         return self.importance_scores.copy()
@@ -268,78 +299,78 @@ class FeatureImportanceAnalyzer:
 class EnhancedDataLoaderV3:
     """
     Data loader with integrated feature selection support.
-    
+
     Improvements over V2:
     - Accepts feature subset for training
     - Returns feature names with data
     - Consistent train/val/test splits
     """
-    
+
     def __init__(
         self,
         sequence_length: int = 30,
-        trend_threshold: float = 0.05,
+        trend_threshold: float = 0.001,  # Legacy param, now using percentile-based thresholds
         scaler_type: str = 'robust',
     ):
         self.sequence_length = sequence_length
         self.trend_threshold = trend_threshold
         self.scaler_type = scaler_type
-        
+
         self.scaler = None
         self.feature_columns: List[str] = []
         self.all_feature_columns: List[str] = []
-        
+
         # Store split data
         self.train_close: np.ndarray = None
         self.val_close: np.ndarray = None
         self.test_close: np.ndarray = None
-    
+
     def load_csv(self, path: str) -> pd.DataFrame:
         """Load and prepare data from CSV."""
         logger.info(f"📂 Loading data from {path}")
         df = pd.read_csv(path)
-        
+
         # Standardize column names
         df.columns = df.columns.str.lower().str.strip()
-        
+
         # Ensure required columns
         required = ['open', 'high', 'low', 'close']
         missing = [c for c in required if c not in df.columns]
         if missing:
             raise ValueError(f"Missing required columns: {missing}")
-        
+
         # Add technical features if not present
         df = self._add_technical_features(df)
-        
+
         # Store all available feature columns (excluding OHLCV and labels)
-        exclude = ['open', 'high', 'low', 'close', 'volume', 'time', 'date', 
+        exclude = ['open', 'high', 'low', 'close', 'volume', 'time', 'date',
                    'datetime', 'timestamp', 'label', 'target']
         self.all_feature_columns = [c for c in df.columns if c not in exclude]
         self.feature_columns = self.all_feature_columns.copy()
-        
+
         logger.info(f"   Loaded {len(df)} rows, {len(self.all_feature_columns)} features")
         return df
-    
+
     def _add_technical_features(self, df: pd.DataFrame) -> pd.DataFrame:
         """Add technical indicators if not present."""
         close = df['close'].values
         high = df['high'].values
         low = df['low'].values
-        
+
         # RSI
         if 'rsi_14' not in df.columns:
             df['rsi_14'] = self._calc_rsi(close, 14)
-        
+
         # ATR
         if 'atr_14' not in df.columns:
             df['atr_14'] = self._calc_atr(high, low, close, 14)
-        
+
         # EMAs
         for period in [9, 20, 50, 200]:
             col = f'ema_{period}'
             if col not in df.columns:
                 df[col] = pd.Series(close).ewm(span=period, adjust=False).mean()
-        
+
         # MACD
         if 'macd' not in df.columns:
             ema12 = pd.Series(close).ewm(span=12, adjust=False).mean()
@@ -347,7 +378,7 @@ class EnhancedDataLoaderV3:
             df['macd'] = ema12 - ema26
             df['macd_signal'] = df['macd'].ewm(span=9, adjust=False).mean()
             df['macd_hist'] = df['macd'] - df['macd_signal']
-        
+
         # Bollinger Bands
         if 'bb_upper' not in df.columns:
             sma20 = pd.Series(close).rolling(20).mean()
@@ -355,63 +386,63 @@ class EnhancedDataLoaderV3:
             df['bb_upper'] = sma20 + 2 * std20
             df['bb_lower'] = sma20 - 2 * std20
             df['bb_position'] = (close - df['bb_lower']) / (df['bb_upper'] - df['bb_lower'])
-        
+
         # Stochastic
         if 'stoch_k' not in df.columns:
             low_14 = pd.Series(low).rolling(14).min()
             high_14 = pd.Series(high).rolling(14).max()
             df['stoch_k'] = 100 * (close - low_14) / (high_14 - low_14 + 1e-10)
             df['stoch_d'] = df['stoch_k'].rolling(3).mean()
-        
+
         # ADX
         if 'adx_14' not in df.columns:
             df['adx_14'] = self._calc_adx(high, low, close, 14)
-        
+
         # ROC (Rate of Change)
         for period in [5, 10, 20]:
             col = f'roc_{period}'
             if col not in df.columns:
                 df[col] = (close - np.roll(close, period)) / (np.roll(close, period) + 1e-10) * 100
-        
+
         # Volume features
         if 'volume' in df.columns:
             vol = df['volume'].values
             if 'volume_sma_ratio' not in df.columns:
                 vol_sma = pd.Series(vol).rolling(20).mean()
                 df['volume_sma_ratio'] = vol / (vol_sma + 1e-10)
-        
+
         # Price momentum
         if 'price_momentum_5' not in df.columns:
             df['price_momentum_5'] = (close - np.roll(close, 5)) / (np.roll(close, 5) + 1e-10)
-        
+
         # Trend strength (simplified)
         if 'trend_strength' not in df.columns:
             df['trend_strength'] = df['adx_14'] / 100.0
-        
+
         # Fill NaN values
         df = df.fillna(method='ffill').fillna(method='bfill').fillna(0)
-        
+
         return df
-    
+
     def _calc_rsi(self, prices: np.ndarray, period: int = 14) -> np.ndarray:
         """Calculate RSI."""
         deltas = np.diff(prices)
         gains = np.where(deltas > 0, deltas, 0)
         losses = np.where(deltas < 0, -deltas, 0)
-        
+
         avg_gain = pd.Series(gains).rolling(window=period).mean().values
         avg_loss = pd.Series(losses).rolling(window=period).mean().values
-        
+
         rs = avg_gain / (avg_loss + 1e-10)
         rsi = 100 - (100 / (1 + rs))
-        
+
         return np.concatenate([[50], rsi])  # Pad first value
-    
+
     def _calc_atr(self, high: np.ndarray, low: np.ndarray, close: np.ndarray, period: int = 14) -> np.ndarray:
         """Calculate ATR."""
         prev_close = np.roll(close, 1)
         prev_close[0] = close[0]
-        
+
         tr = np.maximum(
             high - low,
             np.maximum(
@@ -419,45 +450,45 @@ class EnhancedDataLoaderV3:
                 np.abs(low - prev_close)
             )
         )
-        
+
         return pd.Series(tr).rolling(window=period).mean().fillna(0).values
-    
+
     def _calc_adx(self, high: np.ndarray, low: np.ndarray, close: np.ndarray, period: int = 14) -> np.ndarray:
         """Calculate ADX (simplified)."""
         # True Range
         prev_close = np.roll(close, 1)
         prev_close[0] = close[0]
         tr = np.maximum(high - low, np.maximum(np.abs(high - prev_close), np.abs(low - prev_close)))
-        
+
         # Directional Movement
         prev_high = np.roll(high, 1)
         prev_low = np.roll(low, 1)
         plus_dm = np.where((high - prev_high) > (prev_low - low), np.maximum(high - prev_high, 0), 0)
         minus_dm = np.where((prev_low - low) > (high - prev_high), np.maximum(prev_low - low, 0), 0)
-        
+
         # Smoothed values
         atr = pd.Series(tr).rolling(period).mean()
         plus_di = 100 * pd.Series(plus_dm).rolling(period).mean() / (atr + 1e-10)
         minus_di = 100 * pd.Series(minus_dm).rolling(period).mean() / (atr + 1e-10)
-        
+
         # ADX
         dx = 100 * np.abs(plus_di - minus_di) / (plus_di + minus_di + 1e-10)
         adx = pd.Series(dx).rolling(period).mean()
-        
+
         return adx.fillna(0).values
-    
+
     def set_feature_columns(self, features: List[str]):
         """Set specific features to use."""
         available = set(self.all_feature_columns)
         valid = [f for f in features if f in available]
-        
+
         if len(valid) < len(features):
             missing = [f for f in features if f not in available]
             logger.warning(f"Features not found (skipped): {missing}")
-        
+
         self.feature_columns = valid
         logger.info(f"   Using {len(self.feature_columns)} features")
-    
+
     def split_and_scale(
         self,
         df: pd.DataFrame,
@@ -466,74 +497,122 @@ class EnhancedDataLoaderV3:
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Split data and scale features.
-        
+
         Returns:
             train_scaled, val_scaled, test_scaled
         """
         n = len(df)
         train_end = int(n * train_ratio)
         val_end = int(n * (train_ratio + val_ratio))
-        
+
         # Store close prices for label generation
         self.train_close = df['close'].iloc[:train_end].values
         self.val_close = df['close'].iloc[train_end:val_end].values
         self.test_close = df['close'].iloc[val_end:].values
-        
+
         # Extract features
         train_df = df.iloc[:train_end][self.feature_columns]
         val_df = df.iloc[train_end:val_end][self.feature_columns]
         test_df = df.iloc[val_end:][self.feature_columns]
-        
+
         # Scale
         self.scaler = RobustScaler()
         train_scaled = self.scaler.fit_transform(train_df.values)
         val_scaled = self.scaler.transform(val_df.values)
         test_scaled = self.scaler.transform(test_df.values)
-        
+
         logger.info(f"   Train: {len(train_scaled)}, Val: {len(val_scaled)}, Test: {len(test_scaled)}")
-        
+
         return train_scaled, val_scaled, test_scaled
-    
+
     def create_sequences(
         self,
         data: np.ndarray,
         close_prices: np.ndarray,
         seq_len: int,
         horizon: int = 1,
+        timeframe_hint: str = None,
     ) -> Tuple[np.ndarray, np.ndarray]:
         """
         Create sequences with labels based on future returns.
-        
+
         Args:
             data: Scaled feature matrix
             close_prices: Raw close prices for label generation
             seq_len: Sequence length
             horizon: How many steps ahead to predict
-            
+            timeframe_hint: Optional timeframe for adaptive thresholds
+
         Returns:
             X: (samples, seq_len, features)
             y: (samples,) with labels 0=Bear, 1=Sideways, 2=Bull
         """
         X, y = [], []
+        returns = []
         
-        limit = len(data) - seq_len - horizon
+        # Use longer horizon for clearer signal
+        effective_horizon = max(horizon, 3)
+        limit = len(data) - seq_len - effective_horizon
+        
+        if limit <= 0:
+            logger.warning(f"⚠️ Insufficient data for sequences")
+            return np.array([]), np.array([])
+        
+        # First pass: collect returns
+        for i in range(limit):
+            entry_price = close_prices[i + seq_len - 1]
+            exit_price = close_prices[i + seq_len - 1 + effective_horizon]
+            pct_return = (exit_price - entry_price) / entry_price
+            returns.append(pct_return)
+        
+        returns = np.array(returns)
+        
+        # Use percentile thresholds for balanced 3-class distribution
+        p33 = np.percentile(returns, 33)
+        p67 = np.percentile(returns, 67)
+        
+        # Second pass: create sequences
         for i in range(limit):
             X.append(data[i:i+seq_len])
+            ret = returns[i]
             
-            # Calculate future return
-            entry_price = close_prices[i + seq_len - 1]
-            exit_price = close_prices[i + seq_len - 1 + horizon]
-            pct_return = (exit_price - entry_price) / entry_price
-            
-            # Classify
-            if pct_return > self.trend_threshold:
-                y.append(2)  # Bull
-            elif pct_return < -self.trend_threshold:
+            if ret <= p33:
                 y.append(0)  # Bear
+            elif ret >= p67:
+                y.append(2)  # Bull
             else:
                 y.append(1)  # Sideways
         
+        # Log distribution
+        y_array = np.array(y)
+        unique, counts = np.unique(y_array, return_counts=True)
+        label_names = {0: 'Bear', 1: 'Sideways', 2: 'Bull'}
+        total = len(y_array)
+        label_dist = {label_names.get(k, k): f"{v} ({v/total*100:.1f}%)" for k, v in zip(unique, counts)}
+        logger.info(f"   3-class labels (horizon={effective_horizon}): {label_dist}")
+        
         return np.array(X), np.array(y)
+
+    def _get_adaptive_threshold(self, timeframe_hint: str, seq_len: int, horizon: int) -> float:
+        """Get adaptive trend threshold based on timeframe characteristics."""
+        # Much more realistic thresholds for different forex timeframes
+        # These are based on typical ATR values for EURUSD
+        timeframe_thresholds = {
+            'M1': 0.0001,   # 0.01% for 1-minute (1 pip)
+            'M5': 0.0002,   # 0.02% for 5-minute (2 pips)
+            'M15': 0.0003,  # 0.03% for 15-minute (3 pips)
+            'M30': 0.0005,  # 0.05% for 30-minute (5 pips)
+            'H1': 0.0008,   # 0.08% for 1-hour (8 pips)
+            'H4': 0.002,    # 0.2% for 4-hour (20 pips)
+            'D1': 0.004,    # 0.4% for daily (40 pips)
+        }
+
+        # Use provided hint or default to base threshold
+        if timeframe_hint and timeframe_hint.upper() in timeframe_thresholds:
+            return timeframe_thresholds[timeframe_hint.upper()]
+
+        # Fallback: use default trend_threshold
+        return self.trend_threshold
 
 
 # =============================================================================
@@ -542,12 +621,12 @@ class EnhancedDataLoaderV3:
 
 class CausalConv1d(nn.Module):
     """Causal convolution with left-padding."""
-    
+
     def __init__(self, in_channels: int, out_channels: int, kernel_size: int, dilation: int = 1):
         super().__init__()
         self.padding = (kernel_size - 1) * dilation
         self.conv = nn.Conv1d(in_channels, out_channels, kernel_size, padding=0, dilation=dilation)
-    
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = F.pad(x, (self.padding, 0))
         return self.conv(x)
@@ -555,20 +634,20 @@ class CausalConv1d(nn.Module):
 
 class TCNBlock(nn.Module):
     """Residual TCN block with two causal convolutions."""
-    
+
     def __init__(self, in_ch: int, out_ch: int, kernel_size: int, dilation: int, dropout: float = 0.2):
         super().__init__()
-        
+
         self.conv1 = CausalConv1d(in_ch, out_ch, kernel_size, dilation)
         self.norm1 = nn.BatchNorm1d(out_ch)
         self.conv2 = CausalConv1d(out_ch, out_ch, kernel_size, dilation)
         self.norm2 = nn.BatchNorm1d(out_ch)
-        
+
         self.dropout = nn.Dropout(dropout)
         self.relu = nn.ReLU()
-        
+
         self.residual = nn.Conv1d(in_ch, out_ch, 1) if in_ch != out_ch else nn.Identity()
-    
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         out = self.dropout(self.relu(self.norm1(self.conv1(x))))
         out = self.dropout(self.relu(self.norm2(self.conv2(out))))
@@ -577,72 +656,71 @@ class TCNBlock(nn.Module):
 
 class EnhancedTCN(nn.Module):
     """
-    Enhanced TCN model with integrated feature support.
-    
+    Simplified TCN model for forex prediction.
+
     Key features:
     - Profile-aware architecture selection
-    - Learnable aggregation weights
-    - Feature dimension tracking
+    - Simple but effective aggregation
+    - Lightweight classifier
     """
-    
+
     PROFILES = {
-        'SCALP': {'num_layers': 4, 'kernel_size': 3},      # RF ≈ 31
-        'INTRADAY': {'num_layers': 5, 'kernel_size': 3},   # RF ≈ 63
-        'SWING': {'num_layers': 7, 'kernel_size': 3},      # RF ≈ 255
+        'SCALP': {'num_layers': 3, 'kernel_size': 3},      # RF ≈ 15
+        'INTRADAY': {'num_layers': 4, 'kernel_size': 3},   # RF ≈ 31
+        'SWING': {'num_layers': 5, 'kernel_size': 3},      # RF ≈ 63
     }
-    
+
     def __init__(
         self,
         input_dim: int,
         hidden_dim: int = 64,
-        num_layers: int = 5,
-        num_classes: int = 3,
+        num_layers: int = 4,
+        num_classes: int = 3,  # Bear=0, Sideways=1, Bull=2
         dropout: float = 0.2,
         kernel_size: int = 3,
     ):
         super().__init__()
-        
+
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
         self.feature_dim = hidden_dim
-        
+
         # Calculate dilations
         dilations = [2 ** i for i in range(num_layers)]
         self.receptive_field = 1 + 2 * (kernel_size - 1) * sum(dilations)
-        
+
         # Build TCN blocks
         layers = []
         for i, dilation in enumerate(dilations):
             in_ch = input_dim if i == 0 else hidden_dim
             layers.append(TCNBlock(in_ch, hidden_dim, kernel_size, dilation, dropout))
         self.tcn = nn.Sequential(*layers)
-        
-        # Aggregation: weighted combination of last step and global avg
-        self.agg_weight = nn.Parameter(torch.tensor([0.7, 0.3]))
-        
-        # Layer norm and classifier
+
+        # Simple layer norm
         self.layer_norm = nn.LayerNorm(hidden_dim)
+
+        # Simple classifier
         self.classifier = nn.Sequential(
-            nn.Linear(hidden_dim, 64),
+            nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
-            nn.Dropout(0.3),
-            nn.Linear(64, num_classes),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, num_classes),
         )
-    
+
     @classmethod
     def from_profile(
         cls,
         profile: str,
         input_dim: int,
         hidden_dim: int = 64,
-        num_classes: int = 3,
+        num_classes: int = 3,  # Bear=0, Sideways=1, Bull=2
         dropout: float = 0.2,
     ) -> 'EnhancedTCN':
         """Create TCN with profile-optimized architecture."""
         profile = profile.upper()
         if profile not in cls.PROFILES:
             raise ValueError(f"Unknown profile: {profile}. Use {list(cls.PROFILES.keys())}")
-        
+
         config = cls.PROFILES[profile]
         return cls(
             input_dim=input_dim,
@@ -652,36 +730,34 @@ class EnhancedTCN(nn.Module):
             dropout=dropout,
             kernel_size=config['kernel_size'],
         )
-    
+
     def forward(self, x: torch.Tensor, mode: str = 'classify') -> torch.Tensor:
         """
         Forward pass.
-        
+
         Args:
             x: (batch, seq_len, input_dim)
             mode: 'features' or 'classify'
         """
         # TCN expects (batch, channels, seq_len)
         x = x.transpose(1, 2)
-        
+
         # TCN forward
         tcn_out = self.tcn(x)  # (batch, hidden_dim, seq_len)
-        
+
         # Back to (batch, seq_len, hidden_dim)
         tcn_out = tcn_out.transpose(1, 2)
-        
-        # Aggregate
+
+        # Simple aggregation: last timestep + global average
         last_step = tcn_out[:, -1, :]
         global_avg = tcn_out.mean(dim=1)
-        
-        weights = F.softmax(self.agg_weight, dim=0)
-        features = weights[0] * last_step + weights[1] * global_avg
+        features = 0.7 * last_step + 0.3 * global_avg
         features = self.layer_norm(features)
-        
+
         if mode == 'features':
             return features
         return self.classifier(features)
-    
+
     def get_feature_dim(self) -> int:
         return self.feature_dim
 
@@ -694,7 +770,7 @@ class TCNTrainer:
     """
     End-to-end TCN training with feature discovery.
     """
-    
+
     def __init__(
         self,
         feature_config: FeatureConfig = None,
@@ -702,7 +778,7 @@ class TCNTrainer:
     ):
         self.feature_config = feature_config or FeatureConfig()
         self.training_config = training_config or TrainingConfig()
-        
+
         self.device = self._get_device()
         self.model: Optional[EnhancedTCN] = None
         self.feature_analyzer = FeatureImportanceAnalyzer(self.feature_config)
@@ -710,17 +786,17 @@ class TCNTrainer:
             sequence_length=self.training_config.sequence_length,
             trend_threshold=self.training_config.trend_threshold,
         )
-        
+
         # Training state
         self.selected_features: List[str] = []
         self.training_history: Dict = {'train_loss': [], 'val_loss': [], 'val_acc': []}
         self.best_val_acc: float = 0.0
-    
+
     def _get_device(self) -> torch.device:
         if self.training_config.device == 'auto':
             return torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         return torch.device(self.training_config.device)
-    
+
     def prepare_data(
         self,
         data_path: str,
@@ -730,7 +806,7 @@ class TCNTrainer:
     ) -> Tuple[DataLoader, DataLoader, DataLoader]:
         """
         Load data, optionally discover features, prepare loaders.
-        
+
         Args:
             data_path: Path to CSV data
             features: Optional list of features (skips discovery if provided)
@@ -739,19 +815,19 @@ class TCNTrainer:
         """
         # Load data
         df = self.data_loader.load_csv(data_path)
-        
+
         # Feature selection
         if features:
             # Use provided features
             self.selected_features = features
             self.data_loader.set_feature_columns(features)
             logger.info(f"Using {len(features)} provided features")
-            
+
         elif skip_feature_selection:
             # Use all features
             self.selected_features = self.data_loader.all_feature_columns.copy()
             logger.info(f"Using all {len(self.selected_features)} features (no selection)")
-            
+
         else:
             # Auto-discover features
             # First, prepare data for feature importance (using all features)
@@ -760,50 +836,88 @@ class TCNTrainer:
                 train_ratio=self.training_config.train_split,
                 val_ratio=self.training_config.val_split,
             )
-            
+
+            # Extract timeframe from data path for adaptive thresholds
+            timeframe_hint = None
+            if 'M1' in data_path:
+                timeframe_hint = 'M1'
+            elif 'M5' in data_path:
+                timeframe_hint = 'M5'
+            elif 'M15' in data_path:
+                timeframe_hint = 'M15'
+            elif 'M30' in data_path:
+                timeframe_hint = 'M30'
+            elif 'H1' in data_path:
+                timeframe_hint = 'H1'
+            elif 'H4' in data_path:
+                timeframe_hint = 'H4'
+            elif 'D1' in data_path:
+                timeframe_hint = 'D1'
+
             X_train, y_train = self.data_loader.create_sequences(
                 train_scaled,
                 self.data_loader.train_close,
                 self.training_config.sequence_length,
+                timeframe_hint=timeframe_hint,
             )
-            
+
             # Run feature importance analysis
             self.selected_features = self.feature_analyzer.analyze(
                 X_train, y_train,
                 self.data_loader.feature_columns,
                 profile=profile,
             )
-            
+
             # Now reload with selected features only
             self.data_loader.set_feature_columns(self.selected_features)
-        
+
         # Prepare final data splits
         train_scaled, val_scaled, test_scaled = self.data_loader.split_and_scale(
             df,
             train_ratio=self.training_config.train_split,
             val_ratio=self.training_config.val_split,
         )
-        
-        # Create sequences
+
+        # Extract timeframe from data path for adaptive thresholds
+        timeframe_hint = None
+        if 'M1' in data_path:
+            timeframe_hint = 'M1'
+        elif 'M5' in data_path:
+            timeframe_hint = 'M5'
+        elif 'M15' in data_path:
+            timeframe_hint = 'M15'
+        elif 'M30' in data_path:
+            timeframe_hint = 'M30'
+        elif 'H1' in data_path:
+            timeframe_hint = 'H1'
+        elif 'H4' in data_path:
+            timeframe_hint = 'H4'
+        elif 'D1' in data_path:
+            timeframe_hint = 'D1'
+
+        # Create sequences with adaptive thresholds
         X_train, y_train = self.data_loader.create_sequences(
             train_scaled, self.data_loader.train_close,
             self.training_config.sequence_length,
+            timeframe_hint=timeframe_hint,
         )
         X_val, y_val = self.data_loader.create_sequences(
             val_scaled, self.data_loader.val_close,
             self.training_config.sequence_length,
+            timeframe_hint=timeframe_hint,
         )
         X_test, y_test = self.data_loader.create_sequences(
             test_scaled, self.data_loader.test_close,
             self.training_config.sequence_length,
+            timeframe_hint=timeframe_hint,
         )
-        
+
         logger.info(f"   Train: {len(X_train)}, Val: {len(X_val)}, Test: {len(X_test)}")
-        
+
         # Check class balance
         unique, counts = np.unique(y_train, return_counts=True)
         logger.info(f"   Class distribution: {dict(zip(['Bear', 'Sideways', 'Bull'], counts))}")
-        
+
         # Create DataLoaders
         train_ds = TensorDataset(
             torch.tensor(X_train, dtype=torch.float32),
@@ -817,17 +931,17 @@ class TCNTrainer:
             torch.tensor(X_test, dtype=torch.float32),
             torch.tensor(y_test, dtype=torch.long)
         )
-        
+
         train_loader = DataLoader(train_ds, batch_size=self.training_config.batch_size, shuffle=True)
         val_loader = DataLoader(val_ds, batch_size=self.training_config.batch_size)
         test_loader = DataLoader(test_ds, batch_size=self.training_config.batch_size)
-        
+
         return train_loader, val_loader, test_loader
-    
+
     def build_model(self, profile: Optional[str] = None) -> EnhancedTCN:
         """Build TCN model with appropriate architecture."""
         input_dim = len(self.selected_features)
-        
+
         if profile:
             self.model = EnhancedTCN.from_profile(
                 profile,
@@ -847,10 +961,10 @@ class TCNTrainer:
                 kernel_size=self.training_config.kernel_size,
             )
             logger.info(f"🏗️ Built TCN (RF={self.model.receptive_field})")
-        
+
         self.model = self.model.to(self.device)
         return self.model
-    
+
     def train(
         self,
         train_loader: DataLoader,
@@ -858,13 +972,13 @@ class TCNTrainer:
     ) -> Dict:
         """
         Train the model with early stopping.
-        
+
         Returns:
             Training metrics dictionary
         """
         if self.model is None:
             raise RuntimeError("Model not built. Call build_model() first.")
-        
+
         # Class weights for imbalanced data
         all_labels = []
         for _, y in train_loader:
@@ -873,14 +987,14 @@ class TCNTrainer:
         class_weights = 1.0 / (class_counts + 1e-10)
         class_weights = class_weights / class_weights.sum() * 3
         class_weights = torch.tensor(class_weights, dtype=torch.float32).to(self.device)
-        
+
         criterion = nn.CrossEntropyLoss(weight=class_weights)
         optimizer = torch.optim.AdamW(
             self.model.parameters(),
             lr=self.training_config.learning_rate,
             weight_decay=self.training_config.weight_decay,
         )
-        
+
         # Scheduler
         if self.training_config.use_onecycle:
             scheduler = torch.optim.lr_scheduler.OneCycleLR(
@@ -896,59 +1010,59 @@ class TCNTrainer:
             )
         else:
             scheduler = None
-        
+
         # Training loop
         best_model_state = None
         patience_counter = 0
-        
+
         logger.info(f"\n🚀 Starting training on {self.device}")
         logger.info(f"   Epochs: {self.training_config.epochs}, Batch size: {self.training_config.batch_size}")
-        
+
         for epoch in range(self.training_config.epochs):
             # Train
             self.model.train()
             train_loss = 0.0
-            
+
             pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{self.training_config.epochs}")
             for X_batch, y_batch in pbar:
                 X_batch = X_batch.to(self.device)
                 y_batch = y_batch.to(self.device)
-                
+
                 optimizer.zero_grad()
                 outputs = self.model(X_batch)
                 loss = criterion(outputs, y_batch)
                 loss.backward()
-                
+
                 # Gradient clipping
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
-                
+
                 optimizer.step()
-                
+
                 if self.training_config.use_onecycle and scheduler:
                     scheduler.step()
-                
+
                 train_loss += loss.item()
                 pbar.set_postfix({'loss': f'{loss.item():.4f}'})
-            
+
             train_loss /= len(train_loader)
-            
+
             # Validate
             val_loss, val_acc = self._validate(val_loader, criterion)
-            
+
             # Step scheduler (if not OneCycle)
             if scheduler and not self.training_config.use_onecycle:
                 scheduler.step()
-            
+
             # Record history
             self.training_history['train_loss'].append(train_loss)
             self.training_history['val_loss'].append(val_loss)
             self.training_history['val_acc'].append(val_acc)
-            
+
             logger.info(
                 f"   Epoch {epoch+1}: Train Loss={train_loss:.4f}, "
                 f"Val Loss={val_loss:.4f}, Val Acc={val_acc:.2%}"
             )
-            
+
             # Early stopping check
             if val_acc > self.best_val_acc:
                 self.best_val_acc = val_acc
@@ -959,64 +1073,64 @@ class TCNTrainer:
                 if patience_counter >= self.training_config.early_stopping_patience:
                     logger.info(f"   Early stopping at epoch {epoch+1}")
                     break
-        
+
         # Restore best model
         if best_model_state:
             self.model.load_state_dict(best_model_state)
-        
+
         return {
             'final_train_loss': train_loss,
             'final_val_loss': val_loss,
             'best_val_acc': self.best_val_acc,
             'epochs_trained': epoch + 1,
         }
-    
+
     def _validate(self, val_loader: DataLoader, criterion: nn.Module) -> Tuple[float, float]:
         """Validate model and return loss and accuracy."""
         self.model.eval()
         val_loss = 0.0
         correct = 0
         total = 0
-        
+
         with torch.no_grad():
             for X_batch, y_batch in val_loader:
                 X_batch = X_batch.to(self.device)
                 y_batch = y_batch.to(self.device)
-                
+
                 outputs = self.model(X_batch)
                 loss = criterion(outputs, y_batch)
                 val_loss += loss.item()
-                
+
                 _, predicted = outputs.max(1)
                 total += y_batch.size(0)
                 correct += predicted.eq(y_batch).sum().item()
-        
+
         return val_loss / len(val_loader), correct / total
-    
+
     def evaluate(self, test_loader: DataLoader) -> Dict:
         """Evaluate on test set."""
         self.model.eval()
         all_preds = []
         all_labels = []
         all_probs = []
-        
+
         with torch.no_grad():
             for X_batch, y_batch in test_loader:
                 X_batch = X_batch.to(self.device)
-                
+
                 outputs = self.model(X_batch)
                 probs = F.softmax(outputs, dim=1)
                 _, predicted = outputs.max(1)
-                
+
                 all_preds.extend(predicted.cpu().numpy())
                 all_labels.extend(y_batch.numpy())
                 all_probs.extend(probs.cpu().numpy())
-        
+
         all_preds = np.array(all_preds)
         all_labels = np.array(all_labels)
-        
+
         accuracy = (all_preds == all_labels).mean()
-        
+
         # Per-class accuracy
         class_names = ['Bear', 'Sideways', 'Bull']
         per_class_acc = {}
@@ -1026,12 +1140,12 @@ class TCNTrainer:
                 per_class_acc[name] = (all_preds[mask] == i).mean()
             else:
                 per_class_acc[name] = 0.0
-        
+
         logger.info(f"\n📊 Test Results:")
         logger.info(f"   Overall Accuracy: {accuracy:.2%}")
         for name, acc in per_class_acc.items():
             logger.info(f"   {name} Accuracy: {acc:.2%}")
-        
+
         return {
             'test_accuracy': accuracy,
             'per_class_accuracy': per_class_acc,
@@ -1039,7 +1153,7 @@ class TCNTrainer:
             'labels': all_labels,
             'probabilities': np.array(all_probs),
         }
-    
+
     def save_checkpoint(
         self,
         path: str,
@@ -1048,7 +1162,7 @@ class TCNTrainer:
     ):
         """
         Save model with feature configuration.
-        
+
         The checkpoint includes:
         - model_state: Model weights
         - feature_columns: Selected features (for evaluation)
@@ -1075,34 +1189,34 @@ class TCNTrainer:
             profile=profile,
             metrics=metrics or {},
         )
-        
+
         # Save as dict (for torch.load compatibility)
         save_dict = asdict(checkpoint)
-        
+
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         torch.save(save_dict, path)
-        
+
         logger.info(f"💾 Checkpoint saved to {path}")
         logger.info(f"   Features: {len(self.selected_features)}")
         logger.info(f"   Best Val Acc: {self.best_val_acc:.2%}")
-    
+
     @staticmethod
     def load_checkpoint(path: str, device: str = 'auto') -> Tuple['EnhancedTCN', List[str], Dict]:
         """
         Load model from checkpoint.
-        
+
         Returns:
             model: Loaded EnhancedTCN model
             features: List of feature columns
             checkpoint: Full checkpoint dict
         """
         checkpoint = torch.load(path, map_location='cpu')
-        
+
         # Get model config
         model_config = checkpoint['config']['model']
         training_config = checkpoint['config']['training']
-        
+
         # Rebuild model
         model = EnhancedTCN(
             input_dim=model_config['input_dim'],
@@ -1111,19 +1225,19 @@ class TCNTrainer:
             dropout=training_config['dropout'],
         )
         model.load_state_dict(checkpoint['model_state'])
-        
+
         # Move to device
         if device == 'auto':
             device = 'cuda' if torch.cuda.is_available() else 'cpu'
         model = model.to(device)
         model.eval()
-        
+
         features = checkpoint['feature_columns']
-        
+
         logger.info(f"✅ Loaded checkpoint from {path}")
         logger.info(f"   Features: {len(features)}")
         logger.info(f"   Profile: {checkpoint.get('profile', 'N/A')}")
-        
+
         return model, features, checkpoint
 
 # Main Entry Point
@@ -1137,21 +1251,21 @@ def main(args=None):
 Examples:
   # Auto-discover features and train
   python train_tcn_enhanced.py --data data/raw/eurusd_latest.csv
-  
+
   # Use SCALP profile (faster trading)
   python train_tcn_enhanced.py --data data/raw/eurusd_latest.csv --profile SCALP
-  
+
   # Skip feature selection, use all
   python train_tcn_enhanced.py --data data/raw/eurusd_latest.csv --skip-feature-selection
-  
+
   # Use specific features
   python train_tcn_enhanced.py --data data/raw/eurusd_latest.csv --features "rsi_14,atr_14,macd"
         """
     )
-    
+
     # Required
     parser.add_argument('--data', type=str, required=True, help='Path to CSV data')
-    
+
     # Feature selection
     parser.add_argument('--skip-feature-selection', action='store_true',
                         help='Skip feature discovery, use all features')
@@ -1159,14 +1273,14 @@ Examples:
                         help='Comma-separated list of features to use')
     parser.add_argument('--n-features', type=int, default=25,
                         help='Number of top features to select (default: 25)')
-    
+
     # Model/Profile
     parser.add_argument('--profile', type=str, choices=['SCALP', 'INTRADAY', 'SWING'],
                         default=None, help='Trading profile (affects architecture and features)')
     parser.add_argument('--hidden-dim', type=int, default=64, help='Hidden dimension')
     parser.add_argument('--num-layers', type=int, default=5, help='Number of TCN layers')
     parser.add_argument('--dropout', type=float, default=0.2, help='Dropout rate')
-    
+
     # Training
     parser.add_argument('--epochs', type=int, default=50, help='Number of epochs')
     parser.add_argument('--batch-size', type=int, default=64, help='Batch size')
@@ -1175,21 +1289,21 @@ Examples:
     parser.add_argument('--threshold', type=float, default=0.05,
                         help='Trend threshold (default: 0.05 = 5 pips)')
     parser.add_argument('--patience', type=int, default=10, help='Early stopping patience')
-    
+
     # Scheduler
     parser.add_argument('--use-cosine', action='store_true', help='Use cosine scheduler')
     parser.add_argument('--no-onecycle', action='store_true', help='Disable OneCycle scheduler')
-    
+
     # Output
     parser.add_argument('--save-dir', type=str, default='models/weights',
                         help='Directory to save model')
     parser.add_argument('--name', type=str, default='tcn_enhanced',
                         help='Model name for checkpoint')
-    
+
     # Use provided args or parse from command line
     if args is None:
         args = parser.parse_args()
-    
+
     print("=" * 60)
     print("🚀 Enhanced TCN Training with Feature Discovery")
     print("=" * 60)
@@ -1199,10 +1313,10 @@ Examples:
     print(f"   Hidden dim: {args.hidden_dim}")
     print(f"   Epochs: {args.epochs}")
     print("=" * 60)
-    
+
     # Build configs
     feature_config = FeatureConfig(n_top_features=args.n_features)
-    
+
     training_config = TrainingConfig(
         sequence_length=args.seq_len,
         trend_threshold=args.threshold,
@@ -1216,18 +1330,18 @@ Examples:
         use_onecycle=not args.no_onecycle,
         use_cosine=args.use_cosine,
     )
-    
+
     # Create trainer
     trainer = TCNTrainer(
         feature_config=feature_config,
         training_config=training_config,
     )
-    
+
     # Parse features if provided
     features = None
     if args.features:
         features = [f.strip() for f in args.features.split(',')]
-    
+
     # Prepare data
     train_loader, val_loader, test_loader = trainer.prepare_data(
         data_path=args.data,
@@ -1235,16 +1349,16 @@ Examples:
         skip_feature_selection=args.skip_feature_selection,
         profile=args.profile,
     )
-    
+
     # Build model
     trainer.build_model(profile=args.profile)
-    
+
     # Train
     train_metrics = trainer.train(train_loader, val_loader)
-    
+
     # Evaluate
     test_metrics = trainer.evaluate(test_loader)
-    
+
     # Save checkpoint
     save_path = Path(args.save_dir) / f"{args.name}_best.pt"
     trainer.save_checkpoint(
@@ -1252,7 +1366,7 @@ Examples:
         profile=args.profile,
         metrics={**train_metrics, **test_metrics},
     )
-    
+
     print("\n" + "=" * 60)
     print("✅ Training Complete!")
     print(f"   Best Val Accuracy: {trainer.best_val_acc:.2%}")

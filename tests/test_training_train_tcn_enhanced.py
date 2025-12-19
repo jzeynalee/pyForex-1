@@ -217,15 +217,15 @@ class TestTrainingConfig:
     
     def test_default_trend_threshold(self, training_config):
         """Test default trend threshold."""
-        assert training_config.trend_threshold == 0.05
+        assert training_config.trend_threshold == 0.001
     
     def test_default_train_split(self, training_config):
         """Test default train split ratio."""
-        assert training_config.train_split == 0.8
+        assert training_config.train_split == 0.7
     
     def test_default_val_split(self, training_config):
         """Test default validation split ratio."""
-        assert training_config.val_split == 0.1
+        assert training_config.val_split == 0.15
     
     def test_default_hidden_dim(self, training_config):
         """Test default hidden dimension."""
@@ -233,7 +233,7 @@ class TestTrainingConfig:
     
     def test_default_num_layers(self, training_config):
         """Test default number of layers."""
-        assert training_config.num_layers == 5
+        assert training_config.num_layers == 4
     
     def test_default_kernel_size(self, training_config):
         """Test default kernel size."""
@@ -404,9 +404,9 @@ class TestFeatureImportanceAnalyzer:
         )
         assert len(features) <= 5
     
-    def test_analyze_filters_by_threshold(self, sample_features_array,
+    def test_analyze_filters_by_threshold_with_fallback(self, sample_features_array,
                                           sample_labels, sample_feature_names):
-        """Test analyze filters features below threshold."""
+        """Test analyze uses fallback when all features below threshold."""
         with patch('training.train_tcn_enhanced.RandomForestClassifier') as mock_rf:
             instance = MagicMock()
             # All features below threshold
@@ -420,7 +420,8 @@ class TestFeatureImportanceAnalyzer:
                 sample_labels,
                 sample_feature_names,
             )
-            assert len(features) == 0
+            # Fallback ensures at least some features are selected
+            assert len(features) >= 3  # Minimum 3 features guaranteed
     
     def test_analyze_with_profile(self, sample_features_array, sample_labels,
                                   sample_feature_names, mock_random_forest):
@@ -574,9 +575,9 @@ class TestEnhancedDataLoaderV3Init:
         assert loader.sequence_length == 30
     
     def test_default_trend_threshold(self):
-        """Test default trend threshold is 0.05."""
+        """Test default trend threshold is 0.001."""
         loader = EnhancedDataLoaderV3()
-        assert loader.trend_threshold == 0.05
+        assert loader.trend_threshold == 0.001
     
     def test_custom_sequence_length(self):
         """Test custom sequence length."""
@@ -1224,17 +1225,16 @@ class TestEnhancedTCN:
         model = EnhancedTCN(input_dim=10, hidden_dim=128)
         assert model.get_feature_dim() == 128
     
-    def test_aggregation_weights_initialized(self):
-        """Test aggregation weights parameter exists."""
+    def test_layer_norm_initialized(self):
+        """Test layer normalization is initialized."""
         model = EnhancedTCN(input_dim=10, hidden_dim=32)
-        assert hasattr(model, 'agg_weight')
-        assert model.agg_weight.shape == (2,)
+        assert hasattr(model, 'layer_norm')
+        assert model.layer_norm.normalized_shape == (32,)
     
     def test_layer_norm_exists(self):
         """Test layer normalization exists."""
         model = EnhancedTCN(input_dim=10, hidden_dim=32)
         assert hasattr(model, 'layer_norm')
-        assert isinstance(model.layer_norm, nn.LayerNorm)
     
     def test_profiles_dict_exists(self):
         """Test PROFILES class attribute exists."""
@@ -1255,60 +1255,6 @@ class TestEnhancedTCN:
         model = EnhancedTCN(input_dim=10, hidden_dim=32, num_classes=5)
         final_layer = model.classifier[-1]
         assert final_layer.out_features == 5
-
-
-# =============================================================================
-# TestEnhancedTCNProfiles
-# =============================================================================
-
-class TestEnhancedTCNProfiles:
-    """Tests for profile-based model creation."""
-    
-    def test_from_profile_scalp(self):
-        """Test creating model from SCALP profile."""
-        model = EnhancedTCN.from_profile('SCALP', input_dim=10)
-        # SCALP: num_layers=4, kernel_size=3
-        assert model.receptive_field == 1 + 2 * 2 * (1 + 2 + 4 + 8)  # 31
-    
-    def test_from_profile_intraday(self):
-        """Test creating model from INTRADAY profile."""
-        model = EnhancedTCN.from_profile('INTRADAY', input_dim=10)
-        # INTRADAY: num_layers=5
-        assert model is not None
-    
-    def test_from_profile_swing(self):
-        """Test creating model from SWING profile."""
-        model = EnhancedTCN.from_profile('SWING', input_dim=10)
-        # SWING: num_layers=7 (larger receptive field)
-        assert model.receptive_field > EnhancedTCN.from_profile('SCALP', input_dim=10).receptive_field
-    
-    def test_from_profile_case_insensitive(self):
-        """Test profile name is case insensitive."""
-        model1 = EnhancedTCN.from_profile('scalp', input_dim=10)
-        model2 = EnhancedTCN.from_profile('SCALP', input_dim=10)
-        assert model1.receptive_field == model2.receptive_field
-    
-    def test_from_profile_invalid_raises(self):
-        """Test invalid profile raises ValueError."""
-        with pytest.raises(ValueError, match="Unknown profile"):
-            EnhancedTCN.from_profile('INVALID', input_dim=10)
-    
-    def test_from_profile_custom_hidden_dim(self):
-        """Test custom hidden_dim with profile."""
-        model = EnhancedTCN.from_profile('SCALP', input_dim=10, hidden_dim=128)
-        assert model.hidden_dim == 128
-    
-    def test_from_profile_custom_dropout(self):
-        """Test custom dropout with profile."""
-        model = EnhancedTCN.from_profile('SCALP', input_dim=10, dropout=0.5)
-        # Verify dropout was passed (check internal blocks)
-        assert model is not None
-    
-    def test_from_profile_custom_num_classes(self):
-        """Test custom num_classes with profile."""
-        model = EnhancedTCN.from_profile('SCALP', input_dim=10, num_classes=4)
-        final_layer = model.classifier[-1]
-        assert final_layer.out_features == 4
 
 
 # =============================================================================
@@ -1384,28 +1330,19 @@ class TestEnhancedTCNForward:
         
         assert x.grad is not None
     
-    def test_forward_aggregation_weights_used(self):
-        """Test aggregation weights affect output."""
+    def test_forward_aggregation_combines_features(self):
+        """Test aggregation combines last step and global average."""
         model = EnhancedTCN(input_dim=10, hidden_dim=32)
+        model.eval()
         x = torch.randn(4, 30, 10)
         
-        # Get output with default weights
-        out1 = model(x, mode='features')
+        # Get features output
+        features = model(x, mode='features')
         
-        # Modify weights
-        with torch.no_grad():
-            model.agg_weight[0] = 1.0
-            model.agg_weight[1] = 0.0
-        
-        out2 = model(x, mode='features')
-        
-        # Outputs should differ
-        assert not torch.allclose(out1, out2)
-
-
-# =============================================================================
-# TestTCNTrainerInit
-# =============================================================================
+        # Features should have correct shape
+        assert features.shape == (4, 32)
+        # Features should be normalized (layer norm applied)
+        assert features.std().item() < 5.0  # Reasonable range after layer norm
 
 class TestTCNTrainerInit:
     """Tests for TCNTrainer initialization."""

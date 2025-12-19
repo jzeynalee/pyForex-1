@@ -342,6 +342,27 @@ def cmd_multi_style(args, logger: logging.Logger):
     """Handle multi-style trading command."""
     logger.info("🚀 Starting Multi-Style Trading Mode")
     
+    # Determine which styles are enabled
+    enabled_styles = []
+    if not args.no_scalp:
+        enabled_styles.append("SCALP")
+    if not args.no_intraday:
+        enabled_styles.append("INTRADAY")
+    if not args.no_swing:
+        enabled_styles.append("SWING")
+    
+    logger.info(f"🔍 Checking model weights for enabled styles: {enabled_styles}")
+    
+    # Check and train missing models before starting
+    try:
+        from training.auto_retrain import check_and_train_missing_models
+        if not check_and_train_missing_models(enabled_styles, args.symbol):
+            logger.error("❌ Model training failed. System not ready for trading.")
+            return 1
+    except Exception as e:
+        logger.error(f"❌ Auto-training failed: {e}")
+        logger.warning("⚠️ Continuing with basic system checks...")
+    
     checker = SystemChecker(logger)
     if not checker.run_all_checks("live"):
         logger.error("Prerequisites not met. Aborting.")

@@ -112,6 +112,16 @@ from .retraining_scheduler import (
 )
 
 # =============================================================================
+# Auto Training Manager
+# =============================================================================
+
+from .auto_training_manager import (
+    AutoTrainingManager,
+    TrainingRequirement,
+    check_and_train_missing_models,
+)
+
+# =============================================================================
 # Version Info
 # =============================================================================
 
@@ -163,6 +173,11 @@ __all__ = [
     'RetrainingEvent',
     'DataPreparer',
     'ModelTrainer',
+    
+    # Auto Training
+    'AutoTrainingManager',
+    'TrainingRequirement',
+    'check_and_train_missing_models',
     
     # Factory functions
     'create_scheduler',
