@@ -5,3 +5,22 @@ datasets/
 SYN_*.jpg
 dataset_cache.pt
 checkpoints_vit_cached/
+
+# YOLO Training Outputs
+runs/
+models/yolo/
+
+# Training Data
+data/raw/
+data/processed/
+*.csv
+
+# Model Checkpoints
+*.pt
+*.pth
+*.onnx
+
+# Cache
+__pycache__/
+*.pyc
+.cache/
