@@ -1,58 +1,173 @@
-# Fine-tune ViT (end-to-end)
 # training/finetune_vit.py
-
 """
-Fine-tuning script for ViT on chart classification.
-Unfreezes the last N transformer blocks + classifier head.
-Uses differential learning rates.
+Fine-tuning script for ViT on chart classification with profile support.
+
+Features:
+- End-to-end fine-tuning (unfreezes last N transformer blocks)
+- Differential learning rates (backbone vs head)
+- Profile support: SCALP, INTRADAY, SWING with timeframe-specific configs
+- Full image augmentation (ColorJitter, RandomAffine, RandomErasing)
+- Warmup + Cosine annealing scheduler
+- Early stopping with patience
+- Resume from checkpoint
+- Optional dataset generation
+
+Usage:
+    # Train single profile
+    python training/finetune_vit.py --data_dir datasets/vit_intraday --profile INTRADAY
+    
+    # Train all profiles
+    python training/finetune_vit.py --profile ALL
+    
+    # Generate dataset and train
+    python training/finetune_vit.py --profile INTRADAY --generate-dataset
 """
 
 import argparse
 import os
+import sys
 import torch
 from torch import nn
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 from tqdm import tqdm
+from pathlib import Path
 import timm
 
-# ============================================
-# CUDA DEBUG - Check at import time
-# ============================================
-print(f"[DEBUG] torch.cuda.is_available() = {torch.cuda.is_available()}")
-if torch.cuda.is_available():
-    print(f"[DEBUG] torch.cuda.device_count() = {torch.cuda.device_count()}")
-    print(f"[DEBUG] torch.cuda.get_device_name(0) = {torch.cuda.get_device_name(0)}")
-# ============================================
+# Add project root to path
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+# =============================================================================
+# Profile Configurations
+# =============================================================================
+PROFILES = {
+    'SCALP': {
+        'data_csv': 'data/raw/EURUSD_M5_latest.csv',
+        'dataset_dir': 'datasets/vit_scalp',
+        'window_size': 30,
+        'stride': 5,
+        'forward_bars': 6,
+        'threshold_pct': 0.15,
+        'epochs': 30,
+        'patience': 7,
+        'unfreeze_blocks': 3,
+        'lr_backbone': 5e-6,
+        'lr_head': 5e-4,
+        'description': 'Short-term scalping (M5 timeframe)',
+    },
+    'INTRADAY': {
+        'data_csv': 'data/raw/EURUSD_H1_latest.csv',
+        'dataset_dir': 'datasets/vit_intraday',
+        'window_size': 60,
+        'stride': 10,
+        'forward_bars': 10,
+        'threshold_pct': 0.3,
+        'epochs': 30,
+        'patience': 7,
+        'unfreeze_blocks': 4,
+        'lr_backbone': 1e-5,
+        'lr_head': 1e-3,
+        'description': 'Intraday trading (H1 timeframe)',
+    },
+    'SWING': {
+        'data_csv': 'data/raw/EURUSD_H4_latest.csv',
+        'dataset_dir': 'datasets/vit_swing',
+        'window_size': 90,
+        'stride': 15,
+        'forward_bars': 15,
+        'threshold_pct': 0.5,
+        'epochs': 40,
+        'patience': 10,
+        'unfreeze_blocks': 4,
+        'lr_backbone': 1e-5,
+        'lr_head': 1e-3,
+        'description': 'Swing trading (H4 timeframe)',
+    },
+}
+
+
+# -----------------------------------------------------
+# Dataset Generation (from train_vit_profiles.py)
+# -----------------------------------------------------
+def generate_dataset(profile: str, max_samples: int = None) -> bool:
+    """Generate ViT dataset for a profile using ViTDatasetGenerator."""
+    try:
+        from utils.vit_dataset_generator import ViTDatasetGenerator, FuturePriceLabeler
+    except ImportError:
+        print("❌ utils.vit_dataset_generator not found. Cannot generate dataset.")
+        return False
+    
+    config = PROFILES[profile]
+    
+    print(f"\n📊 Generating ViT dataset for {profile}...")
+    print(f"   CSV: {config['data_csv']}")
+    print(f"   Output: {config['dataset_dir']}")
+    
+    csv_path = Path(config['data_csv'])
+    if not csv_path.exists():
+        print(f"❌ Data file not found: {csv_path}")
+        return False
+    
+    labeler = FuturePriceLabeler(
+        forward_bars=config['forward_bars'],
+        threshold_pct=config['threshold_pct']
+    )
+    
+    generator = ViTDatasetGenerator(
+        output_dir=config['dataset_dir'],
+        image_size=224,
+        window_size=config['window_size'],
+        stride=config['stride'],
+        val_split=0.2,
+        labeler=labeler,
+    )
+    
+    try:
+        stats = generator.generate_from_csv(str(csv_path), symbol=f"EURUSD_{profile}", max_samples=max_samples)
+        print(f"✅ Dataset generated: {stats['train']['total']} train, {stats['val']['total']} val")
+        return True
+    except Exception as e:
+        print(f"❌ Error generating dataset: {e}")
+        return False
 
 
 # -----------------------------------------------------
 # Argument Parser
 # -----------------------------------------------------
 def get_args():
-    # Detect device BEFORE argparse
     detected_device = "cuda" if torch.cuda.is_available() else "cpu"
     
-    parser = argparse.ArgumentParser(description="Fine-tune ViT end-to-end")
+    parser = argparse.ArgumentParser(description="Fine-tune ViT with profile support")
 
-    parser.add_argument("--data_dir", type=str, required=True)
+    # Profile support
+    parser.add_argument("--profile", type=str, choices=['SCALP', 'INTRADAY', 'SWING', 'ALL'],
+                        default=None, help="Trading profile (uses profile-specific settings)")
+    parser.add_argument("--generate-dataset", action='store_true',
+                        help="Generate dataset before training")
+    parser.add_argument("--max-samples", type=int, default=None,
+                        help="Max samples for dataset generation")
+    
+    # Data and training params (can override profile defaults)
+    parser.add_argument("--data_dir", type=str, default=None,
+                        help="Dataset directory (auto-set if using --profile)")
     parser.add_argument("--batch_size", type=int, default=16)
-    parser.add_argument("--num_epochs", type=int, default=30)
-    parser.add_argument("--lr_head", type=float, default=1e-3,
+    parser.add_argument("--num_epochs", type=int, default=None,
+                        help="Training epochs (auto-set if using --profile)")
+    parser.add_argument("--lr_head", type=float, default=None,
                         help="Learning rate for classifier head")
-    parser.add_argument("--lr_backbone", type=float, default=1e-5,
+    parser.add_argument("--lr_backbone", type=float, default=None,
                         help="Learning rate for unfrozen backbone layers")
     parser.add_argument("--weight_decay", type=float, default=0.01)
-    parser.add_argument("--unfreeze_blocks", type=int, default=4,
-                        help="Number of transformer blocks to unfreeze (from end)")
+    parser.add_argument("--unfreeze_blocks", type=int, default=None,
+                        help="Number of transformer blocks to unfreeze")
     parser.add_argument("--dropout", type=float, default=0.1)
     parser.add_argument("--label_smoothing", type=float, default=0.1)
-    parser.add_argument("--patience", type=int, default=7)
+    parser.add_argument("--patience", type=int, default=None)
     parser.add_argument("--warmup_epochs", type=int, default=2)
-    parser.add_argument("--save_dir", type=str, default="./checkpoints_vit_finetuned")
+    parser.add_argument("--save_dir", type=str, default=None,
+                        help="Save directory (auto-set if using --profile)")
     parser.add_argument("--num_workers", type=int, default=4)
-    parser.add_argument("--device", type=str, default=detected_device,
-                        help="Device to use (auto-detected)")
+    parser.add_argument("--device", type=str, default=detected_device)
     parser.add_argument("--resume", type=str, default=None,
                         help="Path to checkpoint to resume from")
 
@@ -425,12 +540,127 @@ def train(args):
 
 
 # -----------------------------------------------------
+# Profile-based Training
+# -----------------------------------------------------
+def train_profile(profile: str, args) -> dict:
+    """Train ViT model for a specific profile."""
+    config = PROFILES[profile]
+    
+    print("\n" + "=" * 60)
+    print(f"🎯 TRAINING ViT MODEL: {profile}")
+    print(f"   {config['description']}")
+    print("=" * 60)
+    
+    # Apply profile defaults (args can override)
+    args.data_dir = args.data_dir or config['dataset_dir']
+    args.num_epochs = args.num_epochs or config['epochs']
+    args.patience = args.patience or config['patience']
+    args.unfreeze_blocks = args.unfreeze_blocks or config['unfreeze_blocks']
+    args.lr_backbone = args.lr_backbone or config['lr_backbone']
+    args.lr_head = args.lr_head or config['lr_head']
+    args.save_dir = args.save_dir or f"models/vit"
+    
+    # Check dataset exists
+    dataset_dir = Path(args.data_dir)
+    if not (dataset_dir / 'train').exists():
+        if getattr(args, 'generate_dataset', False):
+            if not generate_dataset(profile, getattr(args, 'max_samples', None)):
+                return {'profile': profile, 'status': 'FAILED', 'reason': 'Dataset generation failed'}
+        else:
+            print(f"❌ Dataset not found at {dataset_dir}")
+            print(f"   Run with --generate-dataset to create it")
+            return {'profile': profile, 'status': 'FAILED', 'reason': 'Dataset not found'}
+    
+    # Train
+    try:
+        model, best_acc = train(args)
+        
+        # Save profile-specific model to models/vit/
+        save_dir = Path('models/vit')
+        save_dir.mkdir(parents=True, exist_ok=True)
+        
+        profile_ckpt = save_dir / f'vit_{profile.lower()}.pt'
+        best_ckpt = Path(args.save_dir) / 'best_model.pth'
+        
+        if best_ckpt.exists():
+            import shutil
+            shutil.copy(best_ckpt, profile_ckpt)
+            print(f"📦 Saved profile model → {profile_ckpt}")
+        
+        return {'profile': profile, 'status': 'SUCCESS', 'best_acc': best_acc}
+    except Exception as e:
+        print(f"❌ Error training {profile}: {e}")
+        return {'profile': profile, 'status': 'ERROR', 'reason': str(e)}
+
+
+def train_all_profiles(args) -> dict:
+    """Train ViT models for all profiles."""
+    results = {}
+    
+    for profile in PROFILES:
+        # Reset args for each profile
+        profile_args = argparse.Namespace(**vars(args))
+        profile_args.data_dir = None
+        profile_args.num_epochs = None
+        profile_args.patience = None
+        profile_args.unfreeze_blocks = None
+        profile_args.lr_backbone = None
+        profile_args.lr_head = None
+        profile_args.save_dir = None
+        
+        result = train_profile(profile, profile_args)
+        results[profile] = result
+    
+    # Summary
+    print("\n" + "=" * 60)
+    print("📊 VIT FINE-TUNING SUMMARY")
+    print("=" * 60)
+    for profile, result in results.items():
+        if result['status'] == 'SUCCESS':
+            print(f"   ✅ {profile}: {result['best_acc']:.4f} val accuracy")
+        else:
+            print(f"   ❌ {profile}: {result['status']} - {result.get('reason', '')}")
+    
+    return results
+
+
+# -----------------------------------------------------
 # Main
 # -----------------------------------------------------
 def main():
     args = get_args()
-    print(f"[DEBUG] args.device = {args.device}")
-    train(args)
+    
+    # Check GPU
+    print("=" * 50)
+    print("GPU CHECK")
+    print("=" * 50)
+    print(f"CUDA available: {torch.cuda.is_available()}")
+    if torch.cuda.is_available():
+        print(f"GPU: {torch.cuda.get_device_name(0)}")
+    print("=" * 50)
+    
+    if args.profile == 'ALL':
+        train_all_profiles(args)
+    elif args.profile:
+        train_profile(args.profile, args)
+    else:
+        # Legacy mode: require data_dir
+        if not args.data_dir:
+            print("❌ Either --profile or --data_dir is required")
+            print("   Examples:")
+            print("     python finetune_vit.py --profile INTRADAY")
+            print("     python finetune_vit.py --data_dir datasets/vit_intraday")
+            return
+        
+        # Set defaults for non-profile mode
+        args.num_epochs = args.num_epochs or 30
+        args.patience = args.patience or 7
+        args.unfreeze_blocks = args.unfreeze_blocks or 4
+        args.lr_backbone = args.lr_backbone or 1e-5
+        args.lr_head = args.lr_head or 1e-3
+        args.save_dir = args.save_dir or "./checkpoints_vit_finetuned"
+        
+        train(args)
 
 
 if __name__ == "__main__":
