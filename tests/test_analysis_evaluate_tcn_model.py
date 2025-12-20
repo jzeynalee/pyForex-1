@@ -17,7 +17,7 @@ class TestLoadTCNCheckpoint:
     """Test TCN checkpoint loading."""
 
     @patch('analysis.evaluate_tcn_model.torch.load')
-    @patch('analysis.evaluate_tcn_model.EnhancedTCN')
+    @patch('training.train_tcn_enhanced.EnhancedTCN')
     def test_load_checkpoint_with_feature_columns(self, mock_enhanced_tcn, mock_torch_load):
         """Test loading checkpoint with feature_columns."""
         mock_checkpoint = {
@@ -41,7 +41,7 @@ class TestLoadTCNCheckpoint:
         assert model is not None
 
     @patch('analysis.evaluate_tcn_model.torch.load')
-    @patch('analysis.evaluate_tcn_model.EnhancedTCN')
+    @patch('training.train_tcn_enhanced.EnhancedTCN')
     def test_load_checkpoint_missing_features(self, mock_enhanced_tcn, mock_torch_load):
         """Test loading checkpoint without feature_columns raises error."""
         mock_checkpoint = {'model_state': {}}
@@ -53,7 +53,7 @@ class TestLoadTCNCheckpoint:
             load_tcn_checkpoint('model.pt')
 
     @patch('analysis.evaluate_tcn_model.torch.load')
-    @patch('analysis.evaluate_tcn_model.EnhancedTCN')
+    @patch('training.train_tcn_enhanced.EnhancedTCN')
     def test_load_checkpoint_with_config(self, mock_enhanced_tcn, mock_torch_load):
         """Test loading checkpoint with full config."""
         mock_checkpoint = {
@@ -119,17 +119,25 @@ class TestTCNEvaluator:
     @patch('analysis.evaluate_tcn_model.pd.read_csv')
     def test_prepare_data(self, mock_read_csv, evaluator):
         """Test data preparation."""
-        mock_df = MagicMock()
-        mock_df.columns = ['close', 'high', 'low', 'volume']
-        mock_df.iloc.__getitem__.return_value = mock_df
+        # Create real DataFrame for proper column handling
+        import pandas as pd
+        n_rows = 200  # Enough for train/test split with seq_len
+        mock_df = pd.DataFrame({
+            'close': np.random.randn(n_rows) + 1.1,
+            'high': np.random.randn(n_rows) + 1.11,
+            'low': np.random.randn(n_rows) + 1.09
+        })
         mock_read_csv.return_value = mock_df
 
-        # Mock _ensure_features
+        # Mock _ensure_features to return the same df
         evaluator._ensure_features = Mock(return_value=mock_df)
+        
+        X, y, prices, indices = evaluator.prepare_data('data.csv')
 
-        X_test, y_test, close_prices, entry_indices = evaluator.prepare_data('data.csv')
-
-        assert mock_read_csv.called
+        mock_read_csv.assert_called_once()
+        assert len(X) > 0
+        assert len(y) == len(X)
+        assert len(prices) > 0
 
     def test_get_probabilities(self, evaluator):
         """Test getting probabilities from model."""

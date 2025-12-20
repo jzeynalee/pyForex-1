@@ -136,11 +136,10 @@ class TestPredict:
         mock_vit.eval.return_value = mock_vit
         
         mock_classifier = MagicMock()
-        logits = torch.randn(1, 3)
-        logits[0, 1] = 5.0  # Make class 1 the highest
+        logits = torch.tensor([[1.0, 5.0, 2.0]])  # Make class 1 the highest
         mock_classifier.return_value = logits
         
-        class_names = {"0": "bear", "1": "sideways", "2": "bull"}
+        class_names = ["bear", "sideways", "bull"]
 
         from inference.inference_vit import predict
         class_name, prob = predict(mock_vit, mock_classifier, torch.randn(1, 3, 224, 224), 
@@ -159,7 +158,7 @@ class TestPredict:
         raw_logits = torch.tensor([[2.0, 5.0, 1.0]])
         mock_classifier.return_value = raw_logits
         
-        class_names = {"0": "bear", "1": "sideways", "2": "bull"}
+        class_names = ["bear", "sideways", "bull"]
 
         from inference.inference_vit import predict
         class_name, prob = predict(mock_vit, mock_classifier, torch.randn(1, 3, 224, 224), 

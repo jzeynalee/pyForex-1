@@ -101,15 +101,17 @@ class TestHorizonEvaluator:
     @patch('analysis.evaluate_tcn_horizon.pd.read_csv')
     def test_prepare_horizon_data(self, mock_read_csv, evaluator):
         """Test preparing horizon-based data."""
-        # Create mock DataFrame
-        n_rows = 100
-        mock_df = MagicMock()
-        mock_df.columns = ['close', 'high', 'low']
-        mock_df.iloc.__getitem__.return_value = mock_df
-        mock_df.__len__.return_value = n_rows
+        # Create real DataFrame with enough rows for seq_len + horizon + test split
+        import pandas as pd
+        n_rows = 200  # Enough for 80% train, 20% test with seq_len=30 and horizon=5
+        mock_df = pd.DataFrame({
+            'close': np.random.randn(n_rows) + 1.1,  # Positive prices
+            'high': np.random.randn(n_rows) + 1.11,
+            'low': np.random.randn(n_rows) + 1.09
+        })
         mock_read_csv.return_value = mock_df
 
-        # Mock _ensure_features
+        # Mock _ensure_features to return the same df
         evaluator._ensure_features = Mock(return_value=mock_df)
         
         X, entry_prices, exit_prices = evaluator.prepare_horizon_data(
@@ -117,6 +119,9 @@ class TestHorizonEvaluator:
         )
 
         mock_read_csv.assert_called_once()
+        assert len(X) > 0
+        assert len(entry_prices) == len(X)
+        assert len(exit_prices) == len(X)
 
     def test_evaluate_horizon_strategy(self, evaluator):
         """Test horizon strategy evaluation."""
@@ -128,11 +133,14 @@ class TestHorizonEvaluator:
         entry_prices = np.array([1.1000, 1.1050, 1.1100])
         exit_prices = np.array([1.1020, 1.1030, 1.1110])  # Mixed results
 
-        result = evaluator.evaluate_horizon_strategy(
-            probs, entry_prices, exit_prices, spread_cost=0.0001
-        )
+        # Suppress print output during test
+        with patch('builtins.print'):
+            result = evaluator.evaluate_horizon_strategy(
+                probs, entry_prices, exit_prices, spread_cost=0.0001
+            )
 
         assert 'best' in result
         assert 'threshold' in result['best']
-        assert 'returns' in result['best']
+        assert 'total_return' in result['best']
+        assert 'all_results' in result
 
