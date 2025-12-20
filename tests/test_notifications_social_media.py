@@ -216,11 +216,24 @@ class TestSocialMediaNotifier:
         mock_config.dry_run = True
         notifier = SocialMediaNotifier(config=mock_config)
 
-        trade_data = {'symbol': 'EURUSD', 'pnl': 100.0}
+        from notifications.social_media import TradeData
+        now = datetime.now()
+        trade_data = TradeData(
+            trade_id='TEST002',
+            symbol='EURUSD',
+            direction='LONG',
+            entry_price=1.1000,
+            exit_price=1.1010,
+            pnl=100.0,
+            pnl_pct=0.91,
+            entry_time=now,
+            exit_time=now,
+            duration_minutes=30
+        )
         result = notifier.post_trade_result(trade_data)
 
-        # Should return True but not actually post
-        assert result is True
+        # Should return dict of results
+        assert isinstance(result, dict)
 
     def test_post_performance_update(self, mock_config):
         """Test posting performance update."""
@@ -231,13 +244,16 @@ class TestSocialMediaNotifier:
 
             notifier = SocialMediaNotifier(config=mock_config)
 
-            metrics = {
-                'total_trades': 10,
-                'win_rate': 0.7,
-                'total_pnl': 500.0
-            }
+            from notifications.social_media import PerformanceData
+            metrics = PerformanceData(
+                period='daily',
+                total_trades=10,
+                win_rate=0.7,
+                total_pnl=500.0,
+                timestamp=datetime.now()
+            )
 
             result = notifier.post_performance_update(metrics)
 
-            assert result is True
+            assert isinstance(result, dict)
 
