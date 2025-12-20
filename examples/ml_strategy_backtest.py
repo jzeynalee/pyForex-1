@@ -37,7 +37,7 @@ from backtesting import (
 
 # ML components (avoid circular import by importing directly)
 from inference.predictor import RiskAwareTCNPredictor, PredictorConfig, PredictionResult
-from utils.features_engineering import compute_features
+from utils.features_engineering import FeatureEngineerOptimized
 
 # Setup logging
 logging.basicConfig(
@@ -141,6 +141,9 @@ class MLStrategy:
         self.min_confidence = 0.55
         self.min_risk_reward = 1.5
         
+        # Initialize feature engineer
+        self.feature_engineer = FeatureEngineerOptimized()
+        
         # Initialize TCN predictor
         self._init_predictor()
         
@@ -242,25 +245,49 @@ class MLStrategy:
         """Prepare features for ML model."""
         try:
             # Use last sequence_length bars
-            window = data.tail(self.sequence_length).copy()
+            window = data.tail(self.sequence_length + 100).copy()  # Extra for indicators
             
-            # Compute technical features
-            features_df = compute_features(window)
+            # Ensure index is DatetimeIndex (not just datetime column)
+            if not isinstance(window.index, pd.DatetimeIndex):
+                if 'time' in window.columns:
+                    window = window.set_index('time')
+                elif 'timestamp' in window.columns:
+                    window = window.set_index('timestamp')
+            
+            # Ensure required columns exist
+            required = ['open', 'high', 'low', 'close', 'volume']
+            if not all(col in window.columns for col in required):
+                logger.error(f"Missing required columns. Have: {window.columns.tolist()}")
+                return None
+            
+            # Compute technical features using feature engineer
+            features_df = self.feature_engineer.generate_features(window, batch_processing=False)
             
             if features_df is None or len(features_df) == 0:
                 return None
             
-            # Get last row of features
-            feature_vector = features_df.iloc[-1].values
+            # Get last sequence_length rows
+            features_df = features_df.tail(self.sequence_length)
             
-            # Reshape for model (1, seq_len, features) - use simple approach
-            # For now, just use the feature vector repeated
-            features = np.tile(feature_vector, (self.sequence_length, 1))
+            # Drop non-numeric columns and handle NaNs
+            numeric_cols = features_df.select_dtypes(include=[np.number]).columns
+            features_df = features_df[numeric_cols]
+            
+            # Fill NaNs with 0
+            features_df = features_df.fillna(0)
+            
+            # Convert to numpy array (seq_len, n_features)
+            features = features_df.values
+            
+            if features.shape[0] < self.sequence_length:
+                return None
             
             return features
             
         except Exception as e:
             logger.error(f"Feature preparation error: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return None
     
     def _technical_signal(self, data: pd.DataFrame) -> str:
