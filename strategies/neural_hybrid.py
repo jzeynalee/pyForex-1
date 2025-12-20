@@ -178,11 +178,20 @@ class NeuralHybridStrategy:
         self,
         config: Optional[StrategyConfig] = None,
         data_provider = None,
-        executor = None
+        executor = None,
+        **kwargs
     ):
         self.config = config or StrategyConfig()
         self.data_provider = data_provider
         self.executor = executor
+        
+        # Handle extra args like risk_manager if passed
+        if 'risk_manager' in kwargs:
+            # We currently use internal decision_engine which wraps risk logic
+            # but we could store this if needed
+            pass
+            
+        self.name = "NeuralHybridStrategy"
         
         # Models
         self.predictor: Optional[HybridPredictor] = None

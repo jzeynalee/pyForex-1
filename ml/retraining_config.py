@@ -265,8 +265,8 @@ class DataConfig:
     """Configuration for training data management."""
     
     # Data windows
-    max_training_samples: int = 50000
-    min_training_samples: int = 5000
+    max_training_samples: int = 1000000
+    min_training_samples: int = 100000
     lookback_days: int = 90
     
     # Feature selection

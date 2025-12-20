@@ -45,6 +45,7 @@ class TradingBot:
         self,
         config: Optional[BotConfig] = None,
         strategy_class: Optional[Type[Strategy]] = None,
+        connector: Optional[MT5Connector] = None,
     ):
         self.config = config or BotConfig(
             symbol=settings.SYMBOL,
@@ -53,7 +54,10 @@ class TradingBot:
         )
         
         # Initialize components
-        self._init_connector()
+        self.connector = connector
+        if self.connector is None:
+            self._init_connector()
+            
         self._init_risk_manager()
         self._init_strategy(strategy_class)
         
@@ -169,6 +173,10 @@ class TradingBot:
         
         self._shutdown()
     
+    def step(self):
+        """Single iteration step (public for backtesting)."""
+        self._run_iteration()
+
     def _run_iteration(self):
         """Single iteration of the main loop."""
         self.iteration_count += 1

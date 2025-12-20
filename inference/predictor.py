@@ -172,16 +172,17 @@ class RiskAwareTCNPredictor:
     ) -> PredictionResult:
         """
         Make prediction with risk parameters.
-        
-        Args:
-            features: Input features (seq_len, n_features) or DataFrame
-            return_features: Whether to return hidden features
-        
-        Returns:
-            PredictionResult with direction, volatility, quantiles
         """
+        import time
+        import hashlib
+        
+        start_time = time.time()
+        
         # Prepare input
         x = self._prepare_input(features)
+        
+        # Calculate input snapshot hash for integrity
+        input_hash = hashlib.md5(x.cpu().numpy().tobytes()).hexdigest()[:8]
         
         self.model.eval()
         with torch.no_grad():
@@ -203,10 +204,18 @@ class RiskAwareTCNPredictor:
                 quantiles = np.zeros(5)
                 hidden_features = None
         
+        latency_ms = (time.time() - start_time) * 1000
+        
         # Extract prediction info
         predicted_class = int(np.argmax(direction_probs))
         confidence = float(np.max(direction_probs))
         signal_name = ['BEAR', 'SIDEWAYS', 'BULL'][predicted_class]
+        
+        # Log model execution integrity
+        logger.info(
+            f"[TCN] Hash:{input_hash} | Latency:{latency_ms:.2f}ms | "
+            f"Out:{signal_name}({confidence:.2f}) | Vol:{volatility:.5f}"
+        )
         
         return PredictionResult(
             probabilities=direction_probs,
