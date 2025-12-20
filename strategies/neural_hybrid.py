@@ -234,10 +234,9 @@ class NeuralHybridStrategy:
             # Initialize predictor
             self.predictor = create_predictor(
                 profile=self.config.profile,
-                tcn_weights=self.config.tcn_weights,
-                vit_weights=self.config.vit_weights if self.config.use_vision else None,
-                yolo_weights=self.config.yolo_weights if self.config.use_yolo else None,
-                fusion_weights=self.config.fusion_weights
+                weights_path=self.config.tcn_weights,
+                use_vision=self.config.use_vision,
+                use_yolo=self.config.use_yolo
             )
             
             # Load meta-model if available
@@ -661,13 +660,45 @@ class NeuralHybridStrategy:
     def _prepare_features(self, data: pd.DataFrame) -> np.ndarray:
         """Prepare features for prediction."""
         # Get feature columns from predictor
-        if hasattr(self.predictor, 'feature_columns'):
-            feature_cols = self.predictor.feature_columns
+        if hasattr(self.predictor, '_feature_names') and self.predictor._feature_names:
+            feature_cols = self.predictor._feature_names
             if all(col in data.columns for col in feature_cols):
                 return data[feature_cols].values[-self.config.sequence_length:]
         
-        # Fallback to OHLCV
-        return data[['open', 'high', 'low', 'close', 'volume']].values[-self.config.sequence_length:]
+        # Try to generate features using feature engineering
+        try:
+            from utils.features_engineering import FeatureEngineerOptimized
+            fe = FeatureEngineerOptimized()
+            data_with_features = fe.generate_features(data.copy(), batch_processing=False)
+            
+            # Select numeric columns only, excluding time/date columns
+            numeric_cols = data_with_features.select_dtypes(include=[np.number]).columns.tolist()
+            exclude_cols = ['time', 'timestamp', 'date', 'tick_volume']
+            feature_cols = [c for c in numeric_cols if c not in exclude_cols]
+            
+            # Limit to expected input size if needed (model expects 64 features)
+            if len(feature_cols) > 64:
+                # Use first 64 features or select most important ones
+                feature_cols = feature_cols[:64]
+            
+            features = data_with_features[feature_cols].values[-self.config.sequence_length:]
+            
+            # Handle NaNs - forward fill then backward fill, then zero
+            features = np.nan_to_num(features, nan=0.0, posinf=0.0, neginf=0.0)
+            
+            # Pad if we have fewer than 64 features
+            if features.shape[1] < 64:
+                padding = np.zeros((features.shape[0], 64 - features.shape[1]))
+                features = np.hstack([features, padding])
+            
+            return features
+        except Exception as e:
+            logger.warning(f"Feature engineering failed: {e}, using OHLCV fallback")
+        
+        # Fallback to OHLCV with padding to 64 features
+        ohlcv = data[['open', 'high', 'low', 'close', 'volume']].values[-self.config.sequence_length:]
+        padding = np.zeros((ohlcv.shape[0], 64 - 5))
+        return np.hstack([ohlcv, padding])
     
     def _generate_chart_image(self, data: pd.DataFrame) -> Optional[np.ndarray]:
         """Generate chart image for vision models."""

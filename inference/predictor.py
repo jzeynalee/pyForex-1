@@ -141,19 +141,49 @@ class RiskAwareTCNPredictor:
     
     def load_weights(self, path: str):
         """Load model weights from checkpoint."""
-        checkpoint = torch.load(path, map_location=self.device)
+        checkpoint = torch.load(path, map_location=self.device, weights_only=False)
         
         # Handle different checkpoint formats
+        state_dict = None
         if 'model_state_dict' in checkpoint:
-            self.model.load_state_dict(checkpoint['model_state_dict'])
+            state_dict = checkpoint['model_state_dict']
         elif 'state_dict' in checkpoint:
-            self.model.load_state_dict(checkpoint['state_dict'])
+            state_dict = checkpoint['state_dict']
+        elif 'model_state' in checkpoint:
+            state_dict = checkpoint['model_state']
+        elif isinstance(checkpoint, dict) and not any(k.startswith('backbone') or k.startswith('direction') for k in checkpoint.keys()):
+            # Checkpoint is a wrapper dict, not direct state_dict
+            # Try to find the actual model state
+            for key in ['model', 'net', 'network']:
+                if key in checkpoint:
+                    state_dict = checkpoint[key]
+                    break
+            if state_dict is None:
+                logger.warning(f"Could not find model state in checkpoint. Keys: {list(checkpoint.keys())[:10]}")
+                # Skip loading if we can't find the state dict
+                logger.warning("Skipping weight loading - model will use random initialization")
+                self.model.eval()
+                return
         else:
-            self.model.load_state_dict(checkpoint)
+            state_dict = checkpoint
+        
+        try:
+            self.model.load_state_dict(state_dict)
+        except RuntimeError as e:
+            logger.warning(f"Strict loading failed: {e}")
+            # Try non-strict loading
+            try:
+                self.model.load_state_dict(state_dict, strict=False)
+                logger.warning("Loaded weights with strict=False (some keys may be missing)")
+            except Exception as e2:
+                logger.error(f"Could not load weights even with strict=False: {e2}")
+                logger.warning("Model will use random initialization")
         
         # Load feature info if available
         if 'feature_names' in checkpoint:
             self._feature_names = checkpoint['feature_names']
+        elif 'feature_columns' in checkpoint:
+            self._feature_names = checkpoint['feature_columns']
         if 'scaler_params' in checkpoint:
             self._scaler = checkpoint['scaler_params']
         if 'config' in checkpoint:

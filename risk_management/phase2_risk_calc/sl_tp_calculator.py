@@ -130,10 +130,14 @@ class SLTPCalculator:
         # Use ATR or volatility for distance calculations
         vol_measure = atr if atr is not None else volatility
         
-        # Step 1: Calculate quantile-based SL/TP
-        sl_quant, tp_quant = self._calculate_quantile_based(
-            entry_price, direction, quantiles
-        )
+        # Step 1: Calculate quantile-based SL/TP (if quantiles available)
+        if quantiles is not None and len(quantiles) >= 5:
+            sl_quant, tp_quant = self._calculate_quantile_based(
+                entry_price, direction, quantiles
+            )
+        else:
+            # No valid quantiles - use volatility-based as primary
+            sl_quant, tp_quant = None, None
         
         # Step 2: Calculate volatility-based SL/TP (fallback/bounds)
         sl_vol, tp_vol = self._calculate_volatility_based(
@@ -141,12 +145,17 @@ class SLTPCalculator:
         )
         
         # Step 3: Select primary values with bounds
-        sl_price, sl_method = self._select_sl(
-            entry_price, direction, sl_quant, sl_vol, vol_measure
-        )
-        tp_price, tp_method = self._select_tp(
-            entry_price, direction, tp_quant, tp_vol, vol_measure
-        )
+        if sl_quant is not None and tp_quant is not None:
+            sl_price, sl_method = self._select_sl(
+                entry_price, direction, sl_quant, sl_vol, vol_measure
+            )
+            tp_price, tp_method = self._select_tp(
+                entry_price, direction, tp_quant, tp_vol, vol_measure
+            )
+        else:
+            # Use volatility-based directly
+            sl_price, sl_method = sl_vol, 'volatility'
+            tp_price, tp_method = tp_vol, 'volatility'
         
         # Step 4: Apply regime adjustments
         regime_adjusted = False

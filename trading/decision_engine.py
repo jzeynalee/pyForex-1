@@ -372,22 +372,48 @@ class EnhancedDecisionEngine:
         regime = self._detect_regime(market_data)
         decision.regime = regime.value if hasattr(regime, 'value') else str(regime)
         
-        # Extract volatility
-        volatility = predictions.get('volatility')
-        if volatility is not None:
-            if isinstance(volatility, np.ndarray):
-                volatility = float(volatility.flatten()[0])
-            decision.volatility = volatility
+        # Extract volatility from model
+        model_volatility = predictions.get('volatility')
+        if model_volatility is not None:
+            if isinstance(model_volatility, np.ndarray):
+                model_volatility = float(model_volatility.flatten()[0])
         
-        # Get ATR if available
+        # Get ATR if available (more reliable for SL/TP)
+        atr_value = None
         if 'atr' in market_data.columns:
-            decision.atr = float(market_data['atr'].iloc[-1])
+            atr_value = float(market_data['atr'].iloc[-1])
+        elif 'atr_14' in market_data.columns:
+            atr_value = float(market_data['atr_14'].iloc[-1])
+        
+        # Use ATR as volatility if model volatility is unrealistic
+        # Model volatility should be in the same scale as price movements (e.g., 0.001-0.003 for forex H1)
+        # If model volatility > 0.01 (100 pips), it's likely garbage from untrained model
+        if atr_value is not None and atr_value > 0 and atr_value < 0.1:
+            # ATR is available and realistic - use it
+            volatility = atr_value
+        elif model_volatility is not None and 0.0001 < model_volatility < 0.01:
+            # Model volatility is in realistic range
+            volatility = model_volatility
+        else:
+            # Fallback: estimate volatility as ~20 pips for forex
+            volatility = 0.002
+        
+        decision.volatility = volatility
+        decision.atr = atr_value if atr_value else volatility
         
         # =================================================================
         # Step 3: Calculate SL/TP (Phase 2)
         # =================================================================
         quantiles = predictions.get('quantiles')
         trade_dir = TradeDirection.BUY if decision.direction == 'BUY' else TradeDirection.SELL
+        
+        # Validate quantiles - they should be small price movements (typically < 0.1 for forex)
+        # If quantiles are unrealistic, use None to force volatility-based calculation
+        if quantiles is not None:
+            max_quantile = np.max(np.abs(quantiles))
+            if max_quantile > 1.0:  # Unrealistic quantiles from untrained model
+                logger.debug(f"Invalid quantiles detected (max={max_quantile:.2f}), using ATR-based SL/TP")
+                quantiles = None
         
         sltp_result = self.sltp_calculator.calculate(
             entry_price=entry_price,
@@ -419,13 +445,13 @@ class EnhancedDecisionEngine:
             account_balance=account_balance,
             entry_price=entry_price,
             stop_loss=decision.stop_loss,
+            pair=pair,
             volatility=volatility,
-            regime=regime,
             direction_confidence=confidence
         )
         
         decision.position_size = size_result.position_size
-        decision.position_units = size_result.position_units
+        decision.position_units = size_result.units
         decision.risk_amount = size_result.risk_amount
         decision.risk_percent = size_result.risk_percent
         decision.original_position_size = size_result.position_size

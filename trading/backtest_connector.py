@@ -110,6 +110,16 @@ class BacktestConnector:
         start_idx = max(0, self.current_idx - n + 1)
         # Return slice including current_idx
         return self.data.iloc[start_idx : self.current_idx + 1].copy()
+    
+    def get_ohlcv(self, symbol: str = None, timeframe: str = None, count: int = 100) -> pd.DataFrame:
+        """
+        Return OHLCV data - alias for get_data to match MT5Connector interface.
+        """
+        return self.get_data(n=count, symbol=symbol, timeframe=timeframe)
+    
+    def get_account_balance(self) -> float:
+        """Return current account balance."""
+        return self.balance
 
     def get_current_price(self, symbol: Optional[str] = None) -> Optional[Dict[str, float]]:
         # Simulate bid/ask based on spread

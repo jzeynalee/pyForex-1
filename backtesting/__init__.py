@@ -60,6 +60,19 @@ from .reporter import (
     ReportConfig
 )
 
+from .weight_validator import (
+    WeightValidator,
+    WeightValidationResult,
+    validate_weights_for_backtest
+)
+
+from .orchestrator import (
+    BacktestOrchestrator,
+    BacktestConfig as OrchestratorConfig,
+    BacktestResults,
+    run_backtest
+)
+
 __all__ = [
     'BacktestEngine',
     'BacktestConfig',
@@ -80,4 +93,12 @@ __all__ = [
     'BacktestReporter',
     'AcceptanceGate',
     'ReportConfig',
+    # New orchestrator components
+    'WeightValidator',
+    'WeightValidationResult',
+    'validate_weights_for_backtest',
+    'BacktestOrchestrator',
+    'OrchestratorConfig',
+    'BacktestResults',
+    'run_backtest',
 ]
