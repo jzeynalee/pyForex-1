@@ -278,7 +278,7 @@ def auto_retrain_job():
     # M15 * 100,000 = ~3 years of data
     # M5  * 100,000 = ~1 year of data
     # M1  * 100,000 = ~3 months of data
-    DOWNLOAD_COUNT = 1000000
+    DOWNLOAD_COUNT = 8000000
     TIMEFRAME = "M15"  # <--- CHANGE THIS to your desired timeframe
     SYMBOL = "EURUSD"
 
@@ -312,30 +312,28 @@ def auto_retrain_job():
     try:
         logging.info("🧠 Starting TCN Training...")
 
-        # Create args for train_tcn_enhanced
-        class Args:
-            data = str(csv_path)
-            epochs = 50
-            batch_size = 64
-            lr = 1e-3
-            seq_len = 60
-            save_dir = "models/weights"
-            device = "auto"
-            profile = "INTRADAY"
-            features = None
-            skip_feature_selection = False
-            n_features = 25
-            hidden_dim = 64
-            num_layers = 5
-            dropout = 0.2
-            threshold = 0.05
-            patience = 10
-            use_cosine = False
-            no_onecycle = False
-            name = "tcn_enhanced"
-
-        args = Args()
-        train_tcn_enhanced(args)
+        # Call train_tcn_enhanced with individual parameters as expected by tests
+        train_tcn_enhanced(
+            data=str(csv_path),
+            epochs=50,
+            batch_size=64,
+            lr=1e-3,
+            seq_len=60,
+            save_dir="models/weights",
+            device="auto",
+            profile="INTRADAY",
+            features=None,
+            skip_feature_selection=False,
+            n_features=25,
+            hidden_dim=64,
+            num_layers=5,
+            dropout=0.2,
+            threshold=0.05,
+            patience=10,
+            use_cosine=False,
+            no_onecycle=False,
+            name="tcn_enhanced"
+        )
         logging.info("✅ Retraining Complete. TCN model updated.")
 
     except Exception as e:
