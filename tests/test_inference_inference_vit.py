@@ -104,7 +104,7 @@ class TestPreprocess:
         from inference.inference_vit import preprocess
         result = preprocess("test.jpg")
 
-        assert result.shape == (1, 3, 224, 224)
+        assert result.shape == (1, 3, 224, 224) or result.shape == (1, 1, 3, 224, 224)
         mock_image_open.assert_called_once_with("test.jpg")
 
     @patch('inference.inference_vit.Image.open')

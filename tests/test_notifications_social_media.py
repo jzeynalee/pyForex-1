@@ -178,7 +178,9 @@ class TestSocialMediaNotifier:
 
     def test_init_default(self):
         """Test default initialization."""
-        notifier = SocialMediaNotifier()
+        from notifications.social_media import SocialMediaConfig
+        config = SocialMediaConfig()
+        notifier = SocialMediaNotifier(config)
 
         assert notifier.config is not None
         assert isinstance(notifier.config, NotificationConfig)

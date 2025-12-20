@@ -70,7 +70,7 @@ class FusionFXTrendDetector:
         }
         
         mtf_result_obj = self.mtf_analyzer.analyze(dfs_dict=dfs_dict, structural_scores=structural_scores)
-        mtf_result = mtf_result_obj.to_dict()
+        mtf_result = mtf_result_obj.to_dict() if hasattr(mtf_result_obj, 'to_dict') else mtf_result_obj
         mtf_score = mtf_result['mtf_score']
         
         # ========================================

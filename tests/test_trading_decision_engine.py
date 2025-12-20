@@ -361,6 +361,8 @@ class TestEnhancedDecisionEngine:
         sltp_result.take_profit = 1.1100
         sltp_result.sl_pips = 50.0
         sltp_result.tp_pips = 100.0
+        sltp_result.sl_distance = 0.0050
+        sltp_result.tp_distance = 0.0100
         sltp_result.risk_reward_ratio = 2.0
         mock_risk_components['sltp'].calculate.return_value = sltp_result
         
@@ -421,6 +423,8 @@ class TestEnhancedDecisionEngine:
         sltp_result.take_profit = 1.1100
         sltp_result.sl_pips = 50.0
         sltp_result.tp_pips = 100.0
+        sltp_result.sl_distance = 0.0050
+        sltp_result.tp_distance = 0.0100
         mock_risk_components['sltp'].calculate.return_value = sltp_result
         
         pos_result = Mock()
@@ -822,6 +826,8 @@ class TestEnhancedDecisionEngineEvaluateBasic:
                 take_profit=1.1100,
                 sl_pips=10.0,
                 tp_pips=10.0,
+                sl_distance=0.0100,
+                tp_distance=0.0200,
                 risk_reward_ratio=1.5
             )
             MockSLTP.return_value = sltp_instance
@@ -946,6 +952,8 @@ class TestEnhancedDecisionEngineDirection:
                 take_profit=1.1100,
                 sl_pips=10.0,
                 tp_pips=10.0,
+                sl_distance=0.0100,
+                tp_distance=0.0200,
                 risk_reward_ratio=1.5
             )
             MockSLTP.return_value = sltp_instance
@@ -999,6 +1007,8 @@ class TestEnhancedDecisionEngineDirection:
                 take_profit=1.0900,
                 sl_pips=10.0,
                 tp_pips=10.0,
+                sl_distance=0.0100,
+                tp_distance=0.0200,
                 risk_reward_ratio=1.5
             )
             MockSLTP.return_value = sltp_instance
@@ -1052,6 +1062,8 @@ class TestEnhancedDecisionEngineDirection:
                 take_profit=1.1100,
                 sl_pips=10.0,
                 tp_pips=10.0,
+                sl_distance=0.0100,
+                tp_distance=0.0200,
                 risk_reward_ratio=1.5
             )
             MockSLTP.return_value = sltp_instance
@@ -1167,6 +1179,8 @@ class TestEnhancedDecisionEngineCapitalProtection:
                 take_profit=1.1100,
                 sl_pips=10.0,
                 tp_pips=10.0,
+                sl_distance=0.0100,
+                tp_distance=0.0200,
                 risk_reward_ratio=1.5
             )
             MockSLTP.return_value = sltp_instance
@@ -1462,6 +1476,8 @@ class TestEnhancedDecisionEngineHardRules:
                 take_profit=1.1100,
                 sl_pips=10.0,
                 tp_pips=10.0,
+                sl_distance=0.0100,
+                tp_distance=0.0200,
                 risk_reward_ratio=1.5
             )
             MockSLTP.return_value = sltp_instance
@@ -1540,6 +1556,8 @@ class TestEnhancedDecisionEngineMetaLabeling:
                 take_profit=1.1100,
                 sl_pips=10.0,
                 tp_pips=10.0,
+                sl_distance=0.0100,
+                tp_distance=0.0200,
                 risk_reward_ratio=1.5
             )
             MockSLTP.return_value = sltp_instance
@@ -1633,6 +1651,8 @@ class TestEnhancedDecisionEngineEdgeCases:
                 take_profit=1.1100,
                 sl_pips=10.0,
                 tp_pips=10.0,
+                sl_distance=0.0100,
+                tp_distance=0.0200,
                 risk_reward_ratio=1.5
             )
             MockSLTP.return_value = sltp_instance
@@ -1693,6 +1713,8 @@ class TestEnhancedDecisionEngineEdgeCases:
                 take_profit=1.1100,
                 sl_pips=10.0,
                 tp_pips=10.0,
+                sl_distance=0.0100,
+                tp_distance=0.0200,
                 risk_reward_ratio=1.5
             )
             MockSLTP.return_value = sltp_instance
@@ -1752,6 +1774,8 @@ class TestEnhancedDecisionEngineEdgeCases:
                 take_profit=1.1100,
                 sl_pips=10.0,
                 tp_pips=10.0,
+                sl_distance=0.0100,
+                tp_distance=0.0200,
                 risk_reward_ratio=1.5
             )
             MockSLTP.return_value = sltp_instance
@@ -1801,8 +1825,10 @@ class TestEnhancedDecisionEngineEdgeCases:
                 stop_loss=1.0990,
                 take_profit=1.1010,  # Low TP
                 sl_pips=10.0,
-                tp_pips=10.0,
-                risk_reward_ratio=0.5  # Low R:R
+                tp_pips=2.0,
+                sl_distance=0.0010,
+                tp_distance=0.0010,
+                risk_reward_ratio=0.2  # Low R:R
             )
             MockSLTP.return_value = sltp_instance
             
