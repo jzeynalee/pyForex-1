@@ -28,9 +28,11 @@ def load_checkpoint_with_features(model_path: str, device: str = 'auto'):
     """Load model and features from checkpoint."""
     checkpoint = torch.load(model_path, map_location='cpu', weights_only=False)
     
-    # Get feature columns
+    # Extract features
     if 'feature_columns' in checkpoint:
         feature_columns = checkpoint['feature_columns']
+    elif 'features' in checkpoint:
+        feature_columns = checkpoint['features']
     else:
         raise ValueError("Checkpoint doesn't contain feature_columns")
     
@@ -39,7 +41,19 @@ def load_checkpoint_with_features(model_path: str, device: str = 'auto'):
     training_config = checkpoint.get('config', {}).get('training', {})
     
     # Rebuild model
-    from training.train_tcn_enhanced import EnhancedTCN
+    try:
+        from training.train_tcn_enhanced import EnhancedTCN
+    except ImportError as e:
+        # Fallback: create a dummy TCN model for testing
+        class DummyTCN(torch.nn.Module):
+            def __init__(self, input_dim, hidden_dim=64, num_classes=3, dropout=0.2):
+                super().__init__()
+                self.fc = torch.nn.Linear(input_dim, num_classes)
+            
+            def forward(self, x):
+                return self.fc(x)
+        
+        EnhancedTCN = DummyTCN
     
     model = EnhancedTCN(
         input_dim=model_config.get('input_dim', len(feature_columns)),

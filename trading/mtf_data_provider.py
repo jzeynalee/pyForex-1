@@ -348,6 +348,37 @@ class MTFDataProvider:
         """Clear all cached data."""
         self.cache.clear()
         logger.info("MTF data cache cleared")
+    
+    def fetch_multiple_timeframes(self, timeframes: list, n_candles: int = 200, use_cache: bool = True) -> dict:
+        """Fetch data for multiple timeframes."""
+        result = {}
+        for tf in timeframes:
+            result[tf] = self.fetch_single_timeframe(tf, n_candles, use_cache)
+        return result
+    
+    def get_timeframe_data(self, timeframe: str, n_candles: int = 200) -> pd.DataFrame:
+        """Get timeframe data (alias for fetch_single_timeframe)."""
+        return self.fetch_single_timeframe(timeframe, n_candles)
+    
+    def refresh_timeframe(self, timeframe: str, n_candles: int = 200) -> pd.DataFrame:
+        """Refresh specific timeframe data."""
+        return self.fetch_single_timeframe(timeframe, n_candles, use_cache=False)
+    
+    def refresh_all_timeframes(self, timeframes: list = None, n_candles: int = 200) -> dict:
+        """Refresh all cached timeframes or specific timeframes."""
+        if timeframes is None:
+            timeframes = list(self.cache.keys()) if self.cache_enabled else []
+        result = {}
+        for tf in timeframes:
+            result[tf] = self.refresh_timeframe(tf, n_candles)
+        return result
+    
+    def get_latest_bar_time(self, timeframe: str) -> datetime:
+        """Get the latest bar time for a timeframe."""
+        df = self.fetch_single_timeframe(timeframe, 1)
+        if not df.empty:
+            return df['time'].iloc[-1]
+        return datetime.now()
 
 
 class BacktestMTFDataProvider(MTFDataProvider):
@@ -516,5 +547,3 @@ def create_mock_mtf_data(
             })
         
         result[tf.upper()] = pd.DataFrame(data)
-    
-    return result

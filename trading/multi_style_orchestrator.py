@@ -29,6 +29,7 @@ from trading.style_config import (
     get_all_required_timeframes, get_timeframe_minutes,
 )
 from trading.position_coordinator import PositionCoordinator, TrackedPosition
+from trading.risk_manager import RiskManager
 from trading.mt5_connector import MT5Connector, MockMT5Connector, OrderResult
 from strategies.style_strategies import (
     StyleStrategy, ScalpingStrategy, IntradayStrategy, SwingStrategy,

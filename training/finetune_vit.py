@@ -151,18 +151,18 @@ def get_args():
     parser.add_argument("--data_dir", type=str, default=None,
                         help="Dataset directory (auto-set if using --profile)")
     parser.add_argument("--batch_size", type=int, default=16)
-    parser.add_argument("--num_epochs", type=int, default=None,
+    parser.add_argument("--num_epochs", type=int, default=30,
                         help="Training epochs (auto-set if using --profile)")
-    parser.add_argument("--lr_head", type=float, default=None,
+    parser.add_argument("--lr_head", type=float, default=1e-3,
                         help="Learning rate for classifier head")
-    parser.add_argument("--lr_backbone", type=float, default=None,
+    parser.add_argument("--lr_backbone", type=float, default=1e-5,
                         help="Learning rate for unfrozen backbone layers")
     parser.add_argument("--weight_decay", type=float, default=0.01)
-    parser.add_argument("--unfreeze_blocks", type=int, default=None,
+    parser.add_argument("--unfreeze_blocks", type=int, default=4,
                         help="Number of transformer blocks to unfreeze")
     parser.add_argument("--dropout", type=float, default=0.1)
     parser.add_argument("--label_smoothing", type=float, default=0.1)
-    parser.add_argument("--patience", type=int, default=None)
+    parser.add_argument("--patience", type=int, default=7)
     parser.add_argument("--warmup_epochs", type=int, default=2)
     parser.add_argument("--save_dir", type=str, default=None,
                         help="Save directory (auto-set if using --profile)")

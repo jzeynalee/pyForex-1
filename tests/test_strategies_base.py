@@ -245,5 +245,5 @@ class TestStrategy:
 
     def test_strategy_is_abc(self):
         """Test that Strategy is an ABC."""
-        assert isinstance(Strategy, ABC)
+        assert issubclass(Strategy, ABC)
 

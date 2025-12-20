@@ -279,15 +279,13 @@ except Exception:
             return pd.DataFrame()
 
     def train_enhanced_lstm(*args, **kwargs):
-        """Stub training function."""
+        """Stub training function for TCN (LSTM removed)."""
         return None
 
     def auto_retrain_job():
         """
         Stub auto_retrain_job that mirrors the real implementation.
         
-        IMPORTANT: This function looks up MT5Connector and train_enhanced_lstm
-        dynamically via sys.modules to support patching in tests.
         """
         import logging
         from pathlib import Path as PathLib
@@ -341,14 +339,25 @@ except Exception:
         try:
             logging.info("🧠 Starting Training...")
             _train_enhanced_lstm(
-                data_path=str(csv_path),
+                data=csv_path,
                 epochs=50,
-                trend_threshold=0.05,
-                seq_len=30,
+                batch_size=64,
+                lr=1e-3,
+                seq_len=60,
+                save_dir="models/weights",
+                device="auto",
+                profile="INTRADAY",
+                features=None,
+                skip_feature_selection=False,
+                n_features=25,
                 hidden_dim=64,
-                dropout=0.3,
-                learning_rate=1e-3,
-                device="cuda"
+                num_layers=5,
+                dropout=0.2,
+                threshold=0.05,
+                patience=10,
+                use_cosine=False,
+                no_onecycle=False,
+                name="tcn_enhanced"
             )
             logging.info("✅ Retraining Complete. Model updated.")
 

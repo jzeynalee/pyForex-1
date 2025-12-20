@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # tests/test_utils_checkpoint_loader.py
 """
 Unit tests for utils.checkpoint_loader module.
@@ -6,27 +5,11 @@ Tests checkpoint loading utilities for TCN models after LSTM removal.
 """
 import pytest
 import torch
+import torch.nn as nn
 import numpy as np
 from pathlib import Path
 from datetime import datetime
 from unittest.mock import Mock, patch, MagicMock
-=======
-#!/usr/bin/env python3
-"""
-Unit tests for utils/checkpoint_loader.py
-
-Tests checkpoint loading, format detection, feature extraction, and model info retrieval.
-"""
-
-import pytest
-import torch
-import torch.nn as nn
-from pathlib import Path
-from typing import Dict, List, Any
-import tempfile
-import numpy as np
-
->>>>>>> add/tests-and-ci
 from utils.checkpoint_loader import (
     ModelLoader,
     ModelInfo,
@@ -34,15 +17,11 @@ from utils.checkpoint_loader import (
     load_model,
     load_features,
     get_checkpoint_info,
-<<<<<<< HEAD
     print_checkpoint_summary,
-=======
->>>>>>> add/tests-and-ci
     get_default_features,
 )
 
 
-<<<<<<< HEAD
 @pytest.fixture
 def tmp_checkpoint_path(tmp_path):
     """Create a temporary checkpoint path."""
@@ -50,44 +29,13 @@ def tmp_checkpoint_path(tmp_path):
 
 
 @pytest.fixture
-def enhanced_v3_checkpoint():
-    """Create enhanced v3 format checkpoint (latest)."""
-    return {
-        'model_state': {
-            'tcn.network.0.conv1.conv.weight': torch.randn(64, 5, 3),
-            'tcn.network.0.conv1.conv.bias': torch.randn(64),
-        },
-        'feature_columns': ['open', 'high', 'low', 'close', 'volume'],
-        'config': {
-            'model': {
-                'input_dim': 5,
-                'hidden_dim': 64,
-                'num_layers': 5,
-                'receptive_field': 63,
-            },
-            'training': {
-                'num_classes': 3,
-                'epochs': 50,
-                'batch_size': 64,
-            }
-        },
-        'metrics': {
-            'best_val_acc': 0.75,
-            'test_accuracy': 0.73,
-        },
-        'profile': 'INTRADAY',
-        'created_at': '2024-01-01T12:00:00',
-    }
+def temp_checkpoint_dir(tmp_path):
+    """Create a temporary directory for checkpoint files."""
+    return tmp_path
 
 
-@pytest.fixture
-def state_dict_checkpoint():
-    """Create direct state dict checkpoint (legacy)."""
-    return {
-        'tcn.network.0.conv1.conv.weight': torch.randn(64, 5, 3),
-        'tcn.network.0.conv1.conv.bias': torch.randn(64),
-        'classifier.0.weight': torch.randn(64, 64),
-    }
+
+
 
 
 @pytest.mark.unit
@@ -99,21 +47,19 @@ class TestModelLoader:
         with pytest.raises(FileNotFoundError):
             ModelLoader("non_existent_file.pt")
 
-    def test_init_with_enhanced_v3_checkpoint(self, tmp_checkpoint_path, enhanced_v3_checkpoint):
+    def test_init_with_enhanced_v3_checkpoint(self, enhanced_v3_checkpoint):
         """Test initialization with enhanced v3 checkpoint."""
-        torch.save(enhanced_v3_checkpoint, tmp_checkpoint_path)
+        # The fixture already saves and returns the path
+        loader = ModelLoader(enhanced_v3_checkpoint, device='cpu')
 
-        loader = ModelLoader(tmp_checkpoint_path, device='cpu')
-
-        assert loader.path == tmp_checkpoint_path
+        assert loader.path == enhanced_v3_checkpoint
         assert loader.device.type == 'cpu'
         assert loader._format == 'enhanced_v3'
 
-    def test_init_with_state_dict_checkpoint(self, tmp_checkpoint_path, state_dict_checkpoint):
+    def test_init_with_state_dict_checkpoint(self, state_dict_checkpoint):
         """Test initialization with state dict checkpoint."""
-        torch.save(state_dict_checkpoint, tmp_checkpoint_path)
-
-        loader = ModelLoader(tmp_checkpoint_path)
+        # The fixture already saves and returns the path
+        loader = ModelLoader(state_dict_checkpoint)
 
         assert loader._format == 'state_dict'
 
@@ -133,86 +79,77 @@ class TestModelLoader:
             loader = ModelLoader(tmp_checkpoint_path, device='auto')
             assert loader.device.type == 'cuda'
 
-    def test_detect_format_enhanced_v3(self, tmp_checkpoint_path, enhanced_v3_checkpoint):
+    def test_detect_format_enhanced_v3(self, enhanced_v3_checkpoint):
         """Test format detection for enhanced v3."""
-        torch.save(enhanced_v3_checkpoint, tmp_checkpoint_path)
-
-        loader = ModelLoader(tmp_checkpoint_path)
+        # The fixture already saves and returns the path
+        loader = ModelLoader(enhanced_v3_checkpoint)
         assert loader._format == 'enhanced_v3'
 
-    def test_detect_format_state_dict(self, tmp_checkpoint_path, state_dict_checkpoint):
+    def test_detect_format_state_dict(self, state_dict_checkpoint):
         """Test format detection for state dict."""
-        torch.save(state_dict_checkpoint, tmp_checkpoint_path)
-
-        loader = ModelLoader(tmp_checkpoint_path)
+        # The fixture already saves and returns the path
+        loader = ModelLoader(state_dict_checkpoint)
         assert loader._format == 'state_dict'
 
-    def test_get_features_enhanced_v3(self, tmp_checkpoint_path, enhanced_v3_checkpoint):
+    def test_get_features_enhanced_v3(self, enhanced_v3_checkpoint):
         """Test getting features from enhanced v3 checkpoint."""
-        torch.save(enhanced_v3_checkpoint, tmp_checkpoint_path)
-
-        loader = ModelLoader(tmp_checkpoint_path)
+        # The fixture already saves and returns the path
+        loader = ModelLoader(enhanced_v3_checkpoint)
         features = loader.get_features()
 
-        assert features == ['open', 'high', 'low', 'close', 'volume']
+        assert features == ['RSI', 'MACD', 'ATR', 'ADX', 'EMA20', 'EMA50', 'EMA200', 'ROC5', 'ROC10', 'MOMENTUM']
 
-    def test_get_features_missing(self, tmp_checkpoint_path, state_dict_checkpoint):
+    def test_get_features_missing(self, state_dict_checkpoint):
         """Test getting features when not available."""
-        torch.save(state_dict_checkpoint, tmp_checkpoint_path)
-
-        loader = ModelLoader(tmp_checkpoint_path)
+        # The fixture already saves and returns the path
+        loader = ModelLoader(state_dict_checkpoint)
 
         with pytest.raises(CheckpointFormatError, match="doesn't contain feature columns"):
             loader.get_features()
 
-    def test_get_features_safe_with_features(self, tmp_checkpoint_path, enhanced_v3_checkpoint):
+    def test_get_features_safe_with_features(self, enhanced_v3_checkpoint):
         """Test safe feature retrieval when features exist."""
-        torch.save(enhanced_v3_checkpoint, tmp_checkpoint_path)
-
-        loader = ModelLoader(tmp_checkpoint_path)
+        # The fixture already saves and returns the path
+        loader = ModelLoader(enhanced_v3_checkpoint)
         features = loader.get_features_safe()
 
-        assert features == ['open', 'high', 'low', 'close', 'volume']
+        assert features == ['RSI', 'MACD', 'ATR', 'ADX', 'EMA20', 'EMA50', 'EMA200', 'ROC5', 'ROC10', 'MOMENTUM']
 
-    def test_get_features_safe_with_fallback(self, tmp_checkpoint_path, state_dict_checkpoint):
+    def test_get_features_safe_with_fallback(self, state_dict_checkpoint):
         """Test safe feature retrieval with fallback."""
-        torch.save(state_dict_checkpoint, tmp_checkpoint_path)
-
-        loader = ModelLoader(tmp_checkpoint_path)
+        # The fixture already saves and returns the path
+        loader = ModelLoader(state_dict_checkpoint)
         fallback = ['feature1', 'feature2']
         features = loader.get_features_safe(fallback=fallback)
 
         assert features == fallback
 
-    def test_get_config(self, tmp_checkpoint_path, enhanced_v3_checkpoint):
+    def test_get_config(self, enhanced_v3_checkpoint):
         """Test getting configuration."""
-        torch.save(enhanced_v3_checkpoint, tmp_checkpoint_path)
-
-        loader = ModelLoader(tmp_checkpoint_path)
+        # The fixture already saves and returns the path
+        loader = ModelLoader(enhanced_v3_checkpoint)
         config = loader.get_config()
 
         assert 'model' in config
         assert 'training' in config
-        assert config['model']['input_dim'] == 5
+        assert config['model']['input_dim'] == 10
 
-    def test_get_config_empty(self, tmp_checkpoint_path, state_dict_checkpoint):
+    def test_get_config_empty(self, state_dict_checkpoint):
         """Test getting config when not available."""
-        torch.save(state_dict_checkpoint, tmp_checkpoint_path)
-
-        loader = ModelLoader(tmp_checkpoint_path)
+        # The fixture already saves and returns the path
+        loader = ModelLoader(state_dict_checkpoint)
         config = loader.get_config()
 
         assert config == {}
 
-    def test_get_metrics(self, tmp_checkpoint_path, enhanced_v3_checkpoint):
+    def test_get_metrics(self, enhanced_v3_checkpoint):
         """Test getting metrics."""
-        torch.save(enhanced_v3_checkpoint, tmp_checkpoint_path)
-
-        loader = ModelLoader(tmp_checkpoint_path)
+        # The fixture already saves and returns the path
+        loader = ModelLoader(enhanced_v3_checkpoint)
         metrics = loader.get_metrics()
 
         assert 'best_val_acc' in metrics
-        assert metrics['best_val_acc'] == 0.75
+        assert metrics['best_val_acc'] == 0.92
 
     def test_get_training_history(self, tmp_checkpoint_path):
         """Test getting training history."""
@@ -249,25 +186,23 @@ class TestModelLoader:
         assert importance['close'] == 0.5
         assert importance['volume'] == 0.3
 
-    def test_get_model_info(self, tmp_checkpoint_path, enhanced_v3_checkpoint):
+    def test_get_model_info(self, enhanced_v3_checkpoint):
         """Test getting model info."""
-        torch.save(enhanced_v3_checkpoint, tmp_checkpoint_path)
-
-        loader = ModelLoader(tmp_checkpoint_path)
+        # The fixture already saves and returns the path
+        loader = ModelLoader(enhanced_v3_checkpoint)
         info = loader.get_model_info()
 
         assert isinstance(info, ModelInfo)
         assert info.model_type == 'enhanced_tcn'
-        assert info.input_dim == 5
-        assert info.hidden_dim == 64
+        assert info.input_dim == 10
+        assert info.hidden_dim == 32
         assert info.num_classes == 3
         assert info.profile == 'INTRADAY'
-        assert info.receptive_field == 63
+        assert info.receptive_field == 128
 
-    def test_get_model_tcn(self, tmp_checkpoint_path, enhanced_v3_checkpoint):
+    def test_get_model_tcn(self, enhanced_v3_checkpoint):
         """Test getting TCN model."""
-        torch.save(enhanced_v3_checkpoint, tmp_checkpoint_path)
-
+        # The fixture already saves and returns the path
         with patch('training.train_tcn_enhanced.EnhancedTCN') as mock_tcn:
             mock_model = MagicMock()
             mock_model.load_state_dict = MagicMock()
@@ -275,17 +210,16 @@ class TestModelLoader:
             mock_model.eval = MagicMock()
             mock_tcn.return_value = mock_model
 
-            loader = ModelLoader(tmp_checkpoint_path)
+            loader = ModelLoader(enhanced_v3_checkpoint)
             model = loader.get_model()
 
             mock_tcn.assert_called_once()
             mock_model.load_state_dict.assert_called_once()
             mock_model.eval.assert_called_once()
 
-    def test_get_model_caching(self, tmp_checkpoint_path, enhanced_v3_checkpoint):
+    def test_get_model_caching(self, enhanced_v3_checkpoint):
         """Test that get_model caches the model."""
-        torch.save(enhanced_v3_checkpoint, tmp_checkpoint_path)
-
+        # The fixture already saves and returns the path
         with patch('training.train_tcn_enhanced.EnhancedTCN') as mock_tcn:
             mock_model = MagicMock()
             mock_model.load_state_dict = MagicMock()
@@ -293,7 +227,7 @@ class TestModelLoader:
             mock_model.eval = MagicMock()
             mock_tcn.return_value = mock_model
 
-            loader = ModelLoader(tmp_checkpoint_path)
+            loader = ModelLoader(enhanced_v3_checkpoint)
 
             # Call twice
             model1 = loader.get_model()
@@ -331,35 +265,32 @@ class TestModelLoader:
             with pytest.raises(CheckpointFormatError, match="Unknown model type"):
                 loader.get_model()
 
-    def test_get_state_dict_from_enhanced(self, tmp_checkpoint_path, enhanced_v3_checkpoint):
+    def test_get_state_dict_from_enhanced(self, enhanced_v3_checkpoint):
         """Test extracting state dict from enhanced checkpoint."""
-        torch.save(enhanced_v3_checkpoint, tmp_checkpoint_path)
-
-        loader = ModelLoader(tmp_checkpoint_path)
+        # The fixture already saves and returns the path
+        loader = ModelLoader(enhanced_v3_checkpoint)
         state_dict = loader._get_state_dict()
 
-        assert 'tcn.network.0.conv1.conv.weight' in state_dict
+        assert 'linear1.weight' in state_dict
 
-    def test_get_state_dict_from_direct(self, tmp_checkpoint_path, state_dict_checkpoint):
+    def test_get_state_dict_from_direct(self, state_dict_checkpoint):
         """Test extracting state dict from direct checkpoint."""
-        torch.save(state_dict_checkpoint, tmp_checkpoint_path)
-
-        loader = ModelLoader(tmp_checkpoint_path)
+        # The fixture already saves and returns the path
+        loader = ModelLoader(state_dict_checkpoint)
         state_dict = loader._get_state_dict()
 
-        assert 'tcn.network.0.conv1.conv.weight' in state_dict
+        assert 'tcn.linear1.weight' in state_dict
 
-    def test_summary(self, tmp_checkpoint_path, enhanced_v3_checkpoint):
+    def test_summary(self, enhanced_v3_checkpoint):
         """Test generating summary."""
-        torch.save(enhanced_v3_checkpoint, tmp_checkpoint_path)
-
-        loader = ModelLoader(tmp_checkpoint_path)
+        # The fixture already saves and returns the path
+        loader = ModelLoader(enhanced_v3_checkpoint)
         summary = loader.summary()
 
         assert "Checkpoint:" in summary
         assert "enhanced_v3" in summary
         assert "INTRADAY" in summary
-        assert "75" in summary  # accuracy
+        assert "92" in summary  # accuracy
 
 
 @pytest.mark.unit
@@ -549,16 +480,6 @@ class TestBackwardCompatibility:
         # Should be able to extract features from config
         features = loader.get_features()
         assert features == ['open', 'high', 'low', 'close', 'volume']
-=======
-# ============================================================================
-# FIXTURES
-# ============================================================================
-
-@pytest.fixture
-def temp_checkpoint_dir():
-    """Create a temporary directory for test checkpoints."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        yield Path(tmpdir)
 
 
 @pytest.fixture
@@ -1161,4 +1082,3 @@ class TestBackwardCompatibility:
         features = get_default_features()
         # Should return list (empty if default doesn't exist)
         assert isinstance(features, list)
->>>>>>> add/tests-and-ci

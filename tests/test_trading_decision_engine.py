@@ -1,40 +1,11 @@
 # tests/test_trading_decision_engine.py
 """
-<<<<<<< HEAD
 Unit tests for trading/decision_engine.py - Enhanced decision engine with risk management.
-=======
-Comprehensive unit tests for trading/decision_engine.py - Enhanced Decision Engine with full Risk Management Integration.
-
-Tests cover:
-- Signal enumeration and TradeDecision dataclass
-- DecisionEngineConfig and initialization
-- EnhancedDecisionEngine core functionality
-- Risk management phase integration
-- MTF trend detection integration
-- Capital protection mechanisms
-- Trade validation and filtering
-- Edge cases and error handling
-
-Total: 51 test cases
-Pass Rate: 100% ✅
-
-Key Features of the Test Suite:
-✅ Comprehensive Mocking: All external dependencies properly mocked
-✅ Edge Case Coverage: NaN values, empty data, extreme values
-✅ Integration Testing: Tests for multi-component interactions
-✅ Capital Protection: Full testing of Phase 5 risk management
-✅ Configuration Testing: Default and custom configurations
-✅ Error Handling: Validation of rejection logic
-✅ Data Format Testing: Both numpy arrays and dictionaries
-✅ Well-Organized: 20 test classes for logical grouping
-✅ Proper Documentation: Docstrings for every test
->>>>>>> add/tests-and-ci
 """
 
 import pytest
 import numpy as np
 import pandas as pd
-<<<<<<< HEAD
 from unittest.mock import Mock, MagicMock, patch
 from datetime import datetime
 from trading.decision_engine import (
@@ -195,6 +166,12 @@ class TestEnhancedDecisionEngine:
             mock_gate = Mock()
             mock_regime = Mock()
             mock_protector = Mock()
+            
+            # Configure protector.check_trade to return dict by default
+            mock_protector.check_trade.return_value = {
+                'allowed': True,
+                'protection_level': 'normal'
+            }
             
             MockSLTP.return_value = mock_sltp
             MockPos.return_value = mock_pos
@@ -554,56 +531,6 @@ class TestMTFDecisionEngine:
     def test_alias_exists(self):
         """Test that MTFDecisionEngine alias exists."""
         assert MTFDecisionEngine == EnhancedDecisionEngine
-
-=======
-from unittest.mock import Mock, MagicMock, patch, call
-from datetime import datetime, timedelta
-
-from trading.decision_engine import (
-    Signal, TradeDecision, DecisionEngineConfig, EnhancedDecisionEngine,
-    convert_legacy_predictions
-)
-
-
-class TestSignal:
-    """Test Signal enumeration."""
-    
-    def test_signal_enum_values(self):
-        """Test signal enum has correct values."""
-        assert Signal.BEAR.value == 0
-        assert Signal.SIDEWAYS.value == 1
-        assert Signal.BULL.value == 2
-    
-    def test_signal_enum_names(self):
-        """Test signal enum names."""
-        assert Signal.BEAR.name == 'BEAR'
-        assert Signal.SIDEWAYS.name == 'SIDEWAYS'
-        assert Signal.BULL.name == 'BULL'
-    
-    def test_signal_enum_from_value(self):
-        """Test creating signal from value."""
-        assert Signal(0) == Signal.BEAR
-        assert Signal(1) == Signal.SIDEWAYS
-        assert Signal(2) == Signal.BULL
-
-
-class TestTradeDecision:
-    """Test TradeDecision dataclass."""
-    
-    def test_trade_decision_default_creation(self):
-        """Test creating TradeDecision with defaults."""
-        decision = TradeDecision(
-            signal=Signal.SIDEWAYS,
-            signal_name='HOLD',
-            should_trade=False
-        )
-        
-        assert decision.signal == Signal.SIDEWAYS
-        assert decision.signal_name == 'HOLD'
-        assert decision.should_trade is False
-        assert decision.direction == ''
-        assert decision.position_size == 0.0
-        assert decision.rejection_reasons == []
     
     def test_trade_decision_with_values(self):
         """Test creating TradeDecision with all values."""
@@ -1933,4 +1860,3 @@ class TestTradeDecisionIntegration:
 
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
->>>>>>> add/tests-and-ci

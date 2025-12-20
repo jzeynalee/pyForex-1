@@ -241,7 +241,7 @@ class TestRiskManager:
 
         # SL should be adjusted to minimum
         sl_pips = abs(entry_price - sl_limited) / risk_manager.config.pip_value
-        assert sl_pips >= risk_manager.config.min_sl_pips
+        assert sl_pips >= risk_manager.config.min_sl_pips - 0.01  # Allow small floating point error
 
     def test_apply_limits_max_tp(self, risk_manager):
         """Test applying maximum TP limit."""

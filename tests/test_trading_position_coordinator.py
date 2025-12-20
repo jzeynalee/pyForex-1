@@ -269,8 +269,8 @@ class TestPositionCoordinator:
         total = coordinator.get_total_exposure()
 
         assert total['total_positions'] == 2
-        assert total['total_volume'] == 0.15
-        assert total['long_volume'] == 0.15
+        assert total['total_volume'] == pytest.approx(0.15)
+        assert total['long_volume'] == pytest.approx(0.15)
 
     def test_can_open_position_allowed(self, coordinator):
         """Test checking if position can be opened - allowed."""

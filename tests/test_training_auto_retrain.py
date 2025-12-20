@@ -123,7 +123,7 @@ class TestMT5Connection:
         mock_train = Mock()
         
         with patch('training.auto_retrain.MT5Connector', MockConnector), \
-             patch('training.auto_retrain.train_enhanced_lstm', mock_train):
+             patch('training.auto_retrain.train_tcn_enhanced', mock_train):
             
             from training.auto_retrain import auto_retrain_job
             
@@ -142,7 +142,7 @@ class TestMT5Connection:
         mock_train = Mock()
         
         with patch('training.auto_retrain.MT5Connector', MockConnector), \
-             patch('training.auto_retrain.train_enhanced_lstm', mock_train):
+             patch('training.auto_retrain.train_tcn_enhanced', mock_train):
             
             from training.auto_retrain import auto_retrain_job
             auto_retrain_job()
@@ -162,7 +162,7 @@ class TestMT5Connection:
                 return False
         
         with patch('training.auto_retrain.MT5Connector', TrackingConnector), \
-             patch('training.auto_retrain.train_enhanced_lstm', Mock()):
+             patch('training.auto_retrain.train_tcn_enhanced', Mock()):
             
             from training.auto_retrain import auto_retrain_job
             auto_retrain_job()
@@ -185,7 +185,7 @@ class TestDataDownload:
         )
         
         with patch('training.auto_retrain.MT5Connector', MockConnector), \
-             patch('training.auto_retrain.train_enhanced_lstm', Mock()):
+             patch('training.auto_retrain.train_tcn_enhanced', Mock()):
             
             from training.auto_retrain import auto_retrain_job
             auto_retrain_job()
@@ -204,7 +204,7 @@ class TestDataDownload:
         mock_train = Mock()
         
         with patch('training.auto_retrain.MT5Connector', MockConnector), \
-             patch('training.auto_retrain.train_enhanced_lstm', mock_train):
+             patch('training.auto_retrain.train_tcn_enhanced', mock_train):
             
             from training.auto_retrain import auto_retrain_job
             
@@ -222,7 +222,7 @@ class TestDataDownload:
         )
         
         with patch('training.auto_retrain.MT5Connector', MockConnector), \
-             patch('training.auto_retrain.train_enhanced_lstm', Mock()):
+             patch('training.auto_retrain.train_tcn_enhanced', Mock()):
             
             from training.auto_retrain import auto_retrain_job
             
@@ -247,7 +247,7 @@ class TestDataValidation:
         )
         
         with patch('training.auto_retrain.MT5Connector', MockConnector), \
-             patch('training.auto_retrain.train_enhanced_lstm', Mock()):
+             patch('training.auto_retrain.train_tcn_enhanced', Mock()):
             
             from training.auto_retrain import auto_retrain_job
             
@@ -264,7 +264,7 @@ class TestDataValidation:
         )
         
         with patch('training.auto_retrain.MT5Connector', MockConnector), \
-             patch('training.auto_retrain.train_enhanced_lstm', Mock()):
+             patch('training.auto_retrain.train_tcn_enhanced', Mock()):
             
             from training.auto_retrain import auto_retrain_job
             
@@ -286,7 +286,7 @@ class TestDataValidation:
         MockConnector = create_mock_connector(connect_return=True, get_data_return=df)
         
         with patch('training.auto_retrain.MT5Connector', MockConnector), \
-             patch('training.auto_retrain.train_enhanced_lstm', Mock()):
+             patch('training.auto_retrain.train_tcn_enhanced', Mock()):
             
             from training.auto_retrain import auto_retrain_job
             
@@ -308,7 +308,7 @@ class TestDataValidation:
         MockConnector = create_mock_connector(connect_return=True, get_data_return=df)
         
         with patch('training.auto_retrain.MT5Connector', MockConnector), \
-             patch('training.auto_retrain.train_enhanced_lstm', Mock()):
+             patch('training.auto_retrain.train_tcn_enhanced', Mock()):
             
             from training.auto_retrain import auto_retrain_job
             
@@ -333,7 +333,7 @@ class TestDataPersistence:
         )
         
         with patch('training.auto_retrain.MT5Connector', MockConnector), \
-             patch('training.auto_retrain.train_enhanced_lstm', Mock()):
+             patch('training.auto_retrain.train_tcn_enhanced', Mock()):
             
             from training.auto_retrain import auto_retrain_job
             auto_retrain_job()
@@ -352,7 +352,7 @@ class TestDataPersistence:
         assert not (temp_workdir / "data" / "raw").exists()
         
         with patch('training.auto_retrain.MT5Connector', MockConnector), \
-             patch('training.auto_retrain.train_enhanced_lstm', Mock()):
+             patch('training.auto_retrain.train_tcn_enhanced', Mock()):
             
             from training.auto_retrain import auto_retrain_job
             auto_retrain_job()
@@ -367,7 +367,7 @@ class TestDataPersistence:
         )
         
         with patch('training.auto_retrain.MT5Connector', MockConnector), \
-             patch('training.auto_retrain.train_enhanced_lstm', Mock()):
+             patch('training.auto_retrain.train_tcn_enhanced', Mock()):
             
             from training.auto_retrain import auto_retrain_job
             auto_retrain_job()
@@ -389,7 +389,7 @@ class TestDataPersistence:
         )
         
         with patch('training.auto_retrain.MT5Connector', MockConnector), \
-             patch('training.auto_retrain.train_enhanced_lstm', Mock()):
+             patch('training.auto_retrain.train_tcn_enhanced', Mock()):
             
             from training.auto_retrain import auto_retrain_job
             auto_retrain_job()
@@ -410,7 +410,7 @@ class TestTrainingInvocation:
     """Tests for training function invocation."""
     
     def test_training_called_with_correct_params(self, temp_workdir, sample_dataframe_large):
-        """Test that train_enhanced_lstm is called with correct parameters."""
+        """Test that train_tcn_enhanced is called with correct parameters."""
         MockConnector = create_mock_connector(
             connect_return=True,
             get_data_return=sample_dataframe_large
@@ -418,7 +418,7 @@ class TestTrainingInvocation:
         mock_train = Mock()
         
         with patch('training.auto_retrain.MT5Connector', MockConnector), \
-             patch('training.auto_retrain.train_enhanced_lstm', mock_train):
+             patch('training.auto_retrain.train_tcn_enhanced', mock_train):
             
             from training.auto_retrain import auto_retrain_job
             auto_retrain_job()
@@ -428,18 +428,17 @@ class TestTrainingInvocation:
             call_kwargs = mock_train.call_args[1]
             
             # Verify path ends with expected relative path
-            assert call_kwargs['data_path'].endswith('eurusd_latest.csv')
-            assert 'data' in call_kwargs['data_path']
-            assert 'raw' in call_kwargs['data_path']
+            assert call_kwargs['data'].endswith('eurusd_latest.csv')
+            assert 'data' in call_kwargs['data']
+            assert 'raw' in call_kwargs['data']
             
             # Verify all other parameters exactly
             assert call_kwargs['epochs'] == 50
-            assert call_kwargs['trend_threshold'] == 0.05
-            assert call_kwargs['seq_len'] == 30
+            assert call_kwargs['seq_len'] == 60
             assert call_kwargs['hidden_dim'] == 64
-            assert call_kwargs['dropout'] == 0.3
-            assert call_kwargs['learning_rate'] == 1e-3
-            assert call_kwargs['device'] == "cuda"
+            assert call_kwargs['dropout'] == 0.2
+            assert call_kwargs['lr'] == 1e-3
+            assert call_kwargs['device'] == "auto"
     
     def test_training_epochs_parameter(self, temp_workdir, sample_dataframe_large):
         """Test that training uses 50 epochs as specified."""
@@ -450,7 +449,7 @@ class TestTrainingInvocation:
         mock_train = Mock()
         
         with patch('training.auto_retrain.MT5Connector', MockConnector), \
-             patch('training.auto_retrain.train_enhanced_lstm', mock_train):
+             patch('training.auto_retrain.train_tcn_enhanced', mock_train):
             
             from training.auto_retrain import auto_retrain_job
             auto_retrain_job()
@@ -467,7 +466,7 @@ class TestTrainingInvocation:
         mock_train = Mock()
         
         with patch('training.auto_retrain.MT5Connector', MockConnector), \
-             patch('training.auto_retrain.train_enhanced_lstm', mock_train):
+             patch('training.auto_retrain.train_tcn_enhanced', mock_train):
             
             from training.auto_retrain import auto_retrain_job
             auto_retrain_job()
@@ -476,7 +475,7 @@ class TestTrainingInvocation:
             assert call_kwargs['hidden_dim'] == 64
     
     def test_training_dropout_parameter(self, temp_workdir, sample_dataframe_large):
-        """Test that training uses dropout=0.3 as specified."""
+        """Test that training uses dropout=0.2 as specified."""
         MockConnector = create_mock_connector(
             connect_return=True,
             get_data_return=sample_dataframe_large
@@ -484,16 +483,16 @@ class TestTrainingInvocation:
         mock_train = Mock()
         
         with patch('training.auto_retrain.MT5Connector', MockConnector), \
-             patch('training.auto_retrain.train_enhanced_lstm', mock_train):
+             patch('training.auto_retrain.train_tcn_enhanced', mock_train):
             
             from training.auto_retrain import auto_retrain_job
             auto_retrain_job()
             
             call_kwargs = mock_train.call_args[1]
-            assert call_kwargs['dropout'] == 0.3
+            assert call_kwargs['dropout'] == 0.2
     
     def test_training_learning_rate_parameter(self, temp_workdir, sample_dataframe_large):
-        """Test that training uses learning_rate=1e-3 as specified."""
+        """Test that training uses lr=1e-3 as specified."""
         MockConnector = create_mock_connector(
             connect_return=True,
             get_data_return=sample_dataframe_large
@@ -501,16 +500,16 @@ class TestTrainingInvocation:
         mock_train = Mock()
         
         with patch('training.auto_retrain.MT5Connector', MockConnector), \
-             patch('training.auto_retrain.train_enhanced_lstm', mock_train):
+             patch('training.auto_retrain.train_tcn_enhanced', mock_train):
             
             from training.auto_retrain import auto_retrain_job
             auto_retrain_job()
             
             call_kwargs = mock_train.call_args[1]
-            assert call_kwargs['learning_rate'] == 1e-3
+            assert call_kwargs['lr'] == 1e-3
     
     def test_training_device_parameter(self, temp_workdir, sample_dataframe_large):
-        """Test that training uses device='cuda' as specified."""
+        """Test that training uses device='auto' as specified."""
         MockConnector = create_mock_connector(
             connect_return=True,
             get_data_return=sample_dataframe_large
@@ -518,16 +517,16 @@ class TestTrainingInvocation:
         mock_train = Mock()
         
         with patch('training.auto_retrain.MT5Connector', MockConnector), \
-             patch('training.auto_retrain.train_enhanced_lstm', mock_train):
+             patch('training.auto_retrain.train_tcn_enhanced', mock_train):
             
             from training.auto_retrain import auto_retrain_job
             auto_retrain_job()
             
             call_kwargs = mock_train.call_args[1]
-            assert call_kwargs['device'] == 'cuda'
+            assert call_kwargs['device'] == 'auto'
     
     def test_training_seq_len_parameter(self, temp_workdir, sample_dataframe_large):
-        """Test that training uses seq_len=30 as specified."""
+        """Test that training uses seq_len=60 as specified."""
         MockConnector = create_mock_connector(
             connect_return=True,
             get_data_return=sample_dataframe_large
@@ -535,16 +534,16 @@ class TestTrainingInvocation:
         mock_train = Mock()
         
         with patch('training.auto_retrain.MT5Connector', MockConnector), \
-             patch('training.auto_retrain.train_enhanced_lstm', mock_train):
+             patch('training.auto_retrain.train_tcn_enhanced', mock_train):
             
             from training.auto_retrain import auto_retrain_job
             auto_retrain_job()
             
             call_kwargs = mock_train.call_args[1]
-            assert call_kwargs['seq_len'] == 30
+            assert call_kwargs['seq_len'] == 60
     
     def test_training_trend_threshold_parameter(self, temp_workdir, sample_dataframe_large):
-        """Test that training uses trend_threshold=0.05 as specified."""
+        """Test that training uses threshold=0.05 as specified."""
         MockConnector = create_mock_connector(
             connect_return=True,
             get_data_return=sample_dataframe_large
@@ -552,13 +551,13 @@ class TestTrainingInvocation:
         mock_train = Mock()
         
         with patch('training.auto_retrain.MT5Connector', MockConnector), \
-             patch('training.auto_retrain.train_enhanced_lstm', mock_train):
+             patch('training.auto_retrain.train_tcn_enhanced', mock_train):
             
             from training.auto_retrain import auto_retrain_job
             auto_retrain_job()
             
             call_kwargs = mock_train.call_args[1]
-            assert call_kwargs['trend_threshold'] == 0.05
+            assert call_kwargs['threshold'] == 0.05
 
 
 # ============================================================================
@@ -577,7 +576,7 @@ class TestExceptionHandling:
         mock_train = Mock(side_effect=RuntimeError("CUDA out of memory"))
         
         with patch('training.auto_retrain.MT5Connector', MockConnector), \
-             patch('training.auto_retrain.train_enhanced_lstm', mock_train):
+             patch('training.auto_retrain.train_tcn_enhanced', mock_train):
             
             from training.auto_retrain import auto_retrain_job
             
@@ -597,7 +596,7 @@ class TestExceptionHandling:
         mock_train = Mock(side_effect=ValueError("Invalid parameter"))
         
         with patch('training.auto_retrain.MT5Connector', MockConnector), \
-             patch('training.auto_retrain.train_enhanced_lstm', mock_train):
+             patch('training.auto_retrain.train_tcn_enhanced', mock_train):
             
             from training.auto_retrain import auto_retrain_job
             
@@ -612,7 +611,7 @@ class TestExceptionHandling:
         )
         
         with patch('training.auto_retrain.MT5Connector', MockConnector), \
-             patch('training.auto_retrain.train_enhanced_lstm', Mock()):
+             patch('training.auto_retrain.train_tcn_enhanced', Mock()):
             
             from training.auto_retrain import auto_retrain_job
             
@@ -637,13 +636,13 @@ class TestLogging:
         )
         
         with patch('training.auto_retrain.MT5Connector', MockConnector), \
-             patch('training.auto_retrain.train_enhanced_lstm', Mock()):
+             patch('training.auto_retrain.train_tcn_enhanced', Mock()):
             
             from training.auto_retrain import auto_retrain_job
             auto_retrain_job()
             
             captured = capsys.readouterr()
-            assert "STARTING RETRAINING JOB" in captured.out
+            assert "STARTING TCN RETRAINING JOB" in captured.out
             assert "BIG DATA MODE" in captured.out
     
     def test_download_info_logged(self, temp_workdir, sample_dataframe_large, caplog):
@@ -654,7 +653,7 @@ class TestLogging:
         )
         
         with patch('training.auto_retrain.MT5Connector', MockConnector), \
-             patch('training.auto_retrain.train_enhanced_lstm', Mock()):
+             patch('training.auto_retrain.train_tcn_enhanced', Mock()):
             
             from training.auto_retrain import auto_retrain_job
             
@@ -672,7 +671,7 @@ class TestLogging:
         )
         
         with patch('training.auto_retrain.MT5Connector', MockConnector), \
-             patch('training.auto_retrain.train_enhanced_lstm', Mock()):
+             patch('training.auto_retrain.train_tcn_enhanced', Mock()):
             
             from training.auto_retrain import auto_retrain_job
             
@@ -690,14 +689,14 @@ class TestLogging:
         )
         
         with patch('training.auto_retrain.MT5Connector', MockConnector), \
-             patch('training.auto_retrain.train_enhanced_lstm', Mock()):
+             patch('training.auto_retrain.train_tcn_enhanced', Mock()):
             
             from training.auto_retrain import auto_retrain_job
             
             with caplog.at_level(logging.INFO):
                 auto_retrain_job()
             
-            assert "Starting Training" in caplog.text
+            assert "Starting TCN Training" in caplog.text
 
 
 # ============================================================================
@@ -716,7 +715,7 @@ class TestEndToEndWorkflow:
         mock_train = Mock()
         
         with patch('training.auto_retrain.MT5Connector', MockConnector), \
-             patch('training.auto_retrain.train_enhanced_lstm', mock_train):
+             patch('training.auto_retrain.train_tcn_enhanced', mock_train):
             
             from training.auto_retrain import auto_retrain_job
             
@@ -739,7 +738,7 @@ class TestEndToEndWorkflow:
         mock_train = Mock()
         
         with patch('training.auto_retrain.MT5Connector', MockConnector), \
-             patch('training.auto_retrain.train_enhanced_lstm', mock_train):
+             patch('training.auto_retrain.train_tcn_enhanced', mock_train):
             
             from training.auto_retrain import auto_retrain_job
             auto_retrain_job()
@@ -755,7 +754,7 @@ class TestEndToEndWorkflow:
         mock_train = Mock()
         
         with patch('training.auto_retrain.MT5Connector', MockConnector), \
-             patch('training.auto_retrain.train_enhanced_lstm', mock_train):
+             patch('training.auto_retrain.train_tcn_enhanced', mock_train):
             
             from training.auto_retrain import auto_retrain_job
             auto_retrain_job()
@@ -772,7 +771,7 @@ class TestEndToEndWorkflow:
         mock_train = Mock()
         
         with patch('training.auto_retrain.MT5Connector', MockConnector), \
-             patch('training.auto_retrain.train_enhanced_lstm', mock_train):
+             patch('training.auto_retrain.train_tcn_enhanced', mock_train):
             
             from training.auto_retrain import auto_retrain_job
             
@@ -799,7 +798,7 @@ class TestConfigurationConstants:
         )
         
         with patch('training.auto_retrain.MT5Connector', MockConnector), \
-             patch('training.auto_retrain.train_enhanced_lstm', Mock()):
+             patch('training.auto_retrain.train_tcn_enhanced', Mock()):
             
             from training.auto_retrain import auto_retrain_job
             auto_retrain_job()
@@ -814,7 +813,7 @@ class TestConfigurationConstants:
         )
         
         with patch('training.auto_retrain.MT5Connector', MockConnector), \
-             patch('training.auto_retrain.train_enhanced_lstm', Mock()):
+             patch('training.auto_retrain.train_tcn_enhanced', Mock()):
             
             from training.auto_retrain import auto_retrain_job
             auto_retrain_job()
@@ -829,7 +828,7 @@ class TestConfigurationConstants:
         )
         
         with patch('training.auto_retrain.MT5Connector', MockConnector), \
-             patch('training.auto_retrain.train_enhanced_lstm', Mock()):
+             patch('training.auto_retrain.train_tcn_enhanced', Mock()):
             
             from training.auto_retrain import auto_retrain_job
             auto_retrain_job()
@@ -859,7 +858,7 @@ class TestEdgeCases:
         mock_train = Mock()
         
         with patch('training.auto_retrain.MT5Connector', MockConnector), \
-             patch('training.auto_retrain.train_enhanced_lstm', mock_train):
+             patch('training.auto_retrain.train_tcn_enhanced', mock_train):
             
             from training.auto_retrain import auto_retrain_job
             auto_retrain_job()
@@ -877,7 +876,7 @@ class TestEdgeCases:
         MockConnector = create_mock_connector(connect_return=True, get_data_return=df)
         
         with patch('training.auto_retrain.MT5Connector', MockConnector), \
-             patch('training.auto_retrain.train_enhanced_lstm', Mock()):
+             patch('training.auto_retrain.train_tcn_enhanced', Mock()):
             
             from training.auto_retrain import auto_retrain_job
             
@@ -899,7 +898,7 @@ class TestEdgeCases:
         MockConnector = create_mock_connector(connect_return=True, get_data_return=df)
         
         with patch('training.auto_retrain.MT5Connector', MockConnector), \
-             patch('training.auto_retrain.train_enhanced_lstm', Mock()):
+             patch('training.auto_retrain.train_tcn_enhanced', Mock()):
             
             from training.auto_retrain import auto_retrain_job
             auto_retrain_job()
@@ -940,7 +939,7 @@ class TestConcurrentExecution:
         )
         
         with patch('training.auto_retrain.MT5Connector', MockConnector), \
-             patch('training.auto_retrain.train_enhanced_lstm', Mock()):
+             patch('training.auto_retrain.train_tcn_enhanced', Mock()):
             
             from training.auto_retrain import auto_retrain_job
             
@@ -994,7 +993,7 @@ class TestPerformanceConsiderations:
         mock_train = Mock()
         
         with patch('training.auto_retrain.MT5Connector', MockConnector), \
-             patch('training.auto_retrain.train_enhanced_lstm', mock_train):
+             patch('training.auto_retrain.train_tcn_enhanced', mock_train):
             
             from training.auto_retrain import auto_retrain_job
             auto_retrain_job()

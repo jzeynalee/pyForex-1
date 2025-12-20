@@ -226,7 +226,7 @@ class TestMT5Connector:
             mock_mt5.ORDER_FILLING_IOC = 1
             mock_mt5.TRADE_RETCODE_DONE = 10009
             
-            with patch.dict('sys.modules', {'MetaTrader5': mock_mt5}):
+            with patch('trading.mt5_connector.mt5', mock_mt5):
                 yield mock_mt5
 
     def test_init_raises_when_mt5_unavailable(self):
@@ -427,7 +427,7 @@ class TestMT5Connector:
         assert price_info is not None
         assert price_info['bid'] == 1.0999
         assert price_info['ask'] == 1.1001
-        assert price_info['spread'] == 0.0002
+        assert price_info['spread'] == pytest.approx(0.0002, rel=1e-6)
 
     def test_execute_order_buy_success(self, mock_mt5):
         """Test executing BUY order successfully."""

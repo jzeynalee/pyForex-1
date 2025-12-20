@@ -103,19 +103,10 @@ class MT5Connector:
         tf_upper = tf.upper()
         if tf_upper not in self.TF_MAP:
             logger.warning(f"Unknown timeframe {tf}, defaulting to H1")
-            return mt5.TIMEFRAME_H1
+            return self.TF_MAP["H1"]  # Use our TF_MAP instead of mt5 constants
         
-        # Map to MT5 constants
-        mapping = {
-            "M1": mt5.TIMEFRAME_M1,
-            "M5": mt5.TIMEFRAME_M5,
-            "M15": mt5.TIMEFRAME_M15,
-            "M30": mt5.TIMEFRAME_M30,
-            "H1": mt5.TIMEFRAME_H1,
-            "H4": mt5.TIMEFRAME_H4,
-            "D1": mt5.TIMEFRAME_D1,
-        }
-        return mapping.get(tf_upper, mt5.TIMEFRAME_H1)
+        # Return from our TF_MAP (uses minute values)
+        return self.TF_MAP[tf_upper]
     
     def connect(self) -> bool:
         """Initialize connection to MT5 terminal."""
@@ -162,7 +153,7 @@ class MT5Connector:
             if term_info is not None:
                 return True
         
-        return self.connect()
+        return self.connect()  # Return the result of connect()
     
     def get_account_info(self) -> Optional[AccountInfo]:
         """Get current account information."""

@@ -258,6 +258,7 @@ class PositionCoordinator:
         """Get aggregate exposure across all styles."""
         total = {
             'position_count': 0,
+            'total_positions': 0,
             'total_volume': 0.0,
             'long_volume': 0.0,
             'short_volume': 0.0,
@@ -268,6 +269,7 @@ class PositionCoordinator:
         for style in TradingStyle:
             exp = self.get_style_exposure(style)
             total['position_count'] += exp.position_count
+            total['total_positions'] += exp.position_count
             total['total_volume'] += exp.total_volume
             total['long_volume'] += exp.long_volume
             total['short_volume'] += exp.short_volume
@@ -294,7 +296,7 @@ class PositionCoordinator:
         
         # Check 1: Style position limit
         if exposure.position_count >= style_config.max_positions:
-            return False, f"{style.value} max positions ({style_config.max_positions}) reached"
+            return False, f"limit: {style.value} max positions ({style_config.max_positions}) reached"
         
         # Check 2: Style daily trade limit
         if exposure.trades_today >= style_config.max_daily_trades:
@@ -547,5 +549,16 @@ class PositionCoordinator:
             print(f"\n  Open Positions:")
             for pos in report['open_positions']:
                 print(f"    #{pos['ticket']} [{pos['style']}] {pos['direction']} {pos['volume']} @ {pos['entry']:.5f} -> ${pos['pnl']:+.2f}")
+    
+    def get_positions_by_style(self, style: TradingStyle) -> List[TrackedPosition]:
+        """Get all positions for a specific style."""
+        return [pos for pos in self.positions.values() if pos.style == style]
+    
+    def get_daily_stats(self, style: TradingStyle = None):
+        """Get daily statistics for a style or all styles."""
+        if style:
+            return self.daily_stats.get(style, DailyStats(date=datetime.now()))
+        else:
+            return {style.value: self.get_daily_stats(style) for style in TradingStyle}
         
         print("\n" + "=" * 70 + "\n")

@@ -16,7 +16,7 @@ class TestLoadCheckpointWithFeatures:
     """Test checkpoint loading with features."""
 
     @patch('analysis.evaluate_tcn_horizon.torch.load')
-    @patch('analysis.evaluate_tcn_horizon.EnhancedTCN')
+    @patch('training.train_tcn_enhanced.EnhancedTCN')
     def test_load_checkpoint_with_features(self, mock_enhanced_tcn, mock_torch_load):
         """Test loading checkpoint with feature columns."""
         mock_checkpoint = {

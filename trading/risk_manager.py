@@ -412,6 +412,27 @@ class RiskManager:
         
         return sl, tp
     
+    def apply_limits(self, sl: float, tp: float, entry_price: float) -> Tuple[float, float]:
+        """Apply minimum SL and RR constraints."""
+        # Ensure minimum SL distance
+        min_sl_distance = 0.0005 * entry_price  # 5 pips minimum
+        
+        if entry_price - sl < min_sl_distance:
+            sl = entry_price - min_sl_distance
+        elif sl - entry_price < min_sl_distance:
+            sl = entry_price + min_sl_distance
+        
+        # Ensure minimum RR ratio with floating point tolerance
+        sl_distance = abs(entry_price - sl)
+        min_tp_distance = sl_distance * self.config.min_risk_reward
+        
+        if tp - entry_price < min_tp_distance:
+            tp = entry_price + min_tp_distance
+        elif entry_price - tp < min_tp_distance:
+            tp = entry_price - min_tp_distance
+        
+        return sl, tp
+    
     def _find_quantile_idx(self, target_quantile: float) -> int:
         """Find index of closest quantile."""
         return min(
@@ -647,6 +668,15 @@ if __name__ == "__main__":
     print(f"   Account: $10,000")
     print(f"   Risk: 1%")
     print(f"   Lots: {position['lots']}")
+    
+    def get_status(self) -> Dict:
+        """Get current risk manager status."""
+        return {
+            'model_loaded': self.model is not None,
+            'feature_columns': len(self.feature_columns) if self.feature_columns else 0,
+            'config_method': self.config.method.value if self.config else None,
+            'device': self.device,
+        }
     print(f"   Units: {position['units']}")
     print(f"   Risk Amount: ${position['risk_amount']:.2f}")
     
