@@ -286,7 +286,7 @@ def train_multihead_tcn(
         'timestamp': datetime.now().isoformat()
     }, checkpoint_path)
     
-    logger.info(f"✓ Saved checkpoint: {checkpoint_path}")
+    logger.info(f"Saved checkpoint: {checkpoint_path}")
     
     # Also save to weights dir for inference
     weights_path = WEIGHTS_DIR / f"multihead_tcn_{profile}.pth"
@@ -305,7 +305,7 @@ def train_multihead_tcn(
         'num_quantiles': 5
     }, weights_path)
     
-    logger.info(f"✓ Saved weights: {weights_path}")
+    logger.info(f"Saved weights: {weights_path}")
     
     return {
         'profile': profile,
@@ -519,7 +519,7 @@ def train_vit_simplified(
         'best_val_acc': best_val_acc
     }, weights_path)
     
-    logger.info(f"✓ Saved ViT weights: {weights_path}")
+    logger.info(f"Saved ViT weights: {weights_path}")
     
     return {
         'profile': profile,
@@ -633,7 +633,7 @@ def train_meta_labeling(
     model_path = CHECKPOINTS_DIR / "meta_labeling" / f"meta_model_{profile}.pkl"
     meta_model.save(str(model_path))
     
-    logger.info(f"✓ Saved meta-model: {model_path}")
+    logger.info(f"Saved meta-model: {model_path}")
     
     return {
         'profile': profile,
@@ -714,7 +714,7 @@ def train_exit_optimizer(
     model_path = CHECKPOINTS_DIR / "exit_optimizer" / f"exit_optimizer_{profile}.pth"
     agent.save(str(model_path))
     
-    logger.info(f"✓ Saved exit optimizer: {model_path}")
+    logger.info(f"Saved exit optimizer: {model_path}")
     
     return {
         'profile': profile,
@@ -780,7 +780,7 @@ def train_yolo(
     best_weights = CHECKPOINTS_DIR / "yolo" / "pattern_detector" / "weights" / "best.pt"
     if best_weights.exists():
         shutil.copy(best_weights, WEIGHTS_DIR / "yolo_patterns.pt")
-        logger.info(f"✓ Saved YOLO weights: {WEIGHTS_DIR / 'yolo_patterns.pt'}")
+        logger.info(f"Saved YOLO weights: {WEIGHTS_DIR / 'yolo_patterns.pt'}")
     
     return {
         'status': 'completed',
