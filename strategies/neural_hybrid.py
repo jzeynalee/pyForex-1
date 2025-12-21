@@ -658,68 +658,66 @@ class NeuralHybridStrategy:
             return None
     
     def _prepare_features(self, data: pd.DataFrame) -> np.ndarray:
-        """Prepare features for prediction."""
-        # Get feature columns from predictor
-        if hasattr(self.predictor, '_feature_names') and self.predictor._feature_names:
-            feature_cols = self.predictor._feature_names
-            if all(col in data.columns for col in feature_cols):
-                return data[feature_cols].values[-self.config.sequence_length:]
+        """Prepare features for prediction using FeatureEngineer."""
+        # Get expected feature columns and count from predictor
+        expected_feature_cols = None
+        expected_feature_count = 64  # Default
         
-        # Try to generate features using feature engineering
+        if hasattr(self.predictor, '_feature_names') and self.predictor._feature_names:
+            expected_feature_cols = self.predictor._feature_names
+            expected_feature_count = len(expected_feature_cols)
+        
+        # Always use FeatureEngineer to generate features (same as training)
         try:
-            from utils.features_engineering import FeatureEngineerOptimized
-            fe = FeatureEngineerOptimized()
-            data_with_features = fe.generate_features(data.copy(), batch_processing=False)
+            from utils.features_engineering import FeatureEngineer
+            fe = FeatureEngineer()
+            data_with_features = fe.generate_features(data.copy())
             
-            # Get feature columns from predictor if available (from checkpoint)
-            feature_cols = None
-            if hasattr(self.predictor, '_feature_names') and self.predictor._feature_names:
-                feature_cols = self.predictor._feature_names
-                # Check if all required features are available
-                missing = [c for c in feature_cols if c not in data_with_features.columns]
-                if missing:
-                    logger.warning(f"Missing features from checkpoint: {missing}")
-                    feature_cols = None
-            
-            if feature_cols is None:
-                # Fallback to generic feature selection
+            # Select features based on checkpoint or generate matching set
+            if expected_feature_cols:
+                # Use exact feature columns from checkpoint
+                available_cols = [c for c in expected_feature_cols if c in data_with_features.columns]
+                missing_cols = [c for c in expected_feature_cols if c not in data_with_features.columns]
+                
+                if missing_cols:
+                    logger.debug(f"Missing {len(missing_cols)} features, will pad with zeros")
+                
+                # Get available features
+                features = data_with_features[available_cols].values[-self.config.sequence_length:]
+                
+                # Pad missing features with zeros to match expected count
+                if len(available_cols) < expected_feature_count:
+                    padding = np.zeros((features.shape[0], expected_feature_count - len(available_cols)))
+                    features = np.hstack([features, padding])
+            else:
+                # No checkpoint feature list - use all numeric features
+                exclude_cols = ['time', 'timestamp', 'date', 'tick_volume', 'open', 'high', 'low', 'close', 'volume', 'spread', 'real_volume']
                 numeric_cols = data_with_features.select_dtypes(include=[np.number]).columns.tolist()
-                exclude_cols = ['time', 'timestamp', 'date', 'tick_volume']
                 feature_cols = [c for c in numeric_cols if c not in exclude_cols]
                 
-                # Get expected input size from predictor
-                expected_features = 18
-                if hasattr(self.predictor, 'model') and hasattr(self.predictor.model, 'tcn'):
-                    try:
-                        first_block = self.predictor.model.tcn.network[0]
-                        expected_features = first_block.conv1.conv.in_channels
-                    except:
-                        pass
+                # Limit to expected count
+                if len(feature_cols) > expected_feature_count:
+                    feature_cols = feature_cols[:expected_feature_count]
                 
-                if len(feature_cols) > expected_features:
-                    feature_cols = feature_cols[:expected_features]
-            
-            # Extract features
-            available_cols = [c for c in feature_cols if c in data_with_features.columns]
-            features = data_with_features[available_cols].values[-self.config.sequence_length:]
+                features = data_with_features[feature_cols].values[-self.config.sequence_length:]
+                
+                # Pad if needed
+                if features.shape[1] < expected_feature_count:
+                    padding = np.zeros((features.shape[0], expected_feature_count - features.shape[1]))
+                    features = np.hstack([features, padding])
             
             # Handle NaNs
             features = np.nan_to_num(features, nan=0.0, posinf=0.0, neginf=0.0)
             
-            # Pad if needed
-            expected_features = len(feature_cols)
-            if features.shape[1] < expected_features:
-                padding = np.zeros((features.shape[0], expected_features - features.shape[1]))
-                features = np.hstack([features, padding])
+            return features.astype(np.float32)
             
-            return features
         except Exception as e:
             logger.warning(f"Feature engineering failed: {e}, using OHLCV fallback")
         
-        # Fallback to OHLCV with padding to 64 features
+        # Fallback to OHLCV with padding to expected features
         ohlcv = data[['open', 'high', 'low', 'close', 'volume']].values[-self.config.sequence_length:]
-        padding = np.zeros((ohlcv.shape[0], 64 - 5))
-        return np.hstack([ohlcv, padding])
+        padding = np.zeros((ohlcv.shape[0], expected_feature_count - 5))
+        return np.hstack([ohlcv, padding]).astype(np.float32)
     
     def _generate_chart_image(self, data: pd.DataFrame) -> Optional[np.ndarray]:
         """Generate chart image for vision models."""

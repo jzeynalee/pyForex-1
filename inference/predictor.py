@@ -170,6 +170,29 @@ class RiskAwareTCNPredictor:
         is_simple_tcn = any(k.startswith('tcn.') for k in state_keys)
         is_multihead_tcn = any(k.startswith('backbone.') for k in state_keys)
         
+        # Get config from checkpoint to reinitialize model with correct dimensions
+        if 'config' in checkpoint and isinstance(checkpoint['config'], dict):
+            ckpt_config = checkpoint['config']
+            input_dim = ckpt_config.get('input_dim', 64)
+            hidden_dim = ckpt_config.get('hidden_dim', 128)
+            num_layers = ckpt_config.get('num_layers', 4)
+            
+            # Reinitialize MultiHeadTCN with correct dimensions from checkpoint
+            if is_multihead_tcn or (not is_simple_tcn and self._use_risk_heads):
+                try:
+                    from risk_management.phase1_predictive.tcn_backbone import MultiHeadTCN
+                    self.model = MultiHeadTCN(
+                        input_channels=input_dim,
+                        hidden_channels=hidden_dim,
+                        num_layers=num_layers,
+                        num_directions=3,
+                        num_quantiles=5
+                    ).to(self.device)
+                    self._use_risk_heads = True
+                    logger.info(f"Reinitialized MultiHeadTCN with input_dim={input_dim}, hidden_dim={hidden_dim}")
+                except Exception as e:
+                    logger.warning(f"Could not reinitialize MultiHeadTCN: {e}")
+        
         if is_simple_tcn and self._use_risk_heads:
             # Checkpoint is from simple TCN but we loaded MultiHeadTCN - switch models
             logger.info("Checkpoint is from simple TCN - switching model architecture")

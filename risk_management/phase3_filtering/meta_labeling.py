@@ -19,7 +19,7 @@ Key benefits:
 
 import numpy as np
 import pandas as pd
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union, Any
 from dataclasses import dataclass, field
 from sklearn.model_selection import TimeSeriesSplit
 from sklearn.metrics import (
@@ -602,6 +602,67 @@ class TradeFilter:
         self.meta_model = meta_model
         self.min_confidence = min_confidence
         self.min_meta_score = min_meta_score
+    
+    def filter(
+        self,
+        signal: str,
+        features: Dict[str, Any],
+        direction_confidence: float
+    ) -> 'FilterResult':
+        """
+        Filter a single trading signal.
+        
+        Args:
+            signal: Direction signal ('BUY' or 'SELL')
+            features: Meta-features dict
+            direction_confidence: Primary model confidence
+            
+        Returns:
+            FilterResult with should_trade and meta_score
+        """
+        from dataclasses import dataclass
+        
+        @dataclass
+        class FilterResult:
+            should_trade: bool
+            meta_score: float
+            reason: str = ""
+        
+        # Check confidence threshold
+        if direction_confidence < self.min_confidence:
+            return FilterResult(
+                should_trade=False,
+                meta_score=0.0,
+                reason=f"Low confidence: {direction_confidence:.2f} < {self.min_confidence}"
+            )
+        
+        # Get meta-model prediction if model is available
+        meta_score = 0.5  # Default neutral score
+        if self.meta_model is not None:
+            try:
+                # Convert features dict to array for prediction
+                feature_values = []
+                for key in sorted(features.keys()):
+                    val = features[key]
+                    if isinstance(val, (int, float)):
+                        feature_values.append(val)
+                    elif isinstance(val, np.ndarray):
+                        feature_values.extend(val.flatten().tolist())
+                
+                if feature_values:
+                    X = np.array([feature_values])
+                    meta_score = self.meta_model.predict_proba(X)[0]
+            except Exception as e:
+                # If prediction fails, use neutral score
+                meta_score = 0.5
+        
+        should_trade = meta_score >= self.min_meta_score
+        
+        return FilterResult(
+            should_trade=should_trade,
+            meta_score=meta_score,
+            reason="" if should_trade else f"Meta score {meta_score:.2f} < {self.min_meta_score}"
+        )
     
     def filter_signals(
         self,

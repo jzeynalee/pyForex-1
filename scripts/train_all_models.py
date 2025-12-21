@@ -589,11 +589,12 @@ def train_meta_labeling(
     
     meta_labels = np.array(meta_labels)
     
-    # Prepare features for meta-model
+    # Prepare features for meta-model - only numeric columns
     exclude_cols = ['time', 'open', 'high', 'low', 'close', 'volume', 'tick_volume', 'spread', 'real_volume']
-    feature_cols = [c for c in features_df.columns if c not in exclude_cols]
+    numeric_cols = features_df.select_dtypes(include=[np.number]).columns.tolist()
+    feature_cols = [c for c in numeric_cols if c not in exclude_cols]
     
-    X = features_df[feature_cols].values
+    X = features_df[feature_cols].values.astype(np.float32)
     y = meta_labels
     
     # Remove NaN labels
@@ -613,18 +614,11 @@ def train_meta_labeling(
     
     meta_model = MetaLabelingModel(config)
     
-    # Time series split
-    split_idx = int(0.8 * len(X))
-    X_train, X_val = X[:split_idx], X[split_idx:]
-    y_train, y_val = y[:split_idx], y[split_idx:]
+    # Train using the train method (not fit)
+    metrics = meta_model.train(X, y, validation_split=0.2)
     
-    meta_model.fit(X_train, y_train, X_val, y_val, feature_names=feature_cols)
-    
-    # Evaluate
-    val_preds = meta_model.predict_proba(X_val)
-    from sklearn.metrics import roc_auc_score, accuracy_score
-    val_auc = roc_auc_score(y_val, val_preds)
-    val_acc = accuracy_score(y_val, (val_preds > 0.5).astype(int))
+    val_auc = metrics.get('roc_auc', 0.5)
+    val_acc = metrics.get('accuracy', 0.0)
     
     logger.info(f"Validation AUC: {val_auc:.4f}")
     logger.info(f"Validation Accuracy: {val_acc:.4f}")
@@ -663,7 +657,7 @@ def train_exit_optimizer(
         from risk_management.phase4_rl_exit import (
             ExitOptimizer, PPOConfig, create_exit_env, ExitEnvConfig
         )
-        from risk_management.phase4_rl_exit.trainer import ExitTrainer, TrainingConfig
+        from risk_management.phase4_rl_exit.trainer import ExitOptimizerTrainer, TrainingConfig
     except ImportError as e:
         logger.warning(f"Exit optimizer module not available: {e}")
         logger.info("Skipping exit optimizer training.")
@@ -677,16 +671,13 @@ def train_exit_optimizer(
     if len(df) > max_rows:
         df = df.tail(max_rows)
     
-    # Create environment
+    # Environment config
     env_config = ExitEnvConfig(
-        initial_balance=10000,
-        max_position_duration=100,
-        commission_pct=0.0001
+        max_holding_steps=100,
+        transaction_cost=0.0001
     )
     
-    env = create_exit_env(df, env_config)
-    
-    # Create agent
+    # Agent config
     ppo_config = PPOConfig(
         learning_rate=3e-4,
         gamma=0.99,
@@ -696,8 +687,6 @@ def train_exit_optimizer(
         entropy_coef=0.01
     )
     
-    agent = ExitOptimizer(env, ppo_config, device=device)
-    
     # Training config
     train_config = TrainingConfig(
         total_timesteps=total_timesteps,
@@ -706,13 +695,18 @@ def train_exit_optimizer(
         checkpoint_dir=str(CHECKPOINTS_DIR / "exit_optimizer")
     )
     
-    # Train
-    trainer = ExitTrainer(agent, train_config)
-    history = trainer.train()
+    # Train using ExitOptimizerTrainer with correct API
+    trainer = ExitOptimizerTrainer(
+        config=train_config,
+        env_config=env_config,
+        agent_config=ppo_config
+    )
+    history = trainer.train(df)
     
-    # Save
+    # Save - trainer creates its own agent internally
     model_path = CHECKPOINTS_DIR / "exit_optimizer" / f"exit_optimizer_{profile}.pth"
-    agent.save(str(model_path))
+    if trainer.agent is not None:
+        trainer.agent.save(str(model_path))
     
     logger.info(f"Saved exit optimizer: {model_path}")
     

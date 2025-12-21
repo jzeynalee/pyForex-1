@@ -299,10 +299,21 @@ class BacktestOrchestrator:
             NeuralHybridStrategy = neural_hybrid_module.NeuralHybridStrategy
             StrategyConfig = neural_hybrid_module.StrategyConfig
             
-            # Create strategy config
+            # Create strategy config with correct weights paths
+            weights_dir = self.project_root / "models" / "weights"
+            tcn_weights = weights_dir / f"multihead_tcn_{self.config.profile}.pth"
+            meta_model_path = self.project_root / "checkpoints" / "meta_labeling" / f"meta_model_{self.config.profile}.pkl"
+            
+            # Fallback to default if profile-specific weights don't exist
+            if not tcn_weights.exists():
+                tcn_weights = weights_dir / "tcn_best.pt"
+                logger.warning(f"Profile-specific TCN weights not found, using {tcn_weights}")
+            
             strategy_config = StrategyConfig(
                 profile=self.config.profile,
                 symbol=self.config.symbol,
+                tcn_weights=str(tcn_weights) if tcn_weights.exists() else None,
+                meta_model_path=str(meta_model_path) if meta_model_path.exists() else None,
                 sequence_length=60,
                 use_vision=False,  # Disable vision for backtest speed
                 use_yolo=False,
