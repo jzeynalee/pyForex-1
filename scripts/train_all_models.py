@@ -126,7 +126,7 @@ def train_multihead_tcn(
     
     # Feature engineering
     logger.info("Engineering features...")
-    from features.feature_engineering import FeatureEngineer
+    from utils.features_engineering import FeatureEngineer
     
     engineer = FeatureEngineer()
     features_df = engineer.generate_features(df)
@@ -135,9 +135,11 @@ def train_multihead_tcn(
     features_df = features_df.dropna()
     logger.info(f"Features shape after dropna: {features_df.shape}")
     
-    # Get feature columns (exclude OHLCV and time)
+    # Get feature columns (exclude OHLCV, time, and non-numeric)
     exclude_cols = ['time', 'open', 'high', 'low', 'close', 'volume', 'tick_volume', 'spread', 'real_volume']
-    feature_cols = [c for c in features_df.columns if c not in exclude_cols]
+    # Only include numeric columns
+    numeric_cols = features_df.select_dtypes(include=[np.number]).columns.tolist()
+    feature_cols = [c for c in numeric_cols if c not in exclude_cols]
     
     # Limit to reasonable number of features
     if len(feature_cols) > 64:
@@ -164,8 +166,8 @@ def train_multihead_tcn(
         feature_cols = importances.nlargest(64).index.tolist()
         logger.info(f"Selected {len(feature_cols)} features")
     
-    # Prepare sequences and targets
-    logger.info("Preparing sequences...")
+    # Prepare features and labels
+    logger.info("Preparing features and labels...")
     X = features_df[feature_cols].values.astype(np.float32)
     prices = features_df[['open', 'high', 'low', 'close']].values
     
@@ -174,63 +176,70 @@ def train_multihead_tcn(
     scaler = RobustScaler()
     X = scaler.fit_transform(X)
     
-    # Create sequences
-    sequences = []
-    targets_direction = []
-    targets_volatility = []
-    targets_price_move = []
-    
+    # Create labels for each timestep (RiskDataset will handle sequencing)
     forward_bars = {'SCALP': 6, 'INTRADAY': 10, 'SWING': 20}[profile]
+    threshold = {'SCALP': 0.001, 'INTRADAY': 0.002, 'SWING': 0.005}[profile]
     
-    for i in range(seq_len, len(X) - forward_bars):
-        seq = X[i-seq_len:i]
-        sequences.append(seq)
-        
+    n_samples = len(X)
+    targets_direction = np.ones(n_samples, dtype=np.int64)  # Default to SIDEWAYS
+    targets_volatility = np.zeros(n_samples, dtype=np.float32)
+    targets_price_move = np.zeros(n_samples, dtype=np.float32)
+    
+    for i in range(n_samples - forward_bars):
         # Direction target (3-class)
         future_return = (prices[i + forward_bars, 3] - prices[i, 3]) / prices[i, 3]
-        threshold = {'SCALP': 0.001, 'INTRADAY': 0.002, 'SWING': 0.005}[profile]
         
         if future_return > threshold:
-            direction = 2  # BULL
+            targets_direction[i] = 2  # BULL
         elif future_return < -threshold:
-            direction = 0  # BEAR
+            targets_direction[i] = 0  # BEAR
         else:
-            direction = 1  # SIDEWAYS
-        targets_direction.append(direction)
+            targets_direction[i] = 1  # SIDEWAYS
         
         # Volatility target (realized volatility over forward period)
         future_prices = prices[i:i+forward_bars, 3]
-        volatility = np.std(np.diff(future_prices) / future_prices[:-1]) if len(future_prices) > 1 else 0.001
-        targets_volatility.append(volatility)
+        targets_volatility[i] = np.std(np.diff(future_prices) / future_prices[:-1]) if len(future_prices) > 1 else 0.001
         
         # Price move target (for quantile regression)
-        targets_price_move.append(future_return)
+        targets_price_move[i] = future_return
     
-    sequences = np.array(sequences, dtype=np.float32)
-    targets_direction = np.array(targets_direction, dtype=np.int64)
-    targets_volatility = np.array(targets_volatility, dtype=np.float32)
-    targets_price_move = np.array(targets_price_move, dtype=np.float32)
+    # Trim to valid range (exclude last forward_bars samples)
+    valid_end = n_samples - forward_bars
+    X = X[:valid_end]
+    targets_direction = targets_direction[:valid_end]
+    targets_volatility = targets_volatility[:valid_end]
+    targets_price_move = targets_price_move[:valid_end]
     
-    logger.info(f"Created {len(sequences):,} sequences")
+    logger.info(f"Prepared {len(X):,} samples")
     logger.info(f"Direction distribution: BEAR={np.sum(targets_direction==0)}, SIDE={np.sum(targets_direction==1)}, BULL={np.sum(targets_direction==2)}")
     
-    # Create dataset
+    # Create dataset - RiskDataset creates sequences internally
     dataset = RiskDataset(
-        sequences=torch.from_numpy(sequences),
-        targets={
-            'direction': torch.from_numpy(targets_direction),
-            'volatility': torch.from_numpy(targets_volatility),
-            'price_move': torch.from_numpy(targets_price_move)
-        }
+        features=X,
+        direction_labels=targets_direction,
+        volatility_labels=targets_volatility,
+        price_move_labels=targets_price_move,
+        sequence_length=seq_len
     )
+    
+    # Custom collate function to handle None vision features
+    def collate_fn(batch):
+        seqs = torch.stack([item[0] for item in batch])
+        targets = {
+            'direction': torch.stack([item[1]['direction'] for item in batch]),
+            'volatility': torch.stack([item[1]['volatility'] for item in batch]),
+            'price_move': torch.stack([item[1]['price_move'] for item in batch])
+        }
+        # Vision is None for all items, return None
+        return seqs, targets, None
     
     # Split train/val
     train_size = int(0.8 * len(dataset))
     val_size = len(dataset) - train_size
     train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
     
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=0)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0, collate_fn=collate_fn)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=0, collate_fn=collate_fn)
     
     logger.info(f"Train: {len(train_dataset):,}, Val: {len(val_dataset):,}")
     
@@ -546,7 +555,7 @@ def train_meta_labeling(
     logger.info(f"Data shape: {df.shape}")
     
     # Feature engineering
-    from features.feature_engineering import FeatureEngineer
+    from utils.features_engineering import FeatureEngineer
     engineer = FeatureEngineer()
     features_df = engineer.generate_features(df)
     features_df = features_df.dropna()
@@ -919,11 +928,11 @@ def main():
     for name, result in results.items():
         status = result.get('status', 'completed')
         if status == 'failed':
-            logger.info(f"  ❌ {name}: FAILED - {result.get('error', 'Unknown')}")
+            logger.info(f"  [FAILED] {name}: {result.get('error', 'Unknown')}")
         elif status == 'skipped':
-            logger.info(f"  ⏭️  {name}: SKIPPED - {result.get('reason', 'Unknown')}")
+            logger.info(f"  [SKIPPED] {name}: {result.get('reason', 'Unknown')}")
         else:
-            logger.info(f"  ✅ {name}: SUCCESS")
+            logger.info(f"  [SUCCESS] {name}")
     
     # Save results
     results_path = PROJECT_ROOT / "training_results.json"
