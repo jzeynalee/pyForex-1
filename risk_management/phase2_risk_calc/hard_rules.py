@@ -101,6 +101,8 @@ class HardRulesConfig:
     
     # Weekend closing
     friday_close_hour: int = 21      # Close positions by 21:00 UTC Friday
+    skip_weekend_check: bool = False  # Set True for backtesting with historical data
+    skip_session_check: bool = False  # Set True for backtesting to allow all sessions
     
     # News blackout (minutes before/after high-impact news)
     news_blackout_before: int = 30
@@ -233,6 +235,10 @@ class HardRulesEngine:
         """Check if current session is allowed for trading."""
         violations = []
         
+        # Skip session check for backtesting
+        if self.config.skip_session_check:
+            return violations
+        
         current_session = self._get_current_session(current_time)
         
         if current_session not in self.config.allowed_sessions:
@@ -269,6 +275,10 @@ class HardRulesEngine:
     def _check_weekend_rule(self, current_time: datetime) -> List[RuleViolation]:
         """Check if market is closed for weekend."""
         violations = []
+        
+        # Skip weekend check for backtesting with historical data
+        if self.config.skip_weekend_check:
+            return violations
         
         weekday = current_time.weekday()
         hour = current_time.hour

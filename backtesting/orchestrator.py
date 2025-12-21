@@ -68,6 +68,7 @@ class BacktestConfig:
     
     # Strategy
     profile: str = "INTRADAY"
+    min_direction_confidence: float = 0.55  # Confidence threshold for signals
     
     # Risk
     max_positions: int = 1
@@ -305,6 +306,7 @@ class BacktestOrchestrator:
                 sequence_length=60,
                 use_vision=False,  # Disable vision for backtest speed
                 use_yolo=False,
+                min_direction_confidence=self.config.min_direction_confidence,
             )
             
             # Create strategy with connector as data provider and executor
@@ -634,6 +636,7 @@ if __name__ == "__main__":
     parser.add_argument('--profile', type=str, default='INTRADAY', choices=['SCALP', 'INTRADAY', 'SWING'])
     parser.add_argument('--balance', type=float, default=10000.0, help='Initial balance')
     parser.add_argument('--no-validate', action='store_true', help='Skip weight validation')
+    parser.add_argument('--min-confidence', type=float, default=0.55, help='Min direction confidence threshold')
     
     args = parser.parse_args()
     
@@ -642,7 +645,8 @@ if __name__ == "__main__":
         symbol=args.symbol,
         profile=args.profile,
         initial_balance=args.balance,
-        validate_weights=not args.no_validate
+        validate_weights=not args.no_validate,
+        min_direction_confidence=args.min_confidence
     )
     
     orchestrator = BacktestOrchestrator(config)

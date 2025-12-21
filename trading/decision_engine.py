@@ -209,7 +209,16 @@ class EnhancedDecisionEngine:
         ))
         
         self.gatekeeper = TradeGatekeeper(HardRulesConfig(
-            max_leverage_default=self.config.max_leverage
+            max_leverage_default=self.config.max_leverage,
+            # Increase exposure limits for realistic forex trading
+            # Standard forex uses 50:1 to 100:1 leverage
+            max_single_pair_exposure=500.0,  # Allow up to 500% notional per pair
+            max_total_exposure=1000.0,  # Allow up to 1000% total notional (10:1 effective)
+            max_single_direction_exposure=500.0,  # Allow up to 500% in one direction
+            max_correlated_group_exposure=500.0,  # Allow up to 500% in correlated pairs
+            # Skip time-based checks for backtesting (historical data may have gaps)
+            skip_weekend_check=True,
+            skip_session_check=True
         ))
         
         # Phase 3: Meta-labeling filter

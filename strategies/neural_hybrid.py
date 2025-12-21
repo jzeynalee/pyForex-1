@@ -671,24 +671,45 @@ class NeuralHybridStrategy:
             fe = FeatureEngineerOptimized()
             data_with_features = fe.generate_features(data.copy(), batch_processing=False)
             
-            # Select numeric columns only, excluding time/date columns
-            numeric_cols = data_with_features.select_dtypes(include=[np.number]).columns.tolist()
-            exclude_cols = ['time', 'timestamp', 'date', 'tick_volume']
-            feature_cols = [c for c in numeric_cols if c not in exclude_cols]
+            # Get feature columns from predictor if available (from checkpoint)
+            feature_cols = None
+            if hasattr(self.predictor, '_feature_names') and self.predictor._feature_names:
+                feature_cols = self.predictor._feature_names
+                # Check if all required features are available
+                missing = [c for c in feature_cols if c not in data_with_features.columns]
+                if missing:
+                    logger.warning(f"Missing features from checkpoint: {missing}")
+                    feature_cols = None
             
-            # Limit to expected input size if needed (model expects 64 features)
-            if len(feature_cols) > 64:
-                # Use first 64 features or select most important ones
-                feature_cols = feature_cols[:64]
+            if feature_cols is None:
+                # Fallback to generic feature selection
+                numeric_cols = data_with_features.select_dtypes(include=[np.number]).columns.tolist()
+                exclude_cols = ['time', 'timestamp', 'date', 'tick_volume']
+                feature_cols = [c for c in numeric_cols if c not in exclude_cols]
+                
+                # Get expected input size from predictor
+                expected_features = 18
+                if hasattr(self.predictor, 'model') and hasattr(self.predictor.model, 'tcn'):
+                    try:
+                        first_block = self.predictor.model.tcn.network[0]
+                        expected_features = first_block.conv1.conv.in_channels
+                    except:
+                        pass
+                
+                if len(feature_cols) > expected_features:
+                    feature_cols = feature_cols[:expected_features]
             
-            features = data_with_features[feature_cols].values[-self.config.sequence_length:]
+            # Extract features
+            available_cols = [c for c in feature_cols if c in data_with_features.columns]
+            features = data_with_features[available_cols].values[-self.config.sequence_length:]
             
-            # Handle NaNs - forward fill then backward fill, then zero
+            # Handle NaNs
             features = np.nan_to_num(features, nan=0.0, posinf=0.0, neginf=0.0)
             
-            # Pad if we have fewer than 64 features
-            if features.shape[1] < 64:
-                padding = np.zeros((features.shape[0], 64 - features.shape[1]))
+            # Pad if needed
+            expected_features = len(feature_cols)
+            if features.shape[1] < expected_features:
+                padding = np.zeros((features.shape[0], expected_features - features.shape[1]))
                 features = np.hstack([features, padding])
             
             return features

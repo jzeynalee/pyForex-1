@@ -153,25 +153,48 @@ class RiskAwareTCNPredictor:
             state_dict = checkpoint['model_state']
         elif isinstance(checkpoint, dict) and not any(k.startswith('backbone') or k.startswith('direction') for k in checkpoint.keys()):
             # Checkpoint is a wrapper dict, not direct state_dict
-            # Try to find the actual model state
             for key in ['model', 'net', 'network']:
                 if key in checkpoint:
                     state_dict = checkpoint[key]
                     break
             if state_dict is None:
                 logger.warning(f"Could not find model state in checkpoint. Keys: {list(checkpoint.keys())[:10]}")
-                # Skip loading if we can't find the state dict
                 logger.warning("Skipping weight loading - model will use random initialization")
                 self.model.eval()
                 return
         else:
             state_dict = checkpoint
         
+        # Detect checkpoint format and switch model if needed
+        state_keys = list(state_dict.keys())
+        is_simple_tcn = any(k.startswith('tcn.') for k in state_keys)
+        is_multihead_tcn = any(k.startswith('backbone.') for k in state_keys)
+        
+        if is_simple_tcn and self._use_risk_heads:
+            # Checkpoint is from simple TCN but we loaded MultiHeadTCN - switch models
+            logger.info("Checkpoint is from simple TCN - switching model architecture")
+            try:
+                from models.tcn import TCNModel
+                # Get input_dim from checkpoint config if available
+                input_dim = 64
+                if 'config' in checkpoint and isinstance(checkpoint['config'], dict):
+                    input_dim = checkpoint['config'].get('model', {}).get('input_dim', 64)
+                self.model = TCNModel(
+                    input_dim=input_dim,
+                    hidden_dim=64,
+                    num_layers=5,
+                    num_classes=3
+                ).to(self.device)
+                self._use_risk_heads = False
+                logger.info(f"Switched to simple TCNModel (input_dim={input_dim})")
+            except ImportError:
+                logger.error("Could not import TCNModel for fallback")
+        
         try:
             self.model.load_state_dict(state_dict)
+            logger.info(f"Successfully loaded weights from {path}")
         except RuntimeError as e:
             logger.warning(f"Strict loading failed: {e}")
-            # Try non-strict loading
             try:
                 self.model.load_state_dict(state_dict, strict=False)
                 logger.warning("Loaded weights with strict=False (some keys may be missing)")
@@ -229,7 +252,21 @@ class RiskAwareTCNPredictor:
             else:
                 # Standard TCN (direction only)
                 logits = self.model(x)
+                # Handle different output shapes
+                if logits.dim() == 3:
+                    # Shape: (batch, seq_len, num_classes) - take last timestep
+                    logits = logits[:, -1, :]
+                elif logits.dim() == 1:
+                    # Shape: (num_classes,) - add batch dim
+                    logits = logits.unsqueeze(0)
                 direction_probs = F.softmax(logits, dim=-1).cpu().numpy()[0]
+                # Ensure we have exactly 3 classes
+                if len(direction_probs) != 3:
+                    # Pad or truncate to 3 classes
+                    if len(direction_probs) < 3:
+                        direction_probs = np.pad(direction_probs, (0, 3 - len(direction_probs)))
+                    else:
+                        direction_probs = direction_probs[:3]
                 volatility = 0.0
                 quantiles = np.zeros(5)
                 hidden_features = None
