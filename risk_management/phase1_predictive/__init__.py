@@ -5,6 +5,7 @@ Multi-head TCN backbone for risk management predictions:
 - Direction probabilities
 - Volatility forecasts
 - Quantile predictions for price distribution
+ - Trade outcome probabilities (TP hit before SL within horizon): p_long, p_short
 """
 
 from .tcn_backbone import (

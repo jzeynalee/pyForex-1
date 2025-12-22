@@ -248,11 +248,15 @@ class BacktestBot:
         data: "pd.DataFrame",
         strategy_class: Type[Strategy],
         initial_balance: float = 10000.0,
+        profile: str = 'INTRADAY',
+        base_timeframe: str = 'H1',
     ):
         # FIX: Imported BacktestConfig here to fix the TypeError
         from trading.backtest import BacktestExecutor, BacktestConfig
         
         self.data = data
+        self.profile = str(profile or 'INTRADAY').upper()
+        self.base_timeframe = str(base_timeframe or 'H1').upper()
         
         # FIX: Create config object and pass it to executor
         config = BacktestConfig(initial_balance=initial_balance)
@@ -260,7 +264,7 @@ class BacktestBot:
         
         # Create risk manager config
         risk_config = RiskManagerConfig(
-            profile='INTRADAY',
+            profile=self.profile,
             input_features=64,
         )
         self.risk_manager = RiskManagerV2(config=risk_config)
@@ -272,6 +276,88 @@ class BacktestBot:
         
         self.current_idx = 0
         self.window_size = 100
+
+    def get_ohlcv(
+        self,
+        symbol: str,
+        timeframe: str = 'M5',
+        count: int = 200,
+    ) -> "pd.DataFrame":
+        """Return an OHLCV window for a given timeframe (backtest).
+
+        In backtests, we only have a single base timeframe CSV. Higher
+        timeframes are derived by resampling the base bars.
+        """
+        import pandas as pd
+        import numpy as np
+
+        tf = str(timeframe or self.base_timeframe).upper()
+        base_tf = self.base_timeframe
+
+        tf_minutes = {
+            'M1': 1,
+            'M5': 5,
+            'M15': 15,
+            'M30': 30,
+            'H1': 60,
+            'H4': 240,
+            'D1': 1440,
+        }
+
+        base_minutes = tf_minutes.get(str(base_tf).upper())
+        target_minutes = tf_minutes.get(str(tf).upper())
+
+        base_needed = int(count)
+        if base_minutes and target_minutes and target_minutes >= base_minutes:
+            factor = int(max(1, round(target_minutes / base_minutes)))
+            base_needed = int(count) * factor
+
+        df = self.get_data(max(int(base_needed), self.window_size))
+        if df is None or df.empty:
+            return df
+
+        if 'time' in df.columns:
+            df = df.copy()
+            df['time'] = pd.to_datetime(df['time'])
+            df = df.sort_values('time')
+            df = df.set_index('time')
+
+        if tf == base_tf:
+            out = df.tail(int(count)).copy()
+            if isinstance(out.index, pd.DatetimeIndex):
+                out = out.reset_index().rename(columns={'index': 'time'})
+            return out
+
+        minutes = tf_minutes.get(tf)
+        if minutes is None:
+            return pd.DataFrame()
+
+        rule = f"{int(minutes)}min"
+
+        agg = {
+            'open': 'first',
+            'high': 'max',
+            'low': 'min',
+            'close': 'last',
+        }
+
+        vol_col = None
+        for c in ('volume', 'tick_volume', 'real_volume'):
+            if c in df.columns:
+                vol_col = c
+                break
+        if vol_col is not None:
+            agg[vol_col] = 'sum'
+
+        resampled = df.resample(rule, label='right', closed='right').agg(agg)
+        resampled = resampled.dropna(subset=['open', 'high', 'low', 'close'])
+
+        if vol_col is not None and vol_col in resampled.columns:
+            resampled[vol_col] = resampled[vol_col].fillna(0.0)
+
+        out = resampled.tail(int(count)).reset_index().rename(columns={'time': 'time'})
+        out.columns = [str(c).lower() for c in out.columns]
+        return out
     
     def get_data(self, n: int = 100) -> "pd.DataFrame":
         """Provide data window for strategy."""
@@ -287,6 +373,16 @@ class BacktestBot:
         for i in range(self.window_size, len(self.data)):
             self.current_idx = i
             df = self.get_data(self.window_size)
+
+            # Update executor with the latest closed-bar price before strategy evaluation.
+            # This ensures new entries use the correct current price (avoid default 0.0).
+            try:
+                ts = None
+                if 'time' in df.columns:
+                    ts = df['time'].iloc[-1]
+                self.executor.update_price(df['close'].iloc[-1], time=ts)
+            except Exception:
+                self.executor.update_price(df['close'].iloc[-1])
             
             signal = self.strategy.on_bar(df)
             
@@ -295,9 +391,6 @@ class BacktestBot:
                 'close': df['close'].iloc[-1],
                 'signal': signal,
             })
-            
-            # Update executor with current price for P&L
-            self.executor.update_price(df['close'].iloc[-1])
         
         return {
             'trades': self.executor.get_trade_history(),

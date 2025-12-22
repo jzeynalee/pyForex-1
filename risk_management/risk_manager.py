@@ -6,6 +6,7 @@ all three phases of the risk management pipeline:
 
 Phase 1: Predictive Foundation (Multi-Head TCN)
     → Direction, Volatility, Quantile predictions
+    → Trade outcome probabilities (p_long/p_short): TP-before-SL likelihood
 
 Phase 2: Risk Calculations
     → SL/TP levels, Position sizing, Hard rules enforcement
@@ -282,8 +283,15 @@ class RiskManager:
         validation_split: float = 0.2,
         training_config: Optional[TrainingConfig] = None
     ) -> Dict[str, List[float]]:
-        """
-        Train the Phase 1 multi-head TCN model.
+        """Train the Phase 1 multi-head TCN model.
+
+        In addition to direction/volatility/quantiles, this training step can also
+        supervise the trade-objective probability heads:
+        - p_long  ≈ P(TP hits before SL | enter long now)
+        - p_short ≈ P(TP hits before SL | enter short now)
+
+        Outcome targets are generated via leakage-safe ATR-based triple-barrier
+        labeling (no model-derived SL/TP).
         
         Args:
             features: (n_samples, n_features) feature matrix
@@ -308,6 +316,19 @@ class RiskManager:
         price_move_labels = create_price_move_labels(
             prices['close'].values, horizon=horizon
         )
+
+        # Leakage-safe dense outcome labels for p_long/p_short training
+        atr = calculate_atr(
+            prices['high'].values,
+            prices['low'].values,
+            prices['close'].values,
+            period=14
+        )
+        outcome_labels = self.barrier_labeler.generate_outcome_labels(
+            prices=prices,
+            atr=atr,
+            profile=self.config.profile
+        )
         
         # Normalize features
         features_norm, self._norm_params = normalize_features(features)
@@ -318,7 +339,8 @@ class RiskManager:
             direction_labels=direction_labels,
             volatility_labels=volatility_labels,
             price_move_labels=price_move_labels,
-            sequence_length=self.config.sequence_length
+            sequence_length=self.config.sequence_length,
+            outcome_labels=outcome_labels
         )
         
         # Split
@@ -424,7 +446,11 @@ class RiskManager:
         features: np.ndarray,
         batch_size: int = 64
     ) -> Dict[str, np.ndarray]:
-        """Generate predictions for entire feature matrix."""
+        """Generate predictions for entire feature matrix.
+
+        Returns a dict compatible with Phase 3 feature extraction and labeling.
+        Includes p_long/p_short outputs if the underlying model provides them.
+        """
         self.tcn_model.eval()
         
         # Normalize
@@ -434,7 +460,9 @@ class RiskManager:
         all_preds = {
             'direction_probs': [],
             'volatility': [],
-            'quantiles': []
+            'quantiles': [],
+            'p_long': [],
+            'p_short': []
         }
         
         with torch.no_grad():
@@ -458,6 +486,11 @@ class RiskManager:
                 all_preds['direction_probs'].append(output['direction'].cpu().numpy())
                 all_preds['volatility'].append(output['volatility'].cpu().numpy())
                 all_preds['quantiles'].append(output['quantiles'].cpu().numpy())
+
+                if 'p_long' in output:
+                    all_preds['p_long'].append(output['p_long'].cpu().numpy())
+                if 'p_short' in output:
+                    all_preds['p_short'].append(output['p_short'].cpu().numpy())
         
         # Concatenate and pad
         for key in all_preds:
@@ -469,7 +502,12 @@ class RiskManager:
                     np.zeros(pad_shape), arr
                 ], axis=0)[:n_samples]
             else:
-                all_preds[key] = np.zeros((n_samples, 3 if key == 'direction_probs' else 5))
+                if key == 'direction_probs':
+                    all_preds[key] = np.zeros((n_samples, 3))
+                elif key == 'quantiles':
+                    all_preds[key] = np.zeros((n_samples, 5))
+                else:
+                    all_preds[key] = np.zeros((n_samples,))
         
         return all_preds
     
@@ -661,7 +699,12 @@ class RiskManager:
         features: np.ndarray,
         vision_features: Optional[np.ndarray] = None
     ) -> Dict[str, np.ndarray]:
-        """Get predictions from the TCN model."""
+        """Get predictions from the TCN model.
+
+        Returns:
+            Dict with direction/volatility/quantiles/features and optionally
+            p_long/p_short if the model provides them.
+        """
         self.tcn_model.eval()
         
         # Ensure correct shape
@@ -688,13 +731,20 @@ class RiskManager:
         
         with torch.no_grad():
             output = self.tcn_model(x, vision_tensor, mode='all')
-        
-        return {
+
+        result = {
             'direction_probs': output['direction'].cpu().numpy()[0],
             'volatility': output['volatility'].cpu().numpy().item(),
             'quantiles': output['quantiles'].cpu().numpy()[0],
             'features': output['features'].cpu().numpy()[0]
         }
+
+        if 'p_long' in output:
+            result['p_long'] = output['p_long'].cpu().numpy().item()
+        if 'p_short' in output:
+            result['p_short'] = output['p_short'].cpu().numpy().item()
+
+        return result
     
     # =========================================================================
     # Persistence

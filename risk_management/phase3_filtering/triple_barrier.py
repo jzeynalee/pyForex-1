@@ -14,6 +14,13 @@ This creates supervised learning targets that incorporate:
 - Time decay
 
 Key advantage: Labels represent actual tradeable outcomes, not just price direction.
+
+In addition to sparse entry-point labeling, this module also supports
+generating dense, side-specific outcome labels for supervised learning:
+- y_long[t]  = 1 if TP is hit before SL within the time barrier when entering long at t
+- y_short[t] = 1 if TP is hit before SL within the time barrier when entering short at t
+
+These labels align with training probability heads (p_long/p_short).
 """
 
 import numpy as np
@@ -169,6 +176,77 @@ class TripleBarrierLabeler:
             detailed_labels.append(label_result)
         
         return labels, detailed_labels
+
+    def generate_outcome_labels(
+        self,
+        prices: pd.DataFrame,
+        atr: np.ndarray,
+        profile: str = 'INTRADAY'
+    ) -> np.ndarray:
+        """Generate dense binary outcome labels for long/short entries.
+
+        This is intended for training probability heads:
+        - p_long  ≈ P(TP hits before SL | enter long now)
+        - p_short ≈ P(TP hits before SL | enter short now)
+
+        Barrier construction is ATR-based (no model-derived SL/TP) to avoid
+        label leakage.
+
+        Args:
+            prices: DataFrame with 'high', 'low', 'close' columns
+            atr: ATR values aligned to prices (same length)
+            profile: Trading profile for time barrier
+
+        Returns:
+            Array of shape (n_samples, 2) with columns [y_long, y_short]
+            where each label is 1 for TP-first, 0 otherwise.
+        """
+        n_samples = len(prices)
+        labels = np.zeros((n_samples, 2), dtype=np.float32)
+
+        max_periods = self.config.max_holding_periods.get(
+            profile.upper(),
+            self.config.vertical_barrier_periods
+        )
+
+        for idx in range(n_samples):
+            if idx >= n_samples - 1:
+                continue
+
+            entry_price = prices['close'].iloc[idx]
+            atr_val = atr[idx] if atr is not None else None
+            if atr_val is None or atr_val <= 0:
+                continue
+
+            # Long barriers
+            sl_long = entry_price - (atr_val * self.config.sl_atr_multiplier)
+            tp_long = entry_price + (atr_val * self.config.tp_atr_multiplier)
+            res_long = self._find_barrier_hit(
+                prices=prices,
+                entry_idx=idx,
+                entry_price=entry_price,
+                direction=1,
+                sl=sl_long,
+                tp=tp_long,
+                max_periods=max_periods
+            )
+            labels[idx, 0] = 1.0 if res_long.outcome == BarrierOutcome.WIN else 0.0
+
+            # Short barriers
+            sl_short = entry_price + (atr_val * self.config.sl_atr_multiplier)
+            tp_short = entry_price - (atr_val * self.config.tp_atr_multiplier)
+            res_short = self._find_barrier_hit(
+                prices=prices,
+                entry_idx=idx,
+                entry_price=entry_price,
+                direction=-1,
+                sl=sl_short,
+                tp=tp_short,
+                max_periods=max_periods
+            )
+            labels[idx, 1] = 1.0 if res_short.outcome == BarrierOutcome.WIN else 0.0
+
+        return labels
     
     def _find_barrier_hit(
         self,
@@ -281,7 +359,11 @@ class TripleBarrierLabeler:
         profile: str = 'INTRADAY'
     ) -> Tuple[np.ndarray, List[BarrierLabel]]:
         """
-        Generate labels using model predictions for barriers.
+        Generate sparse entry-point labels using model-predicted barriers.
+
+        This method is useful for strategy simulation where SL/TP are derived
+        from a model. For training probability heads, prefer
+        `generate_outcome_labels()` to avoid label leakage.
         
         Args:
             prices: OHLC price data

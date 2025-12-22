@@ -446,7 +446,19 @@ def cmd_live(args, logger: logging.Logger):
 
 
 def cmd_backtest(args, logger: logging.Logger):
-    """Handle backtest command."""
+    """Handle backtest command.
+
+    Supports an optional bar cap (``--max-bars``) to run a quicker backtest over
+    the most recent candles.
+
+    For faster, pure time-series backtests, you can disable non-TCN modalities
+    with ``--no-vision`` and/or ``--no-yolo``.
+
+    Note:
+        If your model produces low-confidence direction probabilities (common
+        with older/legacy checkpoints), you may need to lower the confidence
+        gate via ``--min-confidence`` to generate any trades.
+    """
     logger.info("📊 Starting Backtest Mode")
     
     checker = SystemChecker(logger)
@@ -463,7 +475,11 @@ def cmd_backtest(args, logger: logging.Logger):
     try:
         import pandas as pd
         from trading.bot import BacktestBot
-        from strategies.neural_hybrid import NeuralHybridStrategy
+        from strategies.neural_hybrid import NeuralHybridStrategy, StrategyConfig
+
+        # Reduce per-bar inference logging noise during backtest.
+        logging.getLogger("inference.predictor").setLevel(logging.WARNING)
+        logging.getLogger("strategies.neural_hybrid").setLevel(logging.INFO)
 
         # Load data
         logger.info(f"Loading data from {args.data}")
@@ -473,20 +489,39 @@ def cmd_backtest(args, logger: logging.Logger):
         if 'time' in df.columns:
             df['time'] = pd.to_datetime(df['time'])
 
+        if getattr(args, 'max_bars', None):
+            df = df.tail(int(args.max_bars)).reset_index(drop=True)
+
         logger.info(f"Loaded {len(df)} candles")
 
         # Select strategy (TCN-based neural hybrid)
+        class BacktestNeuralStrategy(NeuralHybridStrategy):
+            def __init__(self, data_provider=None, executor=None, **kwargs):
+                cfg = StrategyConfig(
+                    profile=str(getattr(args, 'profile', 'INTRADAY') or 'INTRADAY').upper(),
+                    use_vision=not bool(getattr(args, 'no_vision', False)),
+                    use_yolo=not bool(getattr(args, 'no_yolo', False)),
+                    min_direction_confidence=float(getattr(args, 'min_confidence', 0.55)),
+                )
+                super().__init__(config=cfg, data_provider=data_provider, executor=executor, **kwargs)
+
         strategy_map = {
-            "neural": NeuralHybridStrategy,
-            "tcn": NeuralHybridStrategy,  # Alias for clarity
+            "neural": BacktestNeuralStrategy,
+            "tcn": BacktestNeuralStrategy,  # Alias for clarity
         }
         strategy_cls = strategy_map.get(args.strategy, NeuralHybridStrategy)
         
         # Run backtest
+        profile = str(getattr(args, 'profile', 'INTRADAY') or 'INTRADAY').upper()
+        base_tf = str(getattr(args, 'base_tf', '') or '').upper()
+        if not base_tf:
+            base_tf = 'M5' if profile == 'SCALP' else 'H1'
         bot = BacktestBot(
             data=df,
             strategy_class=strategy_cls,
             initial_balance=args.balance,
+            profile=profile,
+            base_timeframe=base_tf,
         )
         
         results = bot.run()
@@ -666,7 +701,12 @@ def cmd_train(args, logger: logging.Logger):
 
 
 def cmd_predict(args, logger: logging.Logger):
-    """Handle prediction command."""
+    """Handle prediction command.
+
+    In addition to classic direction outputs (BUY/SELL/HOLD), this command
+    also prints TP-before-SL probabilities (p_long/p_short) when available
+    from the Phase-1 multi-head model.
+    """
     logger.info("🔮 Running Prediction")
     
     checker = SystemChecker(logger)
@@ -732,6 +772,11 @@ def cmd_predict(args, logger: logging.Logger):
             modalities = ['TCN', 'ViT', 'YOLO']
             for i, name in enumerate(modalities):
                 print(f"    {name}: {result.gate_weights[i]:.2%}")
+
+        if getattr(result, 'p_long', None) is not None and getattr(result, 'p_short', None) is not None:
+            print(f"\n  TP-before-SL Probabilities:")
+            print(f"    p_long : {result.p_long:.2%}")
+            print(f"    p_short: {result.p_short:.2%}")
         
         print("\n" + "=" * 50 + "\n")
         
@@ -911,6 +956,31 @@ Examples:
     bt_parser.add_argument("--data", required=True, help="Path to OHLCV CSV file")
     bt_parser.add_argument("--strategy", default="neural", help="Strategy (neural, tcn)")
     bt_parser.add_argument("--balance", type=float, default=10000.0, help="Initial balance")
+    bt_parser.add_argument(
+        "--profile",
+        type=str,
+        default="INTRADAY",
+        help="Trading profile (SCALP, INTRADAY, SWING) used for risk/MTF settings",
+    )
+    bt_parser.add_argument(
+        "--base-tf",
+        type=str,
+        default="",
+        help="Base timeframe of the input CSV (e.g. M5 for scalping); higher TFs are resampled",
+    )
+    bt_parser.add_argument(
+        "--max-bars",
+        type=int,
+        help="Optional cap on number of candles (use most recent N) for faster backtests",
+    )
+    bt_parser.add_argument("--no-vision", action="store_true", help="Disable ViT vision model for backtest")
+    bt_parser.add_argument("--no-yolo", action="store_true", help="Disable YOLO model for backtest")
+    bt_parser.add_argument(
+        "--min-confidence",
+        type=float,
+        default=0.55,
+        help="Decision confidence threshold (lower to allow more trades)",
+    )
     bt_parser.add_argument("--output", type=str, help="Save results to JSON file")
     
     # -------------------------------------------------------------------------

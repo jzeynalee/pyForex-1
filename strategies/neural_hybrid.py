@@ -140,6 +140,9 @@ class StrategyConfig:
     min_direction_confidence: float = 0.55
     min_meta_score: float = 0.5
     min_mtf_alignment: float = 0.6
+
+    # SCALP-only controls (TTF=M15)
+    cooldown_after_loss_m15: int = 0
     
     # Exit advisor settings (Phase 4)
     enable_exit_advisor: bool = True
@@ -155,6 +158,21 @@ class StrategyConfig:
     max_daily_trades: int = 10
     max_daily_loss: float = 500.0
 
+    def __post_init__(self):
+        self.profile = str(self.profile or 'INTRADAY').upper()
+
+        # SCALP profile tightening defaults
+        if self.profile == 'SCALP':
+            # Stronger MTF requirement
+            self.min_mtf_alignment = max(float(self.min_mtf_alignment), 0.75)
+
+            # Reduce trade frequency and exposure
+            self.max_open_trades = min(int(self.max_open_trades), 1)
+            self.max_daily_trades = min(int(self.max_daily_trades), 6)
+
+            # Cooldown after a losing trade (in M15 candles)
+            self.cooldown_after_loss_m15 = max(int(self.cooldown_after_loss_m15), 2)
+
 
 class NeuralHybridStrategy:
     """
@@ -169,6 +187,7 @@ class NeuralHybridStrategy:
         2. Generate features
         3. Get predictions (TCN + Vision)
         4. Evaluate with decision engine (Phases 1-3)
+           - If available, include TP-before-SL probabilities (p_long/p_short)
         5. Apply capital protection (Phase 5)
         6. Create and execute order
         7. Monitor positions with exit advisor (Phase 4)
@@ -215,8 +234,141 @@ class NeuralHybridStrategy:
         
         # Trade history
         self._trade_history: List[Dict] = []
+
+        # Backtest adapter state
+        self._last_processed_trade_count = 0
+
+        # SCALP entry gating (TTF=M15)
+        self._last_ttf_close_time: Optional[datetime] = None
+        self._cooldown_until: Optional[datetime] = None
         
         logger.info(f"NeuralHybridStrategy v2 created for {self.config.symbol}")
+
+    def on_bar(self, df: pd.DataFrame) -> Optional[str]:
+        """
+        Process a closed bar in an event-driven runner.
+
+        This is a thin adapter around :meth:`evaluate` for compatibility with
+        the project-wide :class:`~strategies.base.Strategy` interface used by
+        :class:`~trading.bot.BacktestBot`.
+
+        Args:
+            df: Recent OHLCV window ending at the latest closed bar.
+
+        Returns:
+            Signal string ('BUY' or 'SELL') if a trade is executed, otherwise None.
+        """
+        if df is None or df.empty:
+            return None
+
+        if not self._initialized:
+            starting_balance = 10000.0
+            if self.executor is not None:
+                starting_balance = float(getattr(self.executor, 'balance', starting_balance))
+            if not self.initialize(starting_balance=starting_balance):
+                return None
+
+        self._process_new_closed_trades()
+        self._sync_open_positions_from_executor()
+
+        try:
+            current_time = None
+            if 'time' in df.columns:
+                try:
+                    current_time = pd.to_datetime(df['time'].iloc[-1]).to_pydatetime()
+                except Exception:
+                    current_time = None
+
+            # SCALP plan: M5=LTF features, but only open new trades on M15 candle closes (TTF).
+            if self.config.profile == 'SCALP' and current_time is not None:
+                if self._cooldown_until is not None and current_time < self._cooldown_until:
+                    return None
+                if int(current_time.minute) % 15 != 0:
+                    return None
+                if self._last_ttf_close_time is not None and current_time <= self._last_ttf_close_time:
+                    return None
+                self._last_ttf_close_time = current_time
+
+            # Enforce daily/open-position limits in the backtest on_bar path.
+            if not self._check_daily_limits():
+                return None
+            if len(self._open_positions) >= self.config.max_open_trades:
+                return None
+
+            # LTF features always come from the incoming window (typically M5 in backtests)
+            ltf_data = df
+            if len(ltf_data) < self.config.sequence_length:
+                return None
+
+            # Trading timeframe context (TTF) drives decision engine metrics (ATR/vol/SLTP etc.)
+            market_data = ltf_data
+            if self.config.profile == 'SCALP' and self.data_provider is not None:
+                try:
+                    market_data = self.data_provider.get_ohlcv(
+                        self.config.symbol,
+                        timeframe='M15',
+                        count=self.config.sequence_length + 50,
+                    )
+                except Exception:
+                    market_data = ltf_data
+
+            if market_data is None or len(market_data) < self.config.sequence_length:
+                return None
+
+            entry_price = float(market_data['close'].iloc[-1])
+
+            features = self._prepare_features(ltf_data)
+            if features is None or np.isnan(features).any():
+                return None
+
+            chart_image = None
+            if self.config.use_vision:
+                chart_image = self._generate_chart_image(market_data)
+
+            if isinstance(self.predictor, HybridPredictor):
+                prediction = self.predictor.predict(features, chart_image)
+            else:
+                prediction = self.predictor.predict(features)
+
+            predictions = {
+                'direction_probs': prediction.probabilities,
+                'volatility': prediction.volatility,
+                'quantiles': prediction.quantiles,
+                'features': prediction.features
+            }
+
+            if getattr(prediction, 'p_long', None) is not None:
+                predictions['p_long'] = prediction.p_long
+            if getattr(prediction, 'p_short', None) is not None:
+                predictions['p_short'] = prediction.p_short
+
+            mtf_data = None
+            if self.mtf_detector:
+                mtf_data = self._fetch_mtf_data()
+
+            decision = self.decision_engine.evaluate(
+                predictions=predictions,
+                entry_price=entry_price,
+                pair=self.config.symbol,
+                account_balance=self._get_account_balance(),
+                market_data=market_data,
+                current_spread=None,
+                current_time=current_time,
+                mtf_data=mtf_data,
+            )
+
+            order = self.create_order(decision)
+            if order is None:
+                return None
+
+            if self.execute(order):
+                return order.direction
+
+            return None
+
+        except Exception as e:
+            logger.error(f"on_bar error: {e}", exc_info=True)
+            return None
     
     def initialize(self, starting_balance: Optional[float] = None) -> bool:
         """Initialize strategy components."""
@@ -285,7 +437,7 @@ class NeuralHybridStrategy:
             # Initialize MTF detector
             if HAS_MTF:
                 try:
-                    self.mtf_detector = MTFTrendDetector(profile=self.config.profile)
+                    self.mtf_detector = MTFTrendDetector(profile=get_profile(self.config.profile))
                     logger.info("MTF detector initialized")
                 except Exception as e:
                     logger.warning(f"Could not initialize MTF detector: {e}")
@@ -362,6 +514,11 @@ class NeuralHybridStrategy:
                 'quantiles': prediction.quantiles,
                 'features': prediction.features
             }
+
+            if getattr(prediction, 'p_long', None) is not None:
+                predictions['p_long'] = prediction.p_long
+            if getattr(prediction, 'p_short', None) is not None:
+                predictions['p_short'] = prediction.p_short
             
             # Fetch MTF data if available
             mtf_data = None
@@ -497,22 +654,38 @@ class NeuralHybridStrategy:
         )
     
     def execute(self, order: Order) -> bool:
-        """Execute order through executor."""
+        """Execute order through executor.
+
+        Supports both live executors (MT5-style ``execute_order``) and the
+        backtesting executor (``entry``).
+        """
         if not self.executor:
             logger.warning("No executor configured")
             return False
         
         try:
-            result = self.executor.execute_order(
-                symbol=order.symbol,
-                order_type=order.order_type.value,
-                direction=order.direction,
-                volume=order.volume,
-                stop_loss=order.stop_loss,
-                take_profit=order.take_profit,
-                comment=order.comment,
-                magic_number=order.magic_number
-            )
+            if hasattr(self.executor, 'execute_order'):
+                result = self.executor.execute_order(
+                    symbol=order.symbol,
+                    order_type=order.order_type.value,
+                    direction=order.direction,
+                    volume=order.volume,
+                    price=order.price,
+                    stop_loss=order.stop_loss,
+                    take_profit=order.take_profit,
+                    comment=order.comment,
+                    magic_number=order.magic_number
+                )
+            elif hasattr(self.executor, 'entry'):
+                result = self.executor.entry(
+                    signal=order.direction,
+                    volume=order.volume,
+                    sl=order.stop_loss,
+                    tp=order.take_profit,
+                )
+            else:
+                logger.warning("Executor does not support execute_order or entry")
+                return False
             
             if result.get('success'):
                 ticket = result.get('ticket', str(datetime.utcnow().timestamp()))
@@ -545,7 +718,7 @@ class NeuralHybridStrategy:
             logger.error(f"Execution error: {e}")
             return False
     
-    def on_trade_closed(self, ticket: str, pnl: float):
+    def on_trade_closed(self, ticket: str, pnl: float, close_time: Optional[datetime] = None):
         """Handle trade close event."""
         # Remove from open positions
         pos = self._open_positions.pop(ticket, None)
@@ -557,6 +730,11 @@ class NeuralHybridStrategy:
             self._daily_wins += 1
         else:
             self._daily_losses += 1
+
+        # SCALP cooldown after losses (measured in M15 candles)
+        if pnl < 0 and self.config.profile == 'SCALP' and self.config.cooldown_after_loss_m15 > 0:
+            ct = close_time or datetime.utcnow()
+            self._cooldown_until = ct + timedelta(minutes=15 * int(self.config.cooldown_after_loss_m15))
         
         # Update decision engine's capital protection
         if self.decision_engine:
@@ -576,6 +754,68 @@ class NeuralHybridStrategy:
         })
         
         logger.info(f"Trade closed: {ticket} | PnL: {pnl:.2f} | Balance: {self._current_balance:.2f}")
+
+    def _process_new_closed_trades(self):
+        """Process newly closed trades from the configured executor (backtest mode)."""
+        if self.executor is None or not hasattr(self.executor, 'get_trade_history'):
+            return
+
+        try:
+            history = self.executor.get_trade_history() or []
+        except Exception:
+            return
+
+        new_trades = history[self._last_processed_trade_count:]
+        self._last_processed_trade_count = len(history)
+
+        for t in new_trades:
+            try:
+                ticket = str(t.get('ticket'))
+                pnl = t.get('pnl')
+                if pnl is None:
+                    continue
+                ct = None
+                for k in ('exit_time', 'close_time', 'time'):
+                    if k in t and t.get(k) is not None:
+                        try:
+                            ct = pd.to_datetime(t.get(k)).to_pydatetime()
+                            break
+                        except Exception:
+                            ct = None
+                self.on_trade_closed(ticket=ticket, pnl=float(pnl), close_time=ct)
+            except Exception:
+                continue
+
+    def _sync_open_positions_from_executor(self):
+        """Sync internal open-position tracking from executor state (backtest mode)."""
+        if self.executor is None or not hasattr(self.executor, 'get_open_positions'):
+            return
+
+        try:
+            open_positions = self.executor.get_open_positions() or []
+        except Exception:
+            return
+
+        next_positions: Dict[str, OpenPosition] = {}
+        for p in open_positions:
+            try:
+                ticket = str(p.get('ticket'))
+                direction_str = str(p.get('type', '')).upper()
+                direction = 1 if direction_str == 'BUY' else -1
+                next_positions[ticket] = OpenPosition(
+                    ticket=ticket,
+                    direction=direction,
+                    entry_price=float(p.get('price_open', 0.0) or 0.0),
+                    entry_time=datetime.utcnow(),
+                    volume=float(p.get('volume', 0.0) or 0.0),
+                    stop_loss=float(p.get('sl', 0.0) or 0.0),
+                    take_profit=float(p.get('tp', 0.0) or 0.0),
+                    unrealized_pnl=float(p.get('profit', 0.0) or 0.0),
+                )
+            except Exception:
+                continue
+
+        self._open_positions = next_positions
     
     def get_protection_status(self) -> Dict:
         """Get capital protection status."""
@@ -648,9 +888,20 @@ class NeuralHybridStrategy:
             return None
         
         try:
-            timeframes = ['M5', 'M15', 'H1', 'H4']
+            if HAS_MTF:
+                profile = get_profile(self.config.profile)
+                timeframes = list(profile.timeframe_strings)
+                candle_counts = dict(getattr(profile, 'candle_counts', {}) or {})
+            else:
+                timeframes = ['M5', 'M15', 'H1']
+                candle_counts = {}
+
             return {
-                tf: self.data_provider.get_ohlcv(self.config.symbol, timeframe=tf)
+                tf: self.data_provider.get_ohlcv(
+                    self.config.symbol,
+                    timeframe=tf,
+                    count=int(candle_counts.get(tf, 200))
+                )
                 for tf in timeframes
             }
         except Exception as e:
@@ -658,14 +909,53 @@ class NeuralHybridStrategy:
             return None
     
     def _prepare_features(self, data: pd.DataFrame) -> np.ndarray:
-        """Prepare features for prediction using FeatureEngineer."""
-        # Get expected feature columns and count from predictor
+        """Prepare features for prediction using FeatureEngineer.
+
+        If the loaded TCN expects a 5-feature input (legacy/simple checkpoints),
+        this function uses raw OHLCV as the feature tensor. If the input CSV does
+        not contain a 'volume' column, it will fall back to 'tick_volume' or
+        'real_volume' (or zeros if none are present).
+        """
+        # Get expected feature columns and count from predictor.
         expected_feature_cols = None
         expected_feature_count = 64  # Default
-        
-        if hasattr(self.predictor, '_feature_names') and self.predictor._feature_names:
+
+        if hasattr(self.predictor, '_feature_names') and getattr(self.predictor, '_feature_names', None):
             expected_feature_cols = self.predictor._feature_names
             expected_feature_count = len(expected_feature_cols)
+
+        # If feature names are not available, try to infer the expected input
+        # dimensionality from the loaded TCN model.
+        if expected_feature_cols is None:
+            try:
+                tcn_pred = self.predictor
+                if hasattr(self.predictor, 'tcn_predictor'):
+                    tcn_pred = self.predictor.tcn_predictor
+
+                if hasattr(tcn_pred, 'model'):
+                    model = tcn_pred.model
+                    if hasattr(model, 'config') and hasattr(model.config, 'input_channels'):
+                        expected_feature_count = int(model.config.input_channels)
+                    elif hasattr(model, 'tcn') and hasattr(model.tcn, 'input_dim'):
+                        expected_feature_count = int(model.tcn.input_dim)
+            except Exception:
+                pass
+
+        if expected_feature_count == 5:
+            vol_col = None
+            for c in ('volume', 'tick_volume', 'real_volume'):
+                if c in data.columns:
+                    vol_col = c
+                    break
+
+            if vol_col is None:
+                vol = np.zeros((len(data),), dtype=np.float32)
+            else:
+                vol = data[vol_col].to_numpy(dtype=np.float32, copy=False)
+
+            ohlc = data[['open', 'high', 'low', 'close']].to_numpy(dtype=np.float32, copy=False)
+            ohlcv = np.column_stack([ohlc, vol])[-self.config.sequence_length:]
+            return np.nan_to_num(ohlcv, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
         
         # Always use FeatureEngineer to generate features (same as training)
         try:
@@ -715,7 +1005,18 @@ class NeuralHybridStrategy:
             logger.warning(f"Feature engineering failed: {e}, using OHLCV fallback")
         
         # Fallback to OHLCV with padding to expected features
-        ohlcv = data[['open', 'high', 'low', 'close', 'volume']].values[-self.config.sequence_length:]
+        vol_col = None
+        for c in ('volume', 'tick_volume', 'real_volume'):
+            if c in data.columns:
+                vol_col = c
+                break
+        if vol_col is None:
+            vol = np.zeros((len(data),), dtype=np.float32)
+        else:
+            vol = data[vol_col].to_numpy(dtype=np.float32, copy=False)
+
+        ohlc = data[['open', 'high', 'low', 'close']].to_numpy(dtype=np.float32, copy=False)
+        ohlcv = np.column_stack([ohlc, vol])[-self.config.sequence_length:]
         padding = np.zeros((ohlcv.shape[0], expected_feature_count - 5))
         return np.hstack([ohlcv, padding]).astype(np.float32)
     
@@ -740,11 +1041,19 @@ class NeuralHybridStrategy:
         return spreads.get(self.config.symbol, 2.0)
     
     def _get_account_balance(self) -> float:
-        """Get current account balance."""
+        """Get current account balance.
+
+        In backtesting, some executors expose the balance as an attribute instead
+        of a method; this function supports both.
+        """
         if self.executor:
             try:
                 return self.executor.get_account_balance()
             except:
+                pass
+            try:
+                return float(getattr(self.executor, 'balance'))
+            except Exception:
                 pass
         return self._current_balance
 

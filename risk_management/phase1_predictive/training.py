@@ -6,6 +6,14 @@ This module provides:
 - Combined multi-task loss
 - Training loop utilities
 - Metrics calculation
+
+This training stack supports both classic prediction heads:
+- direction (3-class)
+- volatility (regression)
+- quantiles (pinball regression)
+
+and trade-objective probability heads:
+- outcomes: [p_long, p_short] where each is P(TP hit before SL) within a time barrier
 """
 
 import torch
@@ -136,6 +144,25 @@ class QuantileLoss(nn.Module):
         return losses.mean()
 
 
+class OutcomeLoss(nn.Module):
+    """Binary cross-entropy loss for trade outcome probabilities.
+
+    Targets are dense labels with shape (batch, 2):
+    - outcomes[:, 0] == 1 if a long entry would hit TP before SL within the horizon
+    - outcomes[:, 1] == 1 if a short entry would hit TP before SL within the horizon
+
+    Predictions are expected to be probabilities in [0, 1].
+    """
+
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, pred_outcomes: torch.Tensor, target_outcomes: torch.Tensor) -> torch.Tensor:
+        pred = torch.clamp(pred_outcomes, 1e-6, 1 - 1e-6)
+        target = target_outcomes.to(dtype=pred.dtype)
+        return F.binary_cross_entropy(pred, target)
+
+
 class MultiTaskLoss(nn.Module):
     """
     Combined loss for training all heads simultaneously.
@@ -149,6 +176,7 @@ class MultiTaskLoss(nn.Module):
         direction_weight: float = 1.0,
         volatility_weight: float = 1.0,
         quantile_weight: float = 1.0,
+        outcome_weight: float = 1.0,
         use_uncertainty_weighting: bool = True,
         class_weights: Optional[torch.Tensor] = None,
         quantiles: Tuple[float, ...] = (0.05, 0.25, 0.50, 0.75, 0.95)
@@ -158,6 +186,7 @@ class MultiTaskLoss(nn.Module):
         self.direction_loss = DirectionLoss(class_weights)
         self.volatility_loss = VolatilityLoss()
         self.quantile_loss = QuantileLoss(quantiles)
+        self.outcome_loss = OutcomeLoss()
         
         self.use_uncertainty_weighting = use_uncertainty_weighting
         
@@ -166,11 +195,13 @@ class MultiTaskLoss(nn.Module):
             self.log_var_direction = nn.Parameter(torch.tensor(0.0))
             self.log_var_volatility = nn.Parameter(torch.tensor(0.0))
             self.log_var_quantile = nn.Parameter(torch.tensor(0.0))
+            self.log_var_outcome = nn.Parameter(torch.tensor(0.0))
         else:
             # Fixed weights
             self.direction_weight = direction_weight
             self.volatility_weight = volatility_weight
             self.quantile_weight = quantile_weight
+            self.outcome_weight = outcome_weight
     
     def forward(
         self,
@@ -181,8 +212,8 @@ class MultiTaskLoss(nn.Module):
         Calculate combined loss.
         
         Args:
-            predictions: Dict with 'direction', 'volatility', 'quantiles'
-            targets: Dict with 'direction', 'volatility', 'price_move'
+            predictions: Dict with 'direction', 'volatility', 'quantiles' and optionally 'outcomes'
+            targets: Dict with 'direction', 'volatility', 'price_move' and optionally 'outcomes'
         
         Returns:
             (total_loss, loss_breakdown_dict)
@@ -191,6 +222,9 @@ class MultiTaskLoss(nn.Module):
         loss_dir = self.direction_loss(predictions['direction'], targets['direction'])
         loss_vol = self.volatility_loss(predictions['volatility'], targets['volatility'])
         loss_quant = self.quantile_loss(predictions['quantiles'], targets['price_move'])
+
+        has_outcomes = ('outcomes' in predictions) and ('outcomes' in targets)
+        loss_out = self.outcome_loss(predictions['outcomes'], targets['outcomes']) if has_outcomes else torch.tensor(0.0, device=loss_dir.device)
         
         if self.use_uncertainty_weighting:
             # Uncertainty weighting: L = L_i / (2 * σ_i^2) + log(σ_i)
@@ -199,27 +233,39 @@ class MultiTaskLoss(nn.Module):
                 loss_vol / (2 * torch.exp(self.log_var_volatility)) + self.log_var_volatility / 2 +
                 loss_quant / (2 * torch.exp(self.log_var_quantile)) + self.log_var_quantile / 2
             )
+
+            if has_outcomes:
+                total_loss = total_loss + (
+                    loss_out / (2 * torch.exp(self.log_var_outcome)) + self.log_var_outcome / 2
+                )
             
             # Effective weights for logging
             w_dir = 1 / (2 * torch.exp(self.log_var_direction)).item()
             w_vol = 1 / (2 * torch.exp(self.log_var_volatility)).item()
             w_quant = 1 / (2 * torch.exp(self.log_var_quantile)).item()
+            w_out = 1 / (2 * torch.exp(self.log_var_outcome)).item() if has_outcomes else 0.0
         else:
             total_loss = (
                 self.direction_weight * loss_dir +
                 self.volatility_weight * loss_vol +
                 self.quantile_weight * loss_quant
             )
-            w_dir, w_vol, w_quant = self.direction_weight, self.volatility_weight, self.quantile_weight
+
+            if has_outcomes:
+                total_loss = total_loss + (self.outcome_weight * loss_out)
+
+            w_dir, w_vol, w_quant, w_out = self.direction_weight, self.volatility_weight, self.quantile_weight, (self.outcome_weight if has_outcomes else 0.0)
         
         breakdown = {
             'loss_total': total_loss.item(),
             'loss_direction': loss_dir.item(),
             'loss_volatility': loss_vol.item(),
             'loss_quantile': loss_quant.item(),
+            'loss_outcome': loss_out.item() if has_outcomes else 0.0,
             'weight_direction': w_dir,
             'weight_volatility': w_vol,
-            'weight_quantile': w_quant
+            'weight_quantile': w_quant,
+            'weight_outcome': w_out
         }
         
         return total_loss, breakdown
@@ -241,6 +287,7 @@ class TrainingConfig:
     direction_weight: float = 1.0
     volatility_weight: float = 1.0
     quantile_weight: float = 1.0
+    outcome_weight: float = 1.0
     use_uncertainty_weighting: bool = True
 
 
@@ -253,6 +300,7 @@ class RiskDataset(Dataset):
     - direction_labels: 0 (Bear), 1 (Sideways), 2 (Bull)
     - volatility_labels: Realized volatility over horizon
     - price_move_labels: Actual price movement for quantile regression
+    - outcome_labels: Optional dense labels (n_samples, 2) for [y_long, y_short]
     """
     
     def __init__(
@@ -262,7 +310,8 @@ class RiskDataset(Dataset):
         volatility_labels: np.ndarray,
         price_move_labels: np.ndarray,
         sequence_length: int = 60,
-        vision_features: Optional[np.ndarray] = None
+        vision_features: Optional[np.ndarray] = None,
+        outcome_labels: Optional[np.ndarray] = None
     ):
         """
         Args:
@@ -272,6 +321,7 @@ class RiskDataset(Dataset):
             price_move_labels: (num_samples,) price movement
             sequence_length: Number of timesteps per sequence
             vision_features: Optional (num_samples, vision_dim) vision embeddings
+            outcome_labels: Optional (num_samples, 2) dense binary labels [y_long, y_short]
         """
         self.sequence_length = sequence_length
         self.vision_features = vision_features
@@ -291,6 +341,9 @@ class RiskDataset(Dataset):
                 'volatility': volatility_labels[target_idx],
                 'price_move': price_move_labels[target_idx]
             })
+
+            if outcome_labels is not None:
+                self.targets[-1]['outcomes'] = outcome_labels[target_idx]
             
             if vision_features is not None:
                 self.vision_seqs.append(vision_features[target_idx])
@@ -308,6 +361,9 @@ class RiskDataset(Dataset):
             'volatility': torch.tensor(self.targets[idx]['volatility'], dtype=torch.float32),
             'price_move': torch.tensor(self.targets[idx]['price_move'], dtype=torch.float32)
         }
+
+        if 'outcomes' in self.targets[idx]:
+            targets['outcomes'] = torch.tensor(self.targets[idx]['outcomes'], dtype=torch.float32)
         
         vision = None
         if self.vision_features is not None:
@@ -344,6 +400,9 @@ def compute_metrics(
 ) -> Dict[str, float]:
     """
     Compute evaluation metrics for all heads.
+
+    If outcome targets are present, includes outcome metrics for
+    p_long/p_short training.
     
     Returns:
         Dictionary of metric name -> value
@@ -381,6 +440,20 @@ def compute_metrics(
     
     # Interval width (Q95 - Q5)
     metrics['prediction_interval_width'] = (pred_quant[:, -1] - pred_quant[:, 0]).mean().item()
+
+    # Outcome metrics (optional)
+    if 'outcomes' in predictions and 'outcomes' in targets:
+        pred_out = predictions['outcomes']
+        true_out = targets['outcomes']
+        pred_out = torch.clamp(pred_out, 1e-6, 1 - 1e-6)
+
+        metrics['outcome_bce'] = F.binary_cross_entropy(pred_out, true_out).item()
+        pred_bin = (pred_out >= 0.5).to(dtype=true_out.dtype)
+        acc_long = (pred_bin[:, 0] == true_out[:, 0]).float().mean().item()
+        acc_short = (pred_bin[:, 1] == true_out[:, 1]).float().mean().item()
+        metrics['outcome_accuracy_long'] = acc_long
+        metrics['outcome_accuracy_short'] = acc_short
+        metrics['outcome_accuracy_mean'] = (acc_long + acc_short) / 2
     
     return metrics
 
@@ -412,6 +485,7 @@ class MultiHeadTCNTrainer:
             direction_weight=config.direction_weight,
             volatility_weight=config.volatility_weight,
             quantile_weight=config.quantile_weight,
+            outcome_weight=config.outcome_weight,
             use_uncertainty_weighting=config.use_uncertainty_weighting
         ).to(device)
         
@@ -468,6 +542,10 @@ class MultiHeadTCNTrainer:
             
             # Forward pass
             predictions = self.model(sequences, vision, mode='all')
+
+            if 'outcomes' in predictions and 'outcomes' in targets:
+                all_preds.setdefault('outcomes', [])
+                all_targets.setdefault('outcomes', [])
             
             # Compute loss
             loss, breakdown = self.criterion(predictions, targets)
@@ -516,6 +594,10 @@ class MultiHeadTCNTrainer:
                 vision = vision.to(self.device)
             
             predictions = self.model(sequences, vision, mode='all')
+
+            if 'outcomes' in predictions and 'outcomes' in targets:
+                all_preds.setdefault('outcomes', [])
+                all_targets.setdefault('outcomes', [])
             loss, _ = self.criterion(predictions, targets)
             
             total_loss += loss.item()
@@ -573,7 +655,8 @@ class MultiHeadTCNTrainer:
                 f"Epoch {epoch + 1}/{self.config.num_epochs} | "
                 f"Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | "
                 f"Dir Acc: {val_metrics['direction_accuracy']:.3f} | "
-                f"Vol MAE: {val_metrics['volatility_mae']:.4f}"
+                f"Vol MAE: {val_metrics['volatility_mae']:.4f}" +
+                (f" | Out Acc: {val_metrics.get('outcome_accuracy_mean', 0.0):.3f}" if 'outcome_accuracy_mean' in val_metrics else "")
             )
             
             # Save history

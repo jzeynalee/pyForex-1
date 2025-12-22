@@ -167,6 +167,8 @@ class EnhancedDecisionEngine:
     
     Combines ALL 5 Phases:
     1. Direction prediction (TCN/existing model)
+       - If available, uses TP-before-SL probabilities (p_long/p_short) for side selection
+         and confidence gating; otherwise falls back to direction probabilities.
     2. MTF trend analysis (existing)
     3. Risk calculations (Phase 2)
     4. Trade filtering (Phase 3)
@@ -248,7 +250,7 @@ class EnhancedDecisionEngine:
         self.mtf_detector = None
         if MTFTrendDetector is not None:
             try:
-                self.mtf_detector = MTFTrendDetector(profile=self.config.profile)
+                self.mtf_detector = MTFTrendDetector(profile=get_profile(self.config.profile))
             except Exception as e:
                 logger.warning(f"Could not initialize MTF detector: {e}")
         
@@ -289,6 +291,9 @@ class EnhancedDecisionEngine:
         
         Args:
             predictions: Dict with 'direction_probs', 'volatility', 'quantiles'
+                Optional:
+                    - p_long: P(TP before SL | long)
+                    - p_short: P(TP before SL | short)
             entry_price: Current price / intended entry
             pair: Currency pair (e.g., 'EURUSD')
             account_balance: Current account balance
@@ -330,50 +335,89 @@ class EnhancedDecisionEngine:
             decision.protection_level = pre_check.get('protection_level', 'normal')
         
         # =================================================================
-        # Step 1: Extract direction from predictions
+        # Step 1: Extract direction / trade side from predictions
         # =================================================================
-        direction_probs = predictions.get('direction_probs')
-        if direction_probs is None:
-            decision.rejection_reasons.append("No direction predictions available")
-            return decision
-        
-        # Handle different formats
-        if isinstance(direction_probs, np.ndarray):
-            if direction_probs.ndim > 1:
-                direction_probs = direction_probs.flatten()
-            probs = {
-                'BEAR': float(direction_probs[0]),
-                'SIDEWAYS': float(direction_probs[1]),
-                'BULL': float(direction_probs[2])
-            }
-        else:
-            probs = direction_probs
-        
-        decision.direction_probs = probs
-        
-        # Get predicted direction and confidence
-        direction_idx = np.argmax(list(probs.values()))
-        direction_names = ['BEAR', 'SIDEWAYS', 'BULL']
-        predicted_direction = direction_names[direction_idx]
-        confidence = list(probs.values())[direction_idx]
-        
-        decision.signal = Signal(direction_idx)
-        decision.signal_name = predicted_direction
-        decision.direction_confidence = confidence
-        
-        # Check confidence threshold
-        if confidence < self.config.min_direction_confidence:
-            decision.rejection_reasons.append(
-                f"Low confidence: {confidence:.2%} < {self.config.min_direction_confidence:.2%}"
-            )
-            return decision
-        
-        # Skip if sideways
-        if predicted_direction == 'SIDEWAYS':
-            decision.rejection_reasons.append("Sideways prediction - no trade")
-            return decision
-        
-        decision.direction = 'BUY' if predicted_direction == 'BULL' else 'SELL'
+        p_long = predictions.get('p_long')
+        p_short = predictions.get('p_short')
+
+        if p_long is not None and p_short is not None:
+            try:
+                p_long_f = float(np.array(p_long).flatten()[0])
+                p_short_f = float(np.array(p_short).flatten()[0])
+            except Exception:
+                p_long_f = None
+                p_short_f = None
+
+            if p_long_f is not None and p_short_f is not None:
+                confidence = max(p_long_f, p_short_f)
+                predicted_direction = 'BULL' if p_long_f >= p_short_f else 'BEAR'
+
+                decision.direction_probs = {
+                    'BEAR': float(p_short_f),
+                    'SIDEWAYS': float(max(0.0, 1.0 - confidence)),
+                    'BULL': float(p_long_f)
+                }
+
+                decision.signal = Signal.BULL if predicted_direction == 'BULL' else Signal.BEAR
+                decision.signal_name = predicted_direction
+                decision.direction_confidence = confidence
+
+                if confidence < self.config.min_direction_confidence:
+                    # Outcome head may be untrained or poorly calibrated in older checkpoints.
+                    # Fall back to direction_probs instead of hard rejecting the bar.
+                    p_long = None
+                    p_short = None
+                    p_long_f = None
+                    p_short_f = None
+
+                decision.direction = 'BUY' if predicted_direction == 'BULL' else 'SELL'
+            else:
+                p_long = None
+                p_short = None
+
+        if p_long is None or p_short is None:
+            direction_probs = predictions.get('direction_probs')
+            if direction_probs is None:
+                decision.rejection_reasons.append("No direction predictions available")
+                return decision
+
+            # Handle different formats
+            if isinstance(direction_probs, np.ndarray):
+                if direction_probs.ndim > 1:
+                    direction_probs = direction_probs.flatten()
+                probs = {
+                    'BEAR': float(direction_probs[0]),
+                    'SIDEWAYS': float(direction_probs[1]),
+                    'BULL': float(direction_probs[2])
+                }
+            else:
+                probs = direction_probs
+
+            decision.direction_probs = probs
+
+            # Get predicted direction and confidence
+            direction_idx = np.argmax(list(probs.values()))
+            direction_names = ['BEAR', 'SIDEWAYS', 'BULL']
+            predicted_direction = direction_names[direction_idx]
+            confidence = list(probs.values())[direction_idx]
+
+            decision.signal = Signal(direction_idx)
+            decision.signal_name = predicted_direction
+            decision.direction_confidence = confidence
+
+            # Check confidence threshold
+            if confidence < self.config.min_direction_confidence:
+                decision.rejection_reasons.append(
+                    f"Low confidence: {confidence:.2%} < {self.config.min_direction_confidence:.2%}"
+                )
+                return decision
+
+            # Skip if sideways
+            if predicted_direction == 'SIDEWAYS':
+                decision.rejection_reasons.append("Sideways prediction - no trade")
+                return decision
+
+            decision.direction = 'BUY' if predicted_direction == 'BULL' else 'SELL'
         
         # =================================================================
         # Step 2: Market Regime Detection
@@ -522,6 +566,35 @@ class EnhancedDecisionEngine:
                     f"Low MTF alignment: {mtf_result['alignment']:.2%}"
                 )
                 return decision
+
+            # SCALP profile hierarchy:
+            # - H1 is HTF main trend (hard filter)
+            # - M15 is entry TF (handled in strategy.on_bar)
+            # - M5 is feature TF (model input)
+            if self.config.profile == 'SCALP':
+                if not bool(mtf_result.get('higher_tf_aligned', False)):
+                    decision.rejection_reasons.append("HTF not aligned (higher_tf_aligned=False)")
+                    return decision
+
+                tf_dirs = mtf_result.get('timeframe_directions') or {}
+                h1_dir = tf_dirs.get('H1')
+                if h1_dir is not None:
+                    try:
+                        h1_dir = int(h1_dir)
+                    except Exception:
+                        h1_dir = None
+
+                if h1_dir is not None:
+                    if decision.direction == 'BUY' and h1_dir <= 0:
+                        decision.rejection_reasons.append(
+                            f"HTF(H1) counter-trend: dir={h1_dir}"
+                        )
+                        return decision
+                    if decision.direction == 'SELL' and h1_dir >= 0:
+                        decision.rejection_reasons.append(
+                            f"HTF(H1) counter-trend: dir={h1_dir}"
+                        )
+                        return decision
         
         # =================================================================
         # Phase 5 FINAL CHECK: Capital Protection Size Adjustment
@@ -560,6 +633,7 @@ class EnhancedDecisionEngine:
             f"SL: {decision.sl_pips:.1f} pips | "
             f"TP: {decision.tp_pips:.1f} pips | "
             f"R:R: {decision.risk_reward_ratio:.2f} | "
+            f"MTF: {decision.mtf_alignment:.2f} | "
             f"Protection: {decision.protection_level}"
         )
         
@@ -625,43 +699,54 @@ class EnhancedDecisionEngine:
         predictions: Dict,
         market_data: pd.DataFrame,
         decision: TradeDecision
-    ) -> np.ndarray:
-        """Build feature vector for meta-labeling."""
-        features = []
-        
-        # Direction confidence
-        features.append(decision.direction_confidence)
-        
-        # Volatility
-        features.append(decision.volatility if decision.volatility else 0.0)
-        
-        # ATR
-        features.append(decision.atr if decision.atr else 0.0)
-        
-        # Risk-reward
-        features.append(decision.risk_reward_ratio)
-        
+    ) -> Dict[str, float]:
+        """Build feature dictionary for meta-labeling.
+
+        The TradeFilter API expects a dict-like structure. This method returns
+        scalar features plus optional TP-before-SL probabilities when available.
+        """
+        feat: Dict[str, float] = {}
+
+        feat['direction_confidence'] = float(decision.direction_confidence)
+        feat['volatility'] = float(decision.volatility if decision.volatility else 0.0)
+        feat['atr'] = float(decision.atr if decision.atr else 0.0)
+        feat['risk_reward_ratio'] = float(decision.risk_reward_ratio)
+
+        # Trade-objective probabilities (if present)
+        p_long = predictions.get('p_long')
+        p_short = predictions.get('p_short')
+        if p_long is not None:
+            try:
+                feat['p_long'] = float(np.array(p_long).flatten()[0])
+            except Exception:
+                feat['p_long'] = 0.0
+        if p_short is not None:
+            try:
+                feat['p_short'] = float(np.array(p_short).flatten()[0])
+            except Exception:
+                feat['p_short'] = 0.0
+
         # Quantiles spread
         quantiles = predictions.get('quantiles')
-        if quantiles is not None:
-            if isinstance(quantiles, np.ndarray):
-                features.append(float(quantiles.flatten()[-1] - quantiles.flatten()[0]))
+        if quantiles is not None and isinstance(quantiles, np.ndarray):
+            q_flat = quantiles.flatten()
+            if q_flat.size >= 2:
+                feat['quantile_width'] = float(q_flat[-1] - q_flat[0])
             else:
-                features.append(0.0)
+                feat['quantile_width'] = 0.0
         else:
-            features.append(0.0)
-        
+            feat['quantile_width'] = 0.0
+
         # Recent returns
         if 'close' in market_data.columns:
             returns = market_data['close'].pct_change().iloc[-5:]
-            features.extend([
-                returns.mean() if len(returns) > 0 else 0.0,
-                returns.std() if len(returns) > 0 else 0.0
-            ])
+            feat['recent_return_mean'] = float(returns.mean() if len(returns) > 0 else 0.0)
+            feat['recent_return_std'] = float(returns.std() if len(returns) > 0 else 0.0)
         else:
-            features.extend([0.0, 0.0])
-        
-        return np.array(features, dtype=np.float32)
+            feat['recent_return_mean'] = 0.0
+            feat['recent_return_std'] = 0.0
+
+        return feat
     
     def _check_mtf_alignment(
         self,
@@ -673,23 +758,18 @@ class EnhancedDecisionEngine:
             return {'alignment': 1.0, 'trend': 'unknown'}
         
         try:
-            analysis = self.mtf_detector.analyze(mtf_data)
-            
-            # Calculate alignment with intended direction
-            aligned = 0
-            total = len(analysis.get('timeframes', {}))
-            
-            for tf, tf_data in analysis.get('timeframes', {}).items():
-                tf_direction = tf_data.get('direction', 'SIDEWAYS')
-                if (direction == 'BUY' and tf_direction == 'BULL') or \
-                   (direction == 'SELL' and tf_direction == 'BEAR'):
-                    aligned += 1
-            
-            alignment = aligned / total if total > 0 else 0.0
-            
+            result = self.mtf_detector.detect(mtf_data, compute_ml_features=False)
+            alignment = float(getattr(result, 'mtf_alignment', 1.0) or 0.0)
+            trend = str(getattr(result, 'direction', '') or getattr(result, 'trend_name', '') or 'unknown')
+            tf_dirs = getattr(result, 'timeframe_directions', None)
+            if tf_dirs is None:
+                tf_dirs = {}
+            higher_tf_aligned = bool(getattr(result, 'higher_tf_aligned', False))
             return {
                 'alignment': alignment,
-                'trend': analysis.get('overall_trend', 'unknown')
+                'trend': trend,
+                'timeframe_directions': tf_dirs,
+                'higher_tf_aligned': higher_tf_aligned,
             }
         except Exception as e:
             logger.warning(f"MTF analysis error: {e}")

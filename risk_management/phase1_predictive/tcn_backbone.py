@@ -5,6 +5,7 @@ This module implements a Temporal Convolutional Network with multiple prediction
 - Direction Head: P(Bear), P(Sideways), P(Bull)
 - Volatility Head: Predicted volatility (σ) for next N candles
 - Quantile Head: Price movement distribution [Q5, Q25, Q50, Q75, Q95]
+- Outcome Head: TP-before-SL probabilities [p_long, p_short]
 
 The backbone extracts temporal features that feed all downstream risk calculations.
 """
@@ -391,6 +392,41 @@ class QuantileHead(nn.Module):
         return torch.cat([lower_quantiles, q50, upper_quantiles], dim=-1)
 
 
+class OutcomeHead(nn.Module):
+    """Predicts probability of TP being hit before SL within a fixed horizon.
+
+    This head is designed to align the model output with a tradeable objective.
+    It outputs two probabilities:
+    - p_long:  P(TP_long hits before SL_long | go long now)
+    - p_short: P(TP_short hits before SL_short | go short now)
+
+    The head operates on the last-timestep backbone features.
+    """
+
+    def __init__(self, input_dim: int, hidden_dim: int = 64):
+        super().__init__()
+
+        self.predictor = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(0.2),
+            nn.Linear(hidden_dim, 2)
+        )
+
+    def forward(self, features: torch.Tensor) -> torch.Tensor:
+        """Return probabilities for (p_long, p_short).
+
+        Args:
+            features: (batch, channels, seq_len) from backbone
+
+        Returns:
+            (batch, 2) probabilities in [0, 1] ordered as [p_long, p_short]
+        """
+        last_features = features[:, :, -1]  # (batch, channels)
+        logits = self.predictor(last_features)
+        return torch.sigmoid(logits)
+
+
 class MultiHeadTCN(nn.Module):
     """
     Complete Multi-Head TCN for Risk Management.
@@ -400,6 +436,7 @@ class MultiHeadTCN(nn.Module):
     - Direction Head: Market direction probabilities
     - Volatility Head: Future volatility prediction
     - Quantile Head: Price movement distribution
+    - Outcome Head: TP-before-SL probabilities for long/short trades
     
     This is the core predictive model for Phase 1.
     """
@@ -440,6 +477,8 @@ class MultiHeadTCN(nn.Module):
             head_input_dim,
             quantiles=config.quantile_values
         )
+
+        self.outcome_head = OutcomeHead(head_input_dim)
     
     def forward(
         self,
@@ -453,13 +492,14 @@ class MultiHeadTCN(nn.Module):
         Args:
             x: (batch, seq_len, features) - OHLCV + technical indicators
             vision_features: (batch, vision_dim) - Optional YOLO/ViT features
-            mode: 'all' | 'direction' | 'volatility' | 'quantiles' | 'features'
+            mode: 'all' | 'direction' | 'volatility' | 'quantiles' | 'outcomes' | 'features'
         
         Returns:
             Dictionary with requested outputs:
             - direction: (batch, 3) probabilities
             - volatility: (batch,) predicted σ
             - quantiles: (batch, 5) quantile predictions
+            - outcomes: (batch, 2) probabilities [p_long, p_short]
             - features: (batch, hidden_dim) extracted features (for downstream)
         """
         # Extract temporal features
@@ -493,6 +533,12 @@ class MultiHeadTCN(nn.Module):
         
         if mode in ('all', 'quantiles'):
             output['quantiles'] = self.quantile_head(features)
+
+        if mode in ('all', 'outcomes'):
+            outcome_probs = self.outcome_head(features)
+            output['outcomes'] = outcome_probs
+            output['p_long'] = outcome_probs[:, 0]
+            output['p_short'] = outcome_probs[:, 1]
         
         # Always include feature vector for downstream use
         if mode == 'all':
@@ -517,17 +563,28 @@ class MultiHeadTCN(nn.Module):
             direction_probs=outputs['direction'],
             volatility=outputs['volatility'],
             quantiles=outputs['quantiles'],
-            features=outputs['features']
+            features=outputs['features'],
+            p_long=outputs.get('p_long'),
+            p_short=outputs.get('p_short')
         )
 
 
 @dataclass
 class RiskPrediction:
-    """Container for multi-head TCN predictions."""
+    """Container for multi-head TCN predictions.
+
+    The predictive foundation provides both classic market descriptors
+    (direction/volatility/quantiles) and trade-outcome probabilities:
+    - p_long:  probability that a long trade hits TP before SL within N bars
+    - p_short: probability that a short trade hits TP before SL within N bars
+    """
     direction_probs: torch.Tensor   # (batch, 3): P(Bear), P(Side), P(Bull)
     volatility: torch.Tensor        # (batch,): Predicted σ
     quantiles: torch.Tensor         # (batch, 5): Q5, Q25, Q50, Q75, Q95
     features: torch.Tensor          # (batch, hidden_dim): For downstream
+
+    p_long: Optional[torch.Tensor] = None   # (batch,): P(TP before SL | long)
+    p_short: Optional[torch.Tensor] = None  # (batch,): P(TP before SL | short)
     
     @property
     def predicted_direction(self) -> torch.Tensor:
@@ -566,12 +623,19 @@ class RiskPrediction:
     
     def to_dict(self) -> Dict[str, np.ndarray]:
         """Convert to numpy dictionary for serialization."""
-        return {
+        out = {
             'direction_probs': self.direction_probs.cpu().numpy(),
             'volatility': self.volatility.cpu().numpy(),
             'quantiles': self.quantiles.cpu().numpy(),
             'features': self.features.cpu().numpy()
         }
+
+        if self.p_long is not None:
+            out['p_long'] = self.p_long.cpu().numpy()
+        if self.p_short is not None:
+            out['p_short'] = self.p_short.cpu().numpy()
+
+        return out
 
 
 def create_tcn_for_profile(

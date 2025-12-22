@@ -3,7 +3,7 @@
 Enhanced Hybrid Predictor with Risk Management Integration
 
 Combines:
-- TCN for time-series predictions (direction, volatility, quantiles)
+- TCN for time-series predictions (direction, volatility, quantiles, outcomes)
 - ViT for visual chart patterns
 - YOLO for candlestick pattern detection
 - Fusion network for combining modalities
@@ -33,7 +33,13 @@ class Signal(IntEnum):
 
 
 class PredictionResult(NamedTuple):
-    """Structured prediction output with risk parameters."""
+    """Structured prediction output with risk parameters.
+
+    In addition to direction/volatility/quantiles, this result can optionally
+    include TP-before-SL probabilities:
+    - p_long:  P(TP hit before SL | enter long now)
+    - p_short: P(TP hit before SL | enter short now)
+    """
     # Direction
     probabilities: np.ndarray      # [P(BEAR), P(SIDEWAYS), P(BULL)]
     predicted_class: int           # Signal enum value
@@ -43,6 +49,10 @@ class PredictionResult(NamedTuple):
     # Risk parameters (from Phase 1 heads)
     volatility: float              # Predicted σ
     quantiles: np.ndarray          # [Q5, Q25, Q50, Q75, Q95]
+
+    # Trade-objective probabilities (optional)
+    p_long: Optional[float] = None
+    p_short: Optional[float] = None
     
     # Modality info
     gate_weights: Optional[np.ndarray] = None  # [seq, vit, yolo]
@@ -90,6 +100,9 @@ class RiskAwareTCNPredictor:
     - Direction probabilities: P(Bear), P(Sideways), P(Bull)
     - Volatility prediction: σ (standard deviation)
     - Quantile predictions: [Q5, Q25, Q50, Q75, Q95] for price distribution
+
+    Optional:
+    - Outcome probabilities: [p_long, p_short] as TP-before-SL likelihood
     
     These outputs feed directly into Phase 2 risk calculations.
     """
@@ -140,7 +153,16 @@ class RiskAwareTCNPredictor:
                 raise ImportError("No TCN model available. Install risk_management or models.tcn")
     
     def load_weights(self, path: str):
-        """Load model weights from checkpoint."""
+        """Load model weights from checkpoint.
+
+        This loader supports both MultiHeadTCN checkpoints (risk heads) and
+        legacy/simple TCN checkpoints.
+
+        If a legacy checkpoint is detected while the predictor is currently
+        initialized with MultiHeadTCN, the predictor will switch to the simple
+        TCN architecture and attempt to infer the required input dimensionality
+        from the checkpoint metadata and/or the first convolution weight.
+        """
         checkpoint = torch.load(path, map_location=self.device, weights_only=False)
         
         # Handle different checkpoint formats
@@ -199,12 +221,49 @@ class RiskAwareTCNPredictor:
             try:
                 from models.tcn import TCNModel
                 # Get input_dim from checkpoint config if available
-                input_dim = 64
+                input_dim = 5
+                hidden_dim = 64
+
                 if 'config' in checkpoint and isinstance(checkpoint['config'], dict):
-                    input_dim = checkpoint['config'].get('model', {}).get('input_dim', 64)
+                    ckpt_cfg = checkpoint['config']
+                    if isinstance(ckpt_cfg.get('model'), dict):
+                        input_dim = ckpt_cfg.get('model', {}).get('input_dim', input_dim)
+                        hidden_dim = ckpt_cfg.get('model', {}).get('hidden_dim', hidden_dim)
+                    else:
+                        input_dim = ckpt_cfg.get('input_dim', input_dim)
+                        hidden_dim = ckpt_cfg.get('hidden_dim', hidden_dim)
+
+                # Infer from state dict if config is missing/wrong.
+                try:
+                    conv_candidates = [
+                        k for k in state_keys
+                        if 'tcn.network.0.conv1' in k and ('weight' in k or 'original' in k)
+                    ]
+                    if conv_candidates:
+                        # Prefer weight_norm's vector parameter (original1), not the scale (original0).
+                        preferred = None
+                        for k in conv_candidates:
+                            if k.endswith('original1'):
+                                preferred = k
+                                break
+                        if preferred is None:
+                            for k in conv_candidates:
+                                if k.endswith('.weight'):
+                                    preferred = k
+                                    break
+                        if preferred is None:
+                            preferred = conv_candidates[0]
+
+                        w = state_dict[preferred]
+                        if hasattr(w, 'shape') and len(w.shape) >= 2:
+                            hidden_dim = int(w.shape[0])
+                            input_dim = int(w.shape[1])
+                except Exception:
+                    pass
+
                 self.model = TCNModel(
                     input_dim=input_dim,
-                    hidden_dim=64,
+                    hidden_dim=hidden_dim,
                     num_layers=5,
                     num_classes=3
                 ).to(self.device)
@@ -269,12 +328,18 @@ class RiskAwareTCNPredictor:
                 direction_probs = outputs['direction'].cpu().numpy()[0]
                 volatility = outputs['volatility'].cpu().numpy().item()
                 quantiles = outputs['quantiles'].cpu().numpy()[0]
+                p_long = float(outputs['p_long'].cpu().numpy().item()) if 'p_long' in outputs else None
+                p_short = float(outputs['p_short'].cpu().numpy().item()) if 'p_short' in outputs else None
                 hidden_features = outputs.get('features')
                 if hidden_features is not None:
                     hidden_features = hidden_features.cpu().numpy()[0]
             else:
                 # Standard TCN (direction only)
-                logits = self.model(x)
+                try:
+                    logits = self.model(x, mode='classify')
+                except TypeError:
+                    # Fallback for models that don't implement a 'mode' argument.
+                    logits = self.model(x)
                 # Handle different output shapes
                 if logits.dim() == 3:
                     # Shape: (batch, seq_len, num_classes) - take last timestep
@@ -292,6 +357,8 @@ class RiskAwareTCNPredictor:
                         direction_probs = direction_probs[:3]
                 volatility = 0.0
                 quantiles = np.zeros(5)
+                p_long = None
+                p_short = None
                 hidden_features = None
         
         latency_ms = (time.time() - start_time) * 1000
@@ -314,6 +381,8 @@ class RiskAwareTCNPredictor:
             signal_name=signal_name,
             volatility=volatility,
             quantiles=quantiles,
+            p_long=p_long,
+            p_short=p_short,
             gate_weights=None,
             features=hidden_features if return_features else None
         )
@@ -341,15 +410,22 @@ class RiskAwareTCNPredictor:
                     'direction_probs': outputs['direction'].cpu().numpy(),
                     'volatility': outputs['volatility'].cpu().numpy(),
                     'quantiles': outputs['quantiles'].cpu().numpy(),
+                    'p_long': outputs.get('p_long', torch.zeros(outputs['direction'].shape[0], device=outputs['direction'].device)).cpu().numpy(),
+                    'p_short': outputs.get('p_short', torch.zeros(outputs['direction'].shape[0], device=outputs['direction'].device)).cpu().numpy(),
                     'features': outputs.get('features', torch.zeros(1)).cpu().numpy()
                 }
             else:
-                logits = self.model(x)
+                try:
+                    logits = self.model(x, mode='classify')
+                except TypeError:
+                    logits = self.model(x)
                 probs = F.softmax(logits, dim=-1).cpu().numpy()
                 return {
                     'direction_probs': probs,
                     'volatility': np.zeros(len(probs)),
-                    'quantiles': np.zeros((len(probs), 5))
+                    'quantiles': np.zeros((len(probs), 5)),
+                    'p_long': np.zeros(len(probs)),
+                    'p_short': np.zeros(len(probs))
                 }
     
     def _prepare_input(
@@ -374,6 +450,24 @@ class RiskAwareTCNPredictor:
         # Ensure correct shape (batch, seq_len, features)
         if features.ndim == 2:
             features = features[np.newaxis, ...]  # Add batch dimension
+
+        # Align feature dimension to the currently loaded model.
+        expected_dim = None
+        try:
+            if getattr(self, '_use_risk_heads', False) and hasattr(self.model, 'config'):
+                expected_dim = int(getattr(self.model.config, 'input_channels', 0) or 0)
+            elif hasattr(self.model, 'tcn') and hasattr(self.model.tcn, 'input_dim'):
+                expected_dim = int(getattr(self.model.tcn, 'input_dim'))
+        except Exception:
+            expected_dim = None
+
+        if expected_dim is not None and expected_dim > 0:
+            current_dim = int(features.shape[-1])
+            if current_dim > expected_dim:
+                features = features[..., :expected_dim]
+            elif current_dim < expected_dim:
+                pad = np.zeros((features.shape[0], features.shape[1], expected_dim - current_dim), dtype=features.dtype)
+                features = np.concatenate([features, pad], axis=-1)
         
         # Apply scaling if available
         if self._scaler is not None:
@@ -401,12 +495,19 @@ class RiskAwareTCNPredictor:
     
     def to_dict(self, result: PredictionResult) -> Dict:
         """Convert prediction result to dictionary format for decision engine."""
-        return {
+        out = {
             'direction_probs': result.probabilities,
             'volatility': result.volatility,
             'quantiles': result.quantiles,
             'features': result.features
         }
+
+        if result.p_long is not None:
+            out['p_long'] = result.p_long
+        if result.p_short is not None:
+            out['p_short'] = result.p_short
+
+        return out
 
 
 class HybridPredictor:
