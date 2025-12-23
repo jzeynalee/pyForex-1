@@ -268,7 +268,7 @@ class CapitalProtector:
         self._update_equity_ma()
         
         # Evaluate protection state
-        self._evaluate_state()
+        self._evaluate_state(now=timestamp)
         
         self._last_trade_time = timestamp
     
@@ -277,7 +277,8 @@ class CapitalProtector:
         proposed_size: float,
         account_balance: float,
         current_exposure: float = 0.0,
-        correlated_exposure: float = 0.0
+        correlated_exposure: float = 0.0,
+        current_time: Optional[datetime] = None,
     ) -> Dict:
         """
         Check if a trade is allowed and get adjusted size.
@@ -299,6 +300,12 @@ class CapitalProtector:
             'protection_level': self.state.level.value,
             'size_multiplier': self.state.size_multiplier
         }
+
+        now = current_time or datetime.utcnow()
+        try:
+            self._check_time_periods(now)
+        except Exception:
+            pass
         
         # Check kill switch
         if self.state.level == ProtectionLevel.KILLED:
@@ -308,7 +315,7 @@ class CapitalProtector:
             return result
         
         # Check cooldown
-        if self.state.cooldown_until and datetime.utcnow() < self.state.cooldown_until:
+        if self.state.cooldown_until and now < self.state.cooldown_until:
             result['allowed'] = False
             result['adjusted_size'] = 0.0
             result['reason'] = f"In cooldown until {self.state.cooldown_until}"
@@ -390,23 +397,24 @@ class CapitalProtector:
         """Get current protection state."""
         return self.state
     
-    def reset_daily(self):
+    def reset_daily(self, now: Optional[datetime] = None):
         """Reset daily counters (call at start of trading day)."""
         self._daily_pnl = 0.0
         self._daily_trade_count = 0
-        self._day_start = datetime.utcnow()
+        self._day_start = (now or datetime.utcnow()).replace(hour=0, minute=0, second=0, microsecond=0)
         logger.info("Daily protection counters reset")
     
-    def reset_weekly(self):
+    def reset_weekly(self, now: Optional[datetime] = None):
         """Reset weekly counters."""
         self._weekly_pnl = 0.0
-        self._week_start = datetime.utcnow()
+        ts = now or datetime.utcnow()
+        self._week_start = ts - timedelta(days=ts.weekday())
         logger.info("Weekly protection counters reset")
     
-    def reset_monthly(self):
+    def reset_monthly(self, now: Optional[datetime] = None):
         """Reset monthly counters."""
         self._monthly_pnl = 0.0
-        self._month_start = datetime.utcnow()
+        self._month_start = (now or datetime.utcnow()).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         logger.info("Monthly protection counters reset")
     
     def lift_restrictions(self, reason: str = "Manual override"):
@@ -429,9 +437,11 @@ class CapitalProtector:
         self.state.trigger_reason = reason
         logger.critical(f"KILL SWITCH ACTIVATED: {reason}")
     
-    def _evaluate_state(self):
+    def _evaluate_state(self, now: Optional[datetime] = None):
         """Evaluate current metrics and update protection state."""
         metrics = self.get_metrics()
+
+        ts = now or datetime.utcnow()
         
         new_level = ProtectionLevel.NORMAL
         new_action = ProtectionAction.ALLOW
@@ -444,7 +454,7 @@ class CapitalProtector:
             new_level = ProtectionLevel.KILLED
             new_action = ProtectionAction.KILL_SWITCH
             trigger = f"Equity at {metrics.equity_vs_peak_pct:.1f}% of peak"
-            self.state.killed_at = datetime.utcnow()
+            self.state.killed_at = ts
         
         # Check daily loss limit
         elif (metrics.daily_pnl < 0 and 
@@ -471,7 +481,7 @@ class CapitalProtector:
         elif metrics.consecutive_losses >= self.config.max_consecutive_losses:
             new_level = ProtectionLevel.WARNING
             new_action = ProtectionAction.BLOCK_NEW
-            cooldown = datetime.utcnow() + timedelta(minutes=self.config.losing_streak_cooldown_minutes)
+            cooldown = ts + timedelta(minutes=self.config.losing_streak_cooldown_minutes)
             trigger = f"Losing streak: {metrics.consecutive_losses} consecutive losses"
         
         # Check drawdown - graduated response
@@ -519,7 +529,7 @@ class CapitalProtector:
                 level=new_level,
                 action=new_action,
                 size_multiplier=size_mult,
-                last_update=datetime.utcnow(),
+                last_update=ts,
                 cooldown_until=cooldown,
                 trigger_reason=trigger,
                 metrics_at_trigger={
@@ -533,35 +543,35 @@ class CapitalProtector:
             if new_level != ProtectionLevel.NORMAL:
                 logger.warning(f"Protection level changed to {new_level.value}: {trigger}")
     
-    def _update_time_periods(self):
+    def _update_time_periods(self, now: Optional[datetime] = None):
         """Initialize time period tracking."""
-        now = datetime.utcnow()
-        self._day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        self._week_start = now - timedelta(days=now.weekday())
-        self._month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        ts = now or datetime.utcnow()
+        self._day_start = ts.replace(hour=0, minute=0, second=0, microsecond=0)
+        self._week_start = ts - timedelta(days=ts.weekday())
+        self._month_start = ts.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     
     def _check_time_periods(self, timestamp: datetime):
         """Check and reset time periods if needed."""
         if self._day_start is None:
-            self._update_time_periods()
+            self._update_time_periods(now=timestamp)
             return
         
         # Check day rollover
         day_boundary = self._day_start + timedelta(days=1)
         if timestamp >= day_boundary:
-            self.reset_daily()
+            self.reset_daily(now=timestamp)
         
         # Check week rollover
         week_boundary = self._week_start + timedelta(weeks=1)
         if timestamp >= week_boundary:
-            self.reset_weekly()
+            self.reset_weekly(now=timestamp)
         
         # Check month rollover
         next_month = (self._month_start.month % 12) + 1
         next_month_year = self._month_start.year + (1 if next_month == 1 else 0)
         month_boundary = self._month_start.replace(year=next_month_year, month=next_month)
         if timestamp >= month_boundary:
-            self.reset_monthly()
+            self.reset_monthly(now=timestamp)
     
     def _update_equity_ma(self):
         """Update equity moving average."""

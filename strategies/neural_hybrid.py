@@ -20,6 +20,8 @@ from datetime import datetime, timedelta
 from enum import Enum
 import logging
 
+from utils.candle_to_image import candle_image
+
 # Core imports
 from inference.predictor import (
     RiskAwareTCNPredictor, HybridPredictor, PredictionResult,
@@ -143,6 +145,9 @@ class StrategyConfig:
 
     # SCALP-only controls (TTF=M15)
     cooldown_after_loss_m15: int = 0
+    max_holding_m15: int = 0
+    time_exit_profit_pips: float = 0.0
+    time_exit_cut_loss_pips: float = 0.0
     
     # Exit advisor settings (Phase 4)
     enable_exit_advisor: bool = True
@@ -158,20 +163,49 @@ class StrategyConfig:
     max_daily_trades: int = 10
     max_daily_loss: float = 500.0
 
+    # Hard rules controls
+    avoid_rollover: bool = True
+
     def __post_init__(self):
         self.profile = str(self.profile or 'INTRADAY').upper()
 
         # SCALP profile tightening defaults
         if self.profile == 'SCALP':
             # Stronger MTF requirement
-            self.min_mtf_alignment = max(float(self.min_mtf_alignment), 0.75)
+            self.min_mtf_alignment = max(float(self.min_mtf_alignment), 0.70)
 
             # Reduce trade frequency and exposure
             self.max_open_trades = min(int(self.max_open_trades), 1)
-            self.max_daily_trades = min(int(self.max_daily_trades), 6)
+            self.max_daily_trades = min(int(self.max_daily_trades), 10)
 
             # Cooldown after a losing trade (in M15 candles)
-            self.cooldown_after_loss_m15 = max(int(self.cooldown_after_loss_m15), 2)
+            self.cooldown_after_loss_m15 = max(int(self.cooldown_after_loss_m15), 1)
+
+            try:
+                self.max_holding_m15 = int(self.max_holding_m15)
+            except Exception:
+                self.max_holding_m15 = 0
+            if self.max_holding_m15 <= 0:
+                self.max_holding_m15 = 8
+
+            try:
+                self.time_exit_profit_pips = float(self.time_exit_profit_pips)
+            except Exception:
+                self.time_exit_profit_pips = 0.0
+            if self.time_exit_profit_pips <= 0.0:
+                self.time_exit_profit_pips = 6.0
+
+            try:
+                self.time_exit_cut_loss_pips = float(self.time_exit_cut_loss_pips)
+            except Exception:
+                self.time_exit_cut_loss_pips = 0.0
+            if self.time_exit_cut_loss_pips <= 0.0:
+                self.time_exit_cut_loss_pips = 8.0
+
+            try:
+                self.base_risk_percent = min(float(self.base_risk_percent), 0.5)
+            except Exception:
+                self.base_risk_percent = 0.5
 
 
 class NeuralHybridStrategy:
@@ -278,6 +312,94 @@ class NeuralHybridStrategy:
                     current_time = pd.to_datetime(df['time'].iloc[-1]).to_pydatetime()
                 except Exception:
                     current_time = None
+
+            if (
+                self.config.profile == 'SCALP'
+                and current_time is not None
+                and (float(getattr(self.config, 'time_exit_cut_loss_pips', 0.0) or 0.0) > 0.0
+                     or (int(getattr(self.config, 'max_holding_m15', 0) or 0) > 0
+                         and float(getattr(self.config, 'time_exit_profit_pips', 0.0) or 0.0) > 0.0))
+                and self.executor is not None
+                and hasattr(self.executor, 'close_position')
+                and len(self._open_positions) > 0
+            ):
+                x_pips = float(getattr(self.config, 'time_exit_profit_pips', 0.0) or 0.0)
+                y_pips = float(getattr(self.config, 'time_exit_cut_loss_pips', 0.0) or 0.0)
+                max_minutes = 15 * int(getattr(self.config, 'max_holding_m15', 0) or 0)
+
+                bar_high = None
+                bar_low = None
+                try:
+                    bar_high = float(df['high'].iloc[-1])
+                    bar_low = float(df['low'].iloc[-1])
+                except Exception:
+                    bar_high = None
+                    bar_low = None
+
+                current_price = None
+                try:
+                    current_price = float(df['close'].iloc[-1])
+                except Exception:
+                    current_price = None
+                for ticket, p in list(self._open_positions.items()):
+                    try:
+                        held_minutes = (current_time - p.entry_time).total_seconds() / 60.0
+                    except Exception:
+                        held_minutes = 0.0
+                    pips = 0.0
+                    if current_price is not None:
+                        try:
+                            if int(p.direction) > 0:
+                                pips = (current_price - float(p.entry_price)) / 0.0001
+                            else:
+                                pips = (float(p.entry_price) - current_price) / 0.0001
+                        except Exception:
+                            pips = 0.0
+
+                    # Cut-loss: apply at any time.
+                    if y_pips > 0.0:
+                        y = abs(float(y_pips))
+                        stop_price = None
+                        try:
+                            if int(p.direction) > 0:
+                                stop_price = float(p.entry_price) - (y * 0.0001)
+                            else:
+                                stop_price = float(p.entry_price) + (y * 0.0001)
+                        except Exception:
+                            stop_price = None
+
+                        hit_stop = False
+                        if stop_price is not None and bar_high is not None and bar_low is not None:
+                            if int(p.direction) > 0:
+                                hit_stop = bool(bar_low <= stop_price)
+                            else:
+                                hit_stop = bool(bar_high >= stop_price)
+                        else:
+                            hit_stop = bool(pips <= -y)
+
+                        if hit_stop:
+                            try:
+                                if stop_price is not None and hasattr(self.executor, 'close_position_at'):
+                                    self.executor.close_position_at(int(ticket), stop_price, reason='CLOSED_MANUAL')
+                                else:
+                                    self.executor.close_position(int(ticket), reason='CLOSED_MANUAL')
+                            except Exception:
+                                pass
+                            continue
+
+                    # Profit-aware time exit: only after max hold.
+                    if max_minutes > 0 and held_minutes >= float(max_minutes):
+                        if x_pips > 0.0:
+                            x = abs(float(x_pips))
+                            if pips >= x:
+                                try:
+                                    self.executor.close_position(int(ticket), reason='CLOSED_MANUAL')
+                                except Exception:
+                                    pass
+
+                # Process any newly-closed positions immediately (cooldown, stats, etc.)
+                self._process_new_closed_trades()
+                self._sync_open_positions_from_executor()
 
             # SCALP plan: M5=LTF features, but only open new trades on M15 candle closes (TTF).
             if self.config.profile == 'SCALP' and current_time is not None:
@@ -411,7 +533,8 @@ class NeuralHybridStrategy:
                 enable_capital_protection=self.config.enable_capital_protection,
                 max_daily_loss_pct=self.config.max_daily_loss_percent,
                 max_weekly_loss_pct=self.config.max_weekly_loss_percent,
-                max_drawdown_pct=self.config.max_drawdown_percent
+                max_drawdown_pct=self.config.max_drawdown_percent,
+                avoid_rollover=bool(getattr(self.config, 'avoid_rollover', True)),
             )
             
             self.decision_engine = EnhancedDecisionEngine(
@@ -802,11 +925,17 @@ class NeuralHybridStrategy:
                 ticket = str(p.get('ticket'))
                 direction_str = str(p.get('type', '')).upper()
                 direction = 1 if direction_str == 'BUY' else -1
+                et = None
+                if p.get('entry_time') is not None:
+                    try:
+                        et = pd.to_datetime(p.get('entry_time')).to_pydatetime()
+                    except Exception:
+                        et = None
                 next_positions[ticket] = OpenPosition(
                     ticket=ticket,
                     direction=direction,
                     entry_price=float(p.get('price_open', 0.0) or 0.0),
-                    entry_time=datetime.utcnow(),
+                    entry_time=et or datetime.utcnow(),
                     volume=float(p.get('volume', 0.0) or 0.0),
                     stop_loss=float(p.get('sl', 0.0) or 0.0),
                     take_profit=float(p.get('tp', 0.0) or 0.0),
@@ -851,9 +980,26 @@ class NeuralHybridStrategy:
             'daily_wins': self._daily_wins,
             'daily_losses': self._daily_losses,
             'daily_win_rate': win_rate,
+            'win_rate': win_rate,
             'open_positions': len(self._open_positions),
             'protection_status': self.get_protection_status()
         }
+
+    def get_open_positions(self) -> List[Dict]:
+        """Get list of currently tracked open positions."""
+        positions: List[Dict] = []
+        for ticket, p in self._open_positions.items():
+            positions.append({
+                'ticket': str(ticket),
+                'direction': int(p.direction),
+                'entry_price': float(p.entry_price),
+                'entry_time': p.entry_time,
+                'volume': float(p.volume),
+                'sl': float(p.stop_loss),
+                'tp': float(p.take_profit),
+                'profit': float(p.unrealized_pnl),
+            })
+        return positions
     
     def _check_daily_limits(self) -> bool:
         """Check if daily limits allow trading."""
@@ -1022,8 +1168,21 @@ class NeuralHybridStrategy:
     
     def _generate_chart_image(self, data: pd.DataFrame) -> Optional[np.ndarray]:
         """Generate chart image for vision models."""
-        # Placeholder - actual implementation would render candlestick chart
-        return None
+        try:
+            if data is None or data.empty:
+                return None
+
+            cols = {'open', 'high', 'low', 'close'}
+            if not cols.issubset(set(map(str.lower, data.columns))):
+                return None
+
+            window = data.tail(int(self.config.sequence_length)).copy()
+            window.columns = [str(c).lower() for c in window.columns]
+
+            img = candle_image(window, target_size=224, include_volume=False)
+            return img
+        except Exception:
+            return None
     
     def _get_spread(self) -> float:
         """Get current spread."""
@@ -1059,10 +1218,11 @@ class NeuralHybridStrategy:
 
 
 def create_strategy(
-    profile: str,
-    symbol: str,
+    profile: str = 'INTRADAY',
+    symbol: str = 'EURUSD',
     data_provider = None,
     executor = None,
+    config: Optional[StrategyConfig] = None,
     tcn_weights: str = 'models/weights/tcn_best.pt',
     meta_model_path: Optional[str] = None,
     exit_model_path: Optional[str] = None,
@@ -1070,14 +1230,15 @@ def create_strategy(
     **kwargs
 ) -> NeuralHybridStrategy:
     """Factory function to create configured strategy."""
-    config = StrategyConfig(
-        profile=profile,
-        symbol=symbol,
-        tcn_weights=tcn_weights,
-        meta_model_path=meta_model_path,
-        exit_model_path=exit_model_path,
-        **kwargs
-    )
+    if config is None:
+        config = StrategyConfig(
+            profile=profile,
+            symbol=symbol,
+            tcn_weights=tcn_weights,
+            meta_model_path=meta_model_path,
+            exit_model_path=exit_model_path,
+            **kwargs
+        )
     
     strategy = NeuralHybridStrategy(
         config=config,

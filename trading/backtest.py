@@ -238,6 +238,33 @@ class BacktestExecutor:
         """Close all open positions at current price."""
         for pos in list(self.positions):
             self._close_position(pos, 'CLOSED_MANUAL', self.current_price)
+
+    def close_position(self, ticket: int, reason: str = 'CLOSED_MANUAL') -> bool:
+        """Close a single open position by ticket at current price."""
+        try:
+            ticket_int = int(ticket)
+        except Exception:
+            return False
+
+        for pos in list(self.positions):
+            if int(pos.ticket) == ticket_int:
+                self._close_position(pos, reason, self.current_price)
+                return True
+        return False
+
+    def close_position_at(self, ticket: int, exit_price: float, reason: str = 'CLOSED_MANUAL') -> bool:
+        """Close a single open position by ticket at a specific price."""
+        try:
+            ticket_int = int(ticket)
+            exit_price_f = float(exit_price)
+        except Exception:
+            return False
+
+        for pos in list(self.positions):
+            if int(pos.ticket) == ticket_int:
+                self._close_position(pos, reason, exit_price_f)
+                return True
+        return False
     
     def get_open_positions(self) -> List[Dict]:
         """Get list of open positions."""
@@ -247,6 +274,7 @@ class BacktestExecutor:
                 'type': p.direction,
                 'volume': p.volume,
                 'price_open': p.entry_price,
+                'entry_time': p.entry_time,
                 'price_current': self.current_price,
                 'sl': p.sl,
                 'tp': p.tp,

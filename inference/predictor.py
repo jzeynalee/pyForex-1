@@ -581,8 +581,31 @@ class HybridPredictor:
             from models.fusion import FusionNet
             
             seq_dim = 64  # TCN output dimension
-            vit_dim = 768 if self.vit_model else 0
-            yolo_dim = 20 if self.yolo_model else 0
+            vit_dim = 0
+            if self.vit_model:
+                try:
+                    vit_dim = int(getattr(self.vit_model, 'feature_dim', 0) or 0)
+                except Exception:
+                    vit_dim = 0
+                if vit_dim <= 0:
+                    try:
+                        vit_backbone = getattr(self.vit_model, 'vit', None)
+                        vit_dim = int(getattr(vit_backbone, 'num_features', 0) or 0)
+                    except Exception:
+                        vit_dim = 0
+                if vit_dim <= 0:
+                    vit_dim = 768
+            yolo_dim = 0
+            if self.yolo_model:
+                try:
+                    if hasattr(self.yolo_model, 'get_feature_dim'):
+                        yolo_dim = int(self.yolo_model.get_feature_dim() or 0)
+                    else:
+                        yolo_dim = int(getattr(self.yolo_model, 'feature_dim', 0) or 0)
+                except Exception:
+                    yolo_dim = 0
+                if yolo_dim <= 0:
+                    yolo_dim = 20
             
             self.fusion_model = FusionNet(
                 seq_dim=seq_dim,
@@ -674,14 +697,51 @@ class HybridPredictor:
         x = torch.tensor(image, dtype=torch.float32).unsqueeze(0).to(self.device)
         
         with torch.no_grad():
-            features = self.vit_model(x, mode='features')
-        
-        return features.cpu().numpy()[0]
+            # Prefer timm-style forward_features() to get embeddings.
+            try:
+                vit_backbone = getattr(self.vit_model, 'vit', None)
+                if vit_backbone is not None and hasattr(vit_backbone, 'forward_features'):
+                    feats = vit_backbone.forward_features(x)
+                elif hasattr(self.vit_model, 'forward_features'):
+                    feats = self.vit_model.forward_features(x)
+                else:
+                    feats = None
+            except Exception:
+                feats = None
+
+            if feats is None:
+                # Fallback: use the model forward output (may be logits; still better than crashing).
+                feats = self.vit_model(x)
+
+            # Normalize common timm output shapes into [B, D].
+            if isinstance(feats, dict):
+                if 'cls_token' in feats:
+                    feats = feats['cls_token']
+                elif 'x' in feats:
+                    feats = feats['x']
+            if hasattr(feats, 'dim') and feats.dim() == 3:
+                feats = feats[:, 0, :]
+
+        return feats.cpu().numpy()[0]
     
     def _get_yolo_features(self, image: np.ndarray) -> np.ndarray:
         """Extract pattern features from YOLO."""
-        patterns = self.yolo_model.detect(image)
-        return self.yolo_model.to_feature_vector(patterns)
+        try:
+            if self.yolo_model is None:
+                return None
+
+            # Prefer the extractor API used by models.yolo_pattern.YOLOPatternExtractor
+            if hasattr(self.yolo_model, 'extract'):
+                vec = self.yolo_model.extract(image)
+                return vec
+
+            # Fallbacks for older APIs
+            if hasattr(self.yolo_model, 'detect'):
+                return self.yolo_model.detect(image)
+        except Exception:
+            return None
+
+        return None
     
     def _fuse_predictions(
         self,

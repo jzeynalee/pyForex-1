@@ -391,6 +391,12 @@ class BacktestBot:
                 'close': df['close'].iloc[-1],
                 'signal': signal,
             })
+
+        try:
+            if hasattr(self.executor, 'close_all_positions'):
+                self.executor.close_all_positions()
+        except Exception:
+            pass
         
         return {
             'trades': self.executor.get_trade_history(),

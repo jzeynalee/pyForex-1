@@ -503,6 +503,8 @@ def cmd_backtest(args, logger: logging.Logger):
                     use_yolo=not bool(getattr(args, 'no_yolo', False)),
                     min_direction_confidence=float(getattr(args, 'min_confidence', 0.55)),
                 )
+                if cfg.profile == 'SCALP':
+                    cfg.avoid_rollover = False
                 super().__init__(config=cfg, data_provider=data_provider, executor=executor, **kwargs)
 
         strategy_map = {

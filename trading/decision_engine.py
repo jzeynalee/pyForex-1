@@ -160,6 +160,9 @@ class DecisionEngineConfig:
     max_consecutive_losses: int = 5
     cooldown_minutes: int = 30
 
+    # Hard-rules controls
+    avoid_rollover: bool = True
+
 
 class EnhancedDecisionEngine:
     """
@@ -220,7 +223,8 @@ class EnhancedDecisionEngine:
             max_correlated_group_exposure=500.0,  # Allow up to 500% in correlated pairs
             # Skip time-based checks for backtesting (historical data may have gaps)
             skip_weekend_check=True,
-            skip_session_check=True
+            skip_session_check=True,
+            avoid_rollover=bool(getattr(self.config, 'avoid_rollover', True)),
         ))
         
         # Phase 3: Meta-labeling filter
@@ -535,13 +539,11 @@ class EnhancedDecisionEngine:
         # Step 6: Meta-labeling Filter (Phase 3)
         # =================================================================
         if self.trade_filter:
-            meta_features = self._build_meta_features(
-                predictions, market_data, decision
-            )
+            meta_features_dict = self._build_meta_features_dict(predictions, market_data, decision)
             
             filter_result = self.trade_filter.filter(
                 signal=decision.direction,
-                features=meta_features,
+                features=meta_features_dict,
                 direction_confidence=confidence
             )
             
@@ -572,7 +574,7 @@ class EnhancedDecisionEngine:
             # - M15 is entry TF (handled in strategy.on_bar)
             # - M5 is feature TF (model input)
             if self.config.profile == 'SCALP':
-                if not bool(mtf_result.get('higher_tf_aligned', False)):
+                if (not bool(mtf_result.get('higher_tf_aligned', False))) and float(mtf_result.get('alignment', 0.0) or 0.0) < 0.95:
                     decision.rejection_reasons.append("HTF not aligned (higher_tf_aligned=False)")
                     return decision
 
@@ -585,14 +587,21 @@ class EnhancedDecisionEngine:
                         h1_dir = None
 
                 if h1_dir is not None:
-                    if decision.direction == 'BUY' and h1_dir <= 0:
+                    if decision.direction == 'BUY' and h1_dir < 0:
                         decision.rejection_reasons.append(
                             f"HTF(H1) counter-trend: dir={h1_dir}"
                         )
                         return decision
-                    if decision.direction == 'SELL' and h1_dir >= 0:
+                    if decision.direction == 'SELL' and h1_dir > 0:
                         decision.rejection_reasons.append(
                             f"HTF(H1) counter-trend: dir={h1_dir}"
+                        )
+                        return decision
+
+                    # If H1 is sideways/neutral, allow only when overall MTF alignment is very strong.
+                    if h1_dir == 0 and float(mtf_result.get('alignment', 0.0) or 0.0) < 0.90:
+                        decision.rejection_reasons.append(
+                            f"HTF(H1) neutral: dir=0"
                         )
                         return decision
         
@@ -602,7 +611,8 @@ class EnhancedDecisionEngine:
         if self.capital_protector:
             final_check = self.capital_protector.check_trade(
                 proposed_size=decision.position_size,
-                account_balance=account_balance
+                account_balance=account_balance,
+                current_time=current_time,
             )
             
             if not final_check['allowed']:
@@ -699,12 +709,35 @@ class EnhancedDecisionEngine:
         predictions: Dict,
         market_data: pd.DataFrame,
         decision: TradeDecision
-    ) -> Dict[str, float]:
+    ) -> np.ndarray:
         """Build feature dictionary for meta-labeling.
 
         The TradeFilter API expects a dict-like structure. This method returns
         scalar features plus optional TP-before-SL probabilities when available.
         """
+        feat = self._build_meta_features_dict(predictions, market_data, decision)
+
+        # Stable numeric vector (tests rely on index 0 being direction_confidence)
+        order = [
+            'direction_confidence',
+            'volatility',
+            'atr',
+            'risk_reward_ratio',
+            'quantile_width',
+            'recent_return_mean',
+            'recent_return_std',
+            'p_long',
+            'p_short',
+        ]
+        values = [float(feat.get(k, 0.0) or 0.0) for k in order]
+        return np.array(values, dtype=np.float32)
+
+    def _build_meta_features_dict(
+        self,
+        predictions: Dict,
+        market_data: pd.DataFrame,
+        decision: TradeDecision
+    ) -> Dict[str, float]:
         feat: Dict[str, float] = {}
 
         feat['direction_confidence'] = float(decision.direction_confidence)
@@ -754,7 +787,7 @@ class EnhancedDecisionEngine:
         mtf_data: Dict[str, pd.DataFrame]
     ) -> Dict:
         """Check multi-timeframe trend alignment."""
-        if not self.mtf_detector:
+        if not self.mtf_detector or not mtf_data:
             return {'alignment': 1.0, 'trend': 'unknown'}
         
         try:
