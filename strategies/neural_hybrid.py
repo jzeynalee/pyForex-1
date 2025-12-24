@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 from typing import Dict, Optional, List, Tuple
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from enum import Enum
 import logging
 
@@ -265,6 +265,8 @@ class NeuralHybridStrategy:
         self._daily_pnl = 0.0
         self._daily_wins = 0
         self._daily_losses = 0
+
+        self._last_daily_reset_day: Optional[date] = None
         
         # Trade history
         self._trade_history: List[Dict] = []
@@ -312,6 +314,15 @@ class NeuralHybridStrategy:
                     current_time = pd.to_datetime(df['time'].iloc[-1]).to_pydatetime()
                 except Exception:
                     current_time = None
+
+            if current_time is not None:
+                try:
+                    bar_day = current_time.date()
+                except Exception:
+                    bar_day = None
+                if bar_day is not None and bar_day != self._last_daily_reset_day:
+                    self.reset_daily_stats()
+                    self._last_daily_reset_day = bar_day
 
             if (
                 self.config.profile == 'SCALP'
@@ -401,11 +412,9 @@ class NeuralHybridStrategy:
                 self._process_new_closed_trades()
                 self._sync_open_positions_from_executor()
 
-            # SCALP plan: M5=LTF features, but only open new trades on M15 candle closes (TTF).
+            # SCALP plan: M5=LTF features, but evaluate every base bar (e.g., M5).
             if self.config.profile == 'SCALP' and current_time is not None:
                 if self._cooldown_until is not None and current_time < self._cooldown_until:
-                    return None
-                if int(current_time.minute) % 15 != 0:
                     return None
                 if self._last_ttf_close_time is not None and current_time <= self._last_ttf_close_time:
                     return None
