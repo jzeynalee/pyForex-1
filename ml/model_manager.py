@@ -29,6 +29,7 @@ class ModelMetadata:
     model_type: str
     hyperparameters: Dict[str, Any]
     feature_names: List[str]
+    feature_schema_version: Optional[str]
     training_samples: int
     validation_metrics: Dict[str, float]
     profile_name: str  # SCALP, SWING, etc.
@@ -48,6 +49,7 @@ class ModelMetadata:
             'model_type': self.model_type,
             'hyperparameters': self.hyperparameters,
             'feature_names': self.feature_names,
+            'feature_schema_version': self.feature_schema_version,
             'training_samples': self.training_samples,
             'validation_metrics': self.validation_metrics,
             'profile_name': self.profile_name,
@@ -69,6 +71,7 @@ class ModelMetadata:
             model_type=data['model_type'],
             hyperparameters=data['hyperparameters'],
             feature_names=data['feature_names'],
+            feature_schema_version=data.get('feature_schema_version'),
             training_samples=data['training_samples'],
             validation_metrics=data['validation_metrics'],
             profile_name=data['profile_name'],
@@ -213,6 +216,7 @@ class ModelManager:
         model_type: str,
         hyperparameters: Dict[str, Any],
         feature_names: List[str],
+        feature_schema_version: Optional[str],
         training_data: Any,
         training_start: datetime,
         training_end: datetime,
@@ -242,6 +246,7 @@ class ModelManager:
             model_type=model_type,
             hyperparameters=hyperparameters,
             feature_names=feature_names,
+            feature_schema_version=feature_schema_version,
             training_samples=len(training_data) if hasattr(training_data, '__len__') else 0,
             validation_metrics=validation_metrics,
             profile_name=profile_name,
