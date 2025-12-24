@@ -497,11 +497,18 @@ def cmd_backtest(args, logger: logging.Logger):
         # Select strategy (TCN-based neural hybrid)
         class BacktestNeuralStrategy(NeuralHybridStrategy):
             def __init__(self, data_provider=None, executor=None, **kwargs):
+                min_mtf_alignment = getattr(args, 'min_mtf_alignment', None)
+                if min_mtf_alignment is not None:
+                    try:
+                        min_mtf_alignment = float(min_mtf_alignment)
+                    except Exception:
+                        min_mtf_alignment = None
                 cfg = StrategyConfig(
                     profile=str(getattr(args, 'profile', 'INTRADAY') or 'INTRADAY').upper(),
                     use_vision=not bool(getattr(args, 'no_vision', False)),
                     use_yolo=not bool(getattr(args, 'no_yolo', False)),
                     min_direction_confidence=float(getattr(args, 'min_confidence', 0.55)),
+                    min_mtf_alignment=min_mtf_alignment if min_mtf_alignment is not None else StrategyConfig.min_mtf_alignment,
                 )
                 if cfg.profile == 'SCALP':
                     cfg.avoid_rollover = False
@@ -982,6 +989,12 @@ Examples:
         type=float,
         default=0.55,
         help="Decision confidence threshold (lower to allow more trades)",
+    )
+    bt_parser.add_argument(
+        "--min-mtf-alignment",
+        type=float,
+        default=None,
+        help="Minimum multi-timeframe alignment (0-1). If omitted, uses strategy profile default.",
     )
     bt_parser.add_argument("--output", type=str, help="Save results to JSON file")
     
