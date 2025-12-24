@@ -16,6 +16,8 @@ import json
 import hashlib
 from enum import Enum
 
+from utils.feature_schema import get_feature_schema_version
+
 logger = logging.getLogger(__name__)
 
 
@@ -844,6 +846,7 @@ class RetrainingPipeline:
             model_type=self.config.model.model_type,
             hyperparameters=hyperparameters,
             feature_names=feature_names,
+            feature_schema_version=get_feature_schema_version(),
             training_data=training_data,
             training_start=self.stage_times.get(PipelineStage.MODEL_TRAINING.value, datetime.now()),
             training_end=datetime.now(),
