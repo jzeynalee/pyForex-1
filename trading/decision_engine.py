@@ -272,11 +272,21 @@ class EnhancedDecisionEngine:
         self._initialized = True
         logger.info(f"Engine initialized with balance: {starting_balance:.2f}")
     
-    def record_trade_result(self, pnl: float, is_win: bool, size: float = 0.0):
+    def record_trade_result(
+        self,
+        pnl: float,
+        is_win: bool,
+        size: float = 0.0,
+        timestamp: Optional[datetime] = None,
+    ):
         """Record trade result for capital protection tracking."""
         self._current_balance += pnl
         if self.capital_protector:
-            self.capital_protector.record_trade(pnl, is_win, size)
+            try:
+                self.capital_protector.record_trade(pnl, is_win, size, timestamp=timestamp)
+            except TypeError:
+                # Backward compatibility if protector signature differs
+                self.capital_protector.record_trade(pnl, is_win, size)
     
     def evaluate(
         self,

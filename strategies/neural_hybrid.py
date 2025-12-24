@@ -861,11 +861,14 @@ class NeuralHybridStrategy:
         
         # Update decision engine's capital protection
         if self.decision_engine:
-            self.decision_engine.record_trade_result(
-                pnl=pnl,
-                is_win=pnl >= 0,
-                size=pos.volume if pos else 0.0
-            )
+            try:
+                self.decision_engine.record_trade_result(
+                    pnl=float(pnl),
+                    is_win=bool(pnl > 0),
+                    timestamp=close_time,
+                )
+            except Exception:
+                pass
         
         # Record in history
         self._trade_history.append({
