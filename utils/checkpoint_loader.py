@@ -39,6 +39,7 @@ class ModelInfo:
     receptive_field: Optional[int]
     feature_count: int
     created_at: Optional[str]
+    feature_schema_version: Optional[str] = None
 
 
 class CheckpointFormatError(Exception):
@@ -261,6 +262,10 @@ class ModelLoader:
         except CheckpointFormatError:
             input_dim = model_config.get('input_dim', 0)
         
+        feature_schema_version = None
+        if 'feature_schema_version' in config:
+            feature_schema_version = config['feature_schema_version']
+        
         return ModelInfo(
             model_type=model_type,
             input_dim=input_dim,
@@ -270,6 +275,7 @@ class ModelLoader:
             receptive_field=model_config.get('receptive_field'),
             feature_count=input_dim,
             created_at=self.checkpoint.get('created_at'),
+            feature_schema_version=feature_schema_version,
         )
     
     def summary(self) -> str:
@@ -283,6 +289,9 @@ class ModelLoader:
             f"  Hidden Dim: {info.hidden_dim}",
             f"  Classes: {info.num_classes}",
         ]
+
+        if info.feature_schema_version:
+            lines.append(f"  Feature Schema: {info.feature_schema_version}")
         
         if info.profile:
             lines.append(f"  Profile: {info.profile}")
