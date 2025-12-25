@@ -29,7 +29,9 @@ logger = logging.getLogger(__name__)
 
 class OptimizedBacktestRunner(BacktestRunner):
     def __init__(self, data_path: str, symbol: str = "EURUSD", profile: str = "SCALP"):
-        super().__init__(data_path, symbol)
+        # Setup Prop Firm Config first to get account size
+        self.prop_config = get_prop_firm_config('FTMO', account_size=100000, phase='evaluation', conservative=True)
+        super().__init__(data_path, symbol, initial_balance=self.prop_config.account_size)
         self.profile = profile
         
     def run(self):
