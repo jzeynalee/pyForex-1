@@ -40,7 +40,7 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional, List, Tuple, Dict, Literal, Union
 from dataclasses import dataclass, field, asdict
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader, TensorDataset, Dataset
 from tqdm import tqdm
 
 # Sklearn for feature importance
@@ -50,6 +50,7 @@ from sklearn.preprocessing import RobustScaler
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from models.tcn import CausalConv1d as _CausalConv1d, TCNBlock as _TCNBlock, TCNModel
 from utils.feature_schema import get_feature_schema_version
 from utils.training_utils import set_global_seed, copy_schema_tagged
 
@@ -58,6 +59,97 @@ logging.basicConfig(
     format='%(asctime)s | %(levelname)s | %(message)s',
 )
 logger = logging.getLogger(__name__)
+
+class TCNBlock(_TCNBlock):
+    def __init__(
+        self,
+        in_ch: Optional[int] = None,
+        out_ch: Optional[int] = None,
+        kernel_size: int = 3,
+        dilation: int = 1,
+        dropout: float = 0.2,
+        use_weight_norm: bool = True,
+        in_channels: Optional[int] = None,
+        out_channels: Optional[int] = None,
+    ):
+        if in_channels is None:
+            in_channels = in_ch
+        if out_channels is None:
+            out_channels = out_ch
+        super().__init__(
+            in_channels=int(in_channels),
+            out_channels=int(out_channels),
+            kernel_size=int(kernel_size),
+            dilation=int(dilation),
+            dropout=float(dropout),
+            use_weight_norm=bool(use_weight_norm),
+        )
+
+CausalConv1d = _CausalConv1d
+
+class EnhancedTCN(nn.Module):
+    PROFILES = TCNModel.PROFILES
+
+    def __init__(
+        self,
+        input_dim: int,
+        hidden_dim: int = 64,
+        num_layers: int = 4,
+        num_classes: int = 3,
+        dropout: float = 0.2,
+        kernel_size: int = 3,
+        dilation_base: int = 2,
+    ):
+        super().__init__()
+        self.input_dim = int(input_dim)
+        self.hidden_dim = int(hidden_dim)
+        self.num_classes = int(num_classes)
+
+        self._tcn = TCNModel(
+            input_dim=self.input_dim,
+            hidden_dim=self.hidden_dim,
+            num_layers=int(num_layers),
+            num_classes=self.num_classes,
+            dropout=float(dropout),
+            kernel_size=int(kernel_size),
+            dilation_base=int(dilation_base),
+        )
+
+        self.tcn = self._tcn.tcn
+        self.classifier = self._tcn.classifier
+        self.layer_norm = self._tcn.layer_norm
+        self.feature_dim = self._tcn.feature_dim
+        self.receptive_field = int(getattr(self.tcn, 'receptive_field', 0) or 0)
+
+    @classmethod
+    def from_profile(
+        cls,
+        profile: Literal['SCALP', 'INTRADAY', 'SWING'],
+        input_dim: int,
+        hidden_dim: int = 64,
+        num_classes: int = 3,
+        dropout: float = 0.2,
+    ) -> 'EnhancedTCN':
+        profile = profile.upper()
+        if profile not in TCNModel.PROFILES:
+            raise ValueError(f"Unknown profile: {profile}. Use {list(TCNModel.PROFILES.keys())}")
+
+        cfg = TCNModel.PROFILES[profile]
+        return cls(
+            input_dim=input_dim,
+            hidden_dim=hidden_dim,
+            num_layers=cfg['num_layers'],
+            num_classes=num_classes,
+            dropout=dropout,
+            kernel_size=cfg['kernel_size'],
+            dilation_base=cfg.get('dilation_base', 2),
+        )
+
+    def forward(self, x: torch.Tensor, mode: str = 'classify') -> torch.Tensor:
+        return self._tcn(x, mode=mode)
+
+    def get_feature_dim(self) -> int:
+        return int(self.feature_dim)
 
 
 # =============================================================================
@@ -299,6 +391,30 @@ class FeatureImportanceAnalyzer:
 # Enhanced Data Loader (Unified with feature selection)
 # =============================================================================
 
+class SequenceWindowDataset(Dataset):
+    def __init__(self, data_2d: np.ndarray, labels: np.ndarray, seq_len: int):
+        if data_2d.ndim != 2:
+            raise ValueError(f"data_2d must be 2D, got shape={getattr(data_2d, 'shape', None)}")
+        if labels.ndim != 1:
+            raise ValueError(f"labels must be 1D, got shape={getattr(labels, 'shape', None)}")
+        if len(labels) + seq_len > len(data_2d) + 1:
+            raise ValueError("labels length is inconsistent with data_2d and seq_len")
+
+        self.data_2d = np.asarray(data_2d, dtype=np.float32)
+        self.labels = np.asarray(labels, dtype=np.int64)
+        self.seq_len = int(seq_len)
+
+    def __len__(self) -> int:
+        return int(len(self.labels))
+
+    def __getitem__(self, idx: int):
+        start = int(idx)
+        end = start + self.seq_len
+        x = torch.from_numpy(self.data_2d[start:end])
+        y = torch.tensor(self.labels[start], dtype=torch.long)
+        return x, y
+
+
 class EnhancedDataLoaderV3:
     """
     Data loader with integrated feature selection support.
@@ -328,13 +444,16 @@ class EnhancedDataLoaderV3:
         self.val_close: np.ndarray = None
         self.test_close: np.ndarray = None
 
-    def load_csv(self, path: str) -> pd.DataFrame:
+    def load_csv(self, path: str, max_rows: Optional[int] = None) -> pd.DataFrame:
         """Load and prepare data from CSV."""
         logger.info(f"📂 Loading data from {path}")
         df = pd.read_csv(path)
 
         # Standardize column names
         df.columns = df.columns.str.lower().str.strip()
+
+        if max_rows is not None and max_rows > 0 and len(df) > max_rows:
+            df = df.tail(max_rows).reset_index(drop=True)
 
         # Ensure required columns
         required = ['open', 'high', 'low', 'close']
@@ -371,26 +490,21 @@ class EnhancedDataLoaderV3:
         return df
 
     def _add_technical_features(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Add technical indicators if not present."""
         close = df['close'].values
         high = df['high'].values
         low = df['low'].values
 
-        # RSI
         if 'rsi_14' not in df.columns:
             df['rsi_14'] = self._calc_rsi(close, 14)
 
-        # ATR
         if 'atr_14' not in df.columns:
             df['atr_14'] = self._calc_atr(high, low, close, 14)
 
-        # EMAs
         for period in [9, 20, 50, 200]:
             col = f'ema_{period}'
             if col not in df.columns:
                 df[col] = pd.Series(close).ewm(span=period, adjust=False).mean()
 
-        # MACD
         if 'macd' not in df.columns:
             ema12 = pd.Series(close).ewm(span=12, adjust=False).mean()
             ema26 = pd.Series(close).ewm(span=26, adjust=False).mean()
@@ -398,150 +512,120 @@ class EnhancedDataLoaderV3:
             df['macd_signal'] = df['macd'].ewm(span=9, adjust=False).mean()
             df['macd_hist'] = df['macd'] - df['macd_signal']
 
-        # Bollinger Bands
-        if 'bb_upper' not in df.columns:
-            sma20 = pd.Series(close).rolling(20).mean()
-            std20 = pd.Series(close).rolling(20).std()
-            df['bb_upper'] = sma20 + 2 * std20
-            df['bb_lower'] = sma20 - 2 * std20
-            df['bb_position'] = (close - df['bb_lower']) / (df['bb_upper'] - df['bb_lower'])
+        if 'bb_upper' not in df.columns or 'bb_lower' not in df.columns or 'bb_position' not in df.columns:
+            close_s = pd.Series(close)
+            ma = close_s.rolling(window=20).mean()
+            std = close_s.rolling(window=20).std(ddof=0)
+            upper = ma + 2 * std
+            lower = ma - 2 * std
+            df['bb_upper'] = upper
+            df['bb_lower'] = lower
+            width = (upper - lower).replace(0, np.nan)
+            df['bb_position'] = ((close_s - lower) / width).fillna(0.5).clip(0.0, 1.0)
 
-        # Stochastic
-        if 'stoch_k' not in df.columns:
-            low_14 = pd.Series(low).rolling(14).min()
-            high_14 = pd.Series(high).rolling(14).max()
-            df['stoch_k'] = 100 * (close - low_14) / (high_14 - low_14 + 1e-10)
-            df['stoch_d'] = df['stoch_k'].rolling(3).mean()
+        if 'stoch_k' not in df.columns or 'stoch_d' not in df.columns:
+            low_s = pd.Series(low)
+            high_s = pd.Series(high)
+            close_s = pd.Series(close)
+            ll = low_s.rolling(window=14).min()
+            hh = high_s.rolling(window=14).max()
+            denom = (hh - ll).replace(0, np.nan)
+            stoch_k = ((close_s - ll) / denom * 100.0).fillna(50.0)
+            stoch_d = stoch_k.rolling(window=3).mean().fillna(50.0)
+            df['stoch_k'] = stoch_k
+            df['stoch_d'] = stoch_d
 
-        # ADX
         if 'adx_14' not in df.columns:
             df['adx_14'] = self._calc_adx(high, low, close, 14)
 
-        # ROC (Rate of Change)
-        for period in [5, 10, 20]:
-            col = f'roc_{period}'
-            if col not in df.columns:
-                df[col] = (close - np.roll(close, period)) / (np.roll(close, period) + 1e-10) * 100
-
-        # Volume features
-        if 'volume' in df.columns:
-            vol = df['volume'].values
-            if 'volume_sma_ratio' not in df.columns:
-                vol_sma = pd.Series(vol).rolling(20).mean()
-                df['volume_sma_ratio'] = vol / (vol_sma + 1e-10)
-
-        # Price momentum
-        if 'price_momentum_5' not in df.columns:
-            df['price_momentum_5'] = (close - np.roll(close, 5)) / (np.roll(close, 5) + 1e-10)
-
-        # Trend strength (simplified)
-        if 'trend_strength' not in df.columns:
-            df['trend_strength'] = df['adx_14'] / 100.0
-
-        # Fill NaN values
+        df = df.replace([np.inf, -np.inf], np.nan)
         df = df.fillna(method='ffill').fillna(method='bfill').fillna(0)
-
         return df
 
+    def _calc_adx(self, high: np.ndarray, low: np.ndarray, close: np.ndarray, period: int = 14) -> np.ndarray:
+        high_s = pd.Series(high)
+        low_s = pd.Series(low)
+        close_s = pd.Series(close)
+
+        up_move = high_s.diff()
+        down_move = -low_s.diff()
+
+        plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0.0)
+        minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0.0)
+
+        prev_close = close_s.shift(1)
+        tr = pd.concat(
+            [
+                (high_s - low_s).abs(),
+                (high_s - prev_close).abs(),
+                (low_s - prev_close).abs(),
+            ],
+            axis=1,
+        ).max(axis=1)
+
+        atr = tr.rolling(window=period).mean()
+        plus_di = 100.0 * (pd.Series(plus_dm).rolling(window=period).mean() / (atr + 1e-10))
+        minus_di = 100.0 * (pd.Series(minus_dm).rolling(window=period).mean() / (atr + 1e-10))
+
+        dx = (100.0 * (plus_di - minus_di).abs() / (plus_di + minus_di + 1e-10)).fillna(0.0)
+        adx = dx.rolling(window=period).mean().fillna(0.0)
+        return adx.values
+
     def _calc_rsi(self, prices: np.ndarray, period: int = 14) -> np.ndarray:
-        """Calculate RSI."""
         deltas = np.diff(prices)
         gains = np.where(deltas > 0, deltas, 0)
         losses = np.where(deltas < 0, -deltas, 0)
-
         avg_gain = pd.Series(gains).rolling(window=period).mean().values
         avg_loss = pd.Series(losses).rolling(window=period).mean().values
-
         rs = avg_gain / (avg_loss + 1e-10)
         rsi = 100 - (100 / (1 + rs))
-
-        return np.concatenate([[50], rsi])  # Pad first value
+        return np.concatenate([[50], rsi])
 
     def _calc_atr(self, high: np.ndarray, low: np.ndarray, close: np.ndarray, period: int = 14) -> np.ndarray:
-        """Calculate ATR."""
         prev_close = np.roll(close, 1)
         prev_close[0] = close[0]
-
         tr = np.maximum(
             high - low,
             np.maximum(
                 np.abs(high - prev_close),
-                np.abs(low - prev_close)
-            )
+                np.abs(low - prev_close),
+            ),
         )
-
         return pd.Series(tr).rolling(window=period).mean().fillna(0).values
 
-    def _calc_adx(self, high: np.ndarray, low: np.ndarray, close: np.ndarray, period: int = 14) -> np.ndarray:
-        """Calculate ADX (simplified)."""
-        # True Range
-        prev_close = np.roll(close, 1)
-        prev_close[0] = close[0]
-        tr = np.maximum(high - low, np.maximum(np.abs(high - prev_close), np.abs(low - prev_close)))
-
-        # Directional Movement
-        prev_high = np.roll(high, 1)
-        prev_low = np.roll(low, 1)
-        plus_dm = np.where((high - prev_high) > (prev_low - low), np.maximum(high - prev_high, 0), 0)
-        minus_dm = np.where((prev_low - low) > (high - prev_high), np.maximum(prev_low - low, 0), 0)
-
-        # Smoothed values
-        atr = pd.Series(tr).rolling(period).mean()
-        plus_di = 100 * pd.Series(plus_dm).rolling(period).mean() / (atr + 1e-10)
-        minus_di = 100 * pd.Series(minus_dm).rolling(period).mean() / (atr + 1e-10)
-
-        # ADX
-        dx = 100 * np.abs(plus_di - minus_di) / (plus_di + minus_di + 1e-10)
-        adx = pd.Series(dx).rolling(period).mean()
-
-        return adx.fillna(0).values
-
     def set_feature_columns(self, features: List[str]):
-        """Set specific features to use."""
         available = set(self.all_feature_columns)
         valid = [f for f in features if f in available]
-
         if len(valid) < len(features):
             missing = [f for f in features if f not in available]
             logger.warning(f"Features not found (skipped): {missing}")
-
         self.feature_columns = valid
         logger.info(f"   Using {len(self.feature_columns)} features")
 
     def split_and_scale(
         self,
         df: pd.DataFrame,
-        train_ratio: float = 0.8,
-        val_ratio: float = 0.1,
+        train_ratio: float = 0.7,
+        val_ratio: float = 0.15,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """
-        Split data and scale features.
-
-        Returns:
-            train_scaled, val_scaled, test_scaled
-        """
         n = len(df)
         train_end = int(n * train_ratio)
         val_end = int(n * (train_ratio + val_ratio))
 
-        # Store close prices for label generation
         self.train_close = df['close'].iloc[:train_end].values
         self.val_close = df['close'].iloc[train_end:val_end].values
         self.test_close = df['close'].iloc[val_end:].values
 
-        # Extract features
         train_df = df.iloc[:train_end][self.feature_columns]
         val_df = df.iloc[train_end:val_end][self.feature_columns]
         test_df = df.iloc[val_end:][self.feature_columns]
 
-        # Scale
         self.scaler = RobustScaler()
-        train_scaled = self.scaler.fit_transform(train_df.values)
-        val_scaled = self.scaler.transform(val_df.values)
-        test_scaled = self.scaler.transform(test_df.values)
+        train_scaled = self.scaler.fit_transform(train_df.values).astype(np.float32, copy=False)
+        val_scaled = self.scaler.transform(val_df.values).astype(np.float32, copy=False)
+        test_scaled = self.scaler.transform(test_df.values).astype(np.float32, copy=False)
 
         logger.info(f"   Train: {len(train_scaled)}, Val: {len(val_scaled)}, Test: {len(test_scaled)}")
-
         return train_scaled, val_scaled, test_scaled
 
     def create_sequences(
@@ -549,236 +633,38 @@ class EnhancedDataLoaderV3:
         data: np.ndarray,
         close_prices: np.ndarray,
         seq_len: int,
-        horizon: int = 1,
+        horizon: int = 3,
         timeframe_hint: str = None,
+        max_sequences: Optional[int] = None,
     ) -> Tuple[np.ndarray, np.ndarray]:
-        """
-        Create sequences with labels based on future returns.
-
-        Args:
-            data: Scaled feature matrix
-            close_prices: Raw close prices for label generation
-            seq_len: Sequence length
-            horizon: How many steps ahead to predict
-            timeframe_hint: Optional timeframe for adaptive thresholds
-
-        Returns:
-            X: (samples, seq_len, features)
-            y: (samples,) with labels 0=Bear, 1=Sideways, 2=Bull
-        """
-        X, y = [], []
-        returns = []
-        
-        # Use longer horizon for clearer signal
-        effective_horizon = max(horizon, 3)
-        limit = len(data) - seq_len - effective_horizon
-        
+        limit = len(data) - seq_len - horizon + 1
         if limit <= 0:
-            logger.warning(f"⚠️ Insufficient data for sequences")
             return np.array([]), np.array([])
-        
-        # First pass: collect returns
-        for i in range(limit):
-            entry_price = close_prices[i + seq_len - 1]
-            exit_price = close_prices[i + seq_len - 1 + effective_horizon]
-            pct_return = (exit_price - entry_price) / entry_price
-            returns.append(pct_return)
-        
-        returns = np.array(returns)
-        
-        # Use percentile thresholds for balanced 3-class distribution
+
+        if max_sequences is not None and limit > max_sequences:
+            start = limit - max_sequences
+            data = data[start:]
+            close_prices = close_prices[start:]
+            limit = len(data) - seq_len - horizon + 1
+
+        if limit > 250000:
+            raise MemoryError("create_sequences would allocate a very large array; use SequenceWindowDataset instead")
+
+        entry_idx = np.arange(limit, dtype=np.int64) + (seq_len - 1)
+        exit_idx = entry_idx + horizon
+        entry_price = close_prices[entry_idx]
+        exit_price = close_prices[exit_idx]
+        returns = (exit_price - entry_price) / entry_price
+
         p33 = np.percentile(returns, 33)
         p67 = np.percentile(returns, 67)
-        
-        # Second pass: create sequences
+        y = np.where(returns <= p33, 0, np.where(returns >= p67, 2, 1)).astype(np.int64)
+
+        X = np.empty((limit, seq_len, data.shape[1]), dtype=np.float32)
         for i in range(limit):
-            X.append(data[i:i+seq_len])
-            ret = returns[i]
-            
-            if ret <= p33:
-                y.append(0)  # Bear
-            elif ret >= p67:
-                y.append(2)  # Bull
-            else:
-                y.append(1)  # Sideways
-        
-        # Log distribution
-        y_array = np.array(y)
-        unique, counts = np.unique(y_array, return_counts=True)
-        label_names = {0: 'Bear', 1: 'Sideways', 2: 'Bull'}
-        total = len(y_array)
-        label_dist = {label_names.get(k, k): f"{v} ({v/total*100:.1f}%)" for k, v in zip(unique, counts)}
-        logger.info(f"   3-class labels (horizon={effective_horizon}): {label_dist}")
-        
-        return np.array(X), np.array(y)
+            X[i] = data[i:i + seq_len]
 
-    def _get_adaptive_threshold(self, timeframe_hint: str, seq_len: int, horizon: int) -> float:
-        """Get adaptive trend threshold based on timeframe characteristics."""
-        # Much more realistic thresholds for different forex timeframes
-        # These are based on typical ATR values for EURUSD
-        timeframe_thresholds = {
-            'M1': 0.0001,   # 0.01% for 1-minute (1 pip)
-            'M5': 0.0002,   # 0.02% for 5-minute (2 pips)
-            'M15': 0.0003,  # 0.03% for 15-minute (3 pips)
-            'M30': 0.0005,  # 0.05% for 30-minute (5 pips)
-            'H1': 0.0008,   # 0.08% for 1-hour (8 pips)
-            'H4': 0.002,    # 0.2% for 4-hour (20 pips)
-            'D1': 0.004,    # 0.4% for daily (40 pips)
-        }
-
-        # Use provided hint or default to base threshold
-        if timeframe_hint and timeframe_hint.upper() in timeframe_thresholds:
-            return timeframe_thresholds[timeframe_hint.upper()]
-
-        # Fallback: use default trend_threshold
-        return self.trend_threshold
-
-
-# =============================================================================
-# TCN Model (with enhancements)
-# =============================================================================
-
-class CausalConv1d(nn.Module):
-    """Causal convolution with left-padding."""
-
-    def __init__(self, in_channels: int, out_channels: int, kernel_size: int, dilation: int = 1):
-        super().__init__()
-        self.padding = (kernel_size - 1) * dilation
-        self.conv = nn.Conv1d(in_channels, out_channels, kernel_size, padding=0, dilation=dilation)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = F.pad(x, (self.padding, 0))
-        return self.conv(x)
-
-
-class TCNBlock(nn.Module):
-    """Residual TCN block with two causal convolutions."""
-
-    def __init__(self, in_ch: int, out_ch: int, kernel_size: int, dilation: int, dropout: float = 0.2):
-        super().__init__()
-
-        self.conv1 = CausalConv1d(in_ch, out_ch, kernel_size, dilation)
-        self.norm1 = nn.BatchNorm1d(out_ch)
-        self.conv2 = CausalConv1d(out_ch, out_ch, kernel_size, dilation)
-        self.norm2 = nn.BatchNorm1d(out_ch)
-
-        self.dropout = nn.Dropout(dropout)
-        self.relu = nn.ReLU()
-
-        self.residual = nn.Conv1d(in_ch, out_ch, 1) if in_ch != out_ch else nn.Identity()
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        out = self.dropout(self.relu(self.norm1(self.conv1(x))))
-        out = self.dropout(self.relu(self.norm2(self.conv2(out))))
-        return self.relu(out + self.residual(x))
-
-
-class EnhancedTCN(nn.Module):
-    """
-    Simplified TCN model for forex prediction.
-
-    Key features:
-    - Profile-aware architecture selection
-    - Simple but effective aggregation
-    - Lightweight classifier
-    """
-
-    PROFILES = {
-        'SCALP': {'num_layers': 3, 'kernel_size': 3},      # RF ≈ 15
-        'INTRADAY': {'num_layers': 4, 'kernel_size': 3},   # RF ≈ 31
-        'SWING': {'num_layers': 5, 'kernel_size': 3},      # RF ≈ 63
-    }
-
-    def __init__(
-        self,
-        input_dim: int,
-        hidden_dim: int = 64,
-        num_layers: int = 4,
-        num_classes: int = 3,  # Bear=0, Sideways=1, Bull=2
-        dropout: float = 0.2,
-        kernel_size: int = 3,
-    ):
-        super().__init__()
-
-        self.input_dim = input_dim
-        self.hidden_dim = hidden_dim
-        self.feature_dim = hidden_dim
-
-        # Calculate dilations
-        dilations = [2 ** i for i in range(num_layers)]
-        self.receptive_field = 1 + 2 * (kernel_size - 1) * sum(dilations)
-
-        # Build TCN blocks
-        layers = []
-        for i, dilation in enumerate(dilations):
-            in_ch = input_dim if i == 0 else hidden_dim
-            layers.append(TCNBlock(in_ch, hidden_dim, kernel_size, dilation, dropout))
-        self.tcn = nn.Sequential(*layers)
-
-        # Simple layer norm
-        self.layer_norm = nn.LayerNorm(hidden_dim)
-
-        # Simple classifier
-        self.classifier = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dim, num_classes),
-        )
-
-    @classmethod
-    def from_profile(
-        cls,
-        profile: str,
-        input_dim: int,
-        hidden_dim: int = 64,
-        num_classes: int = 3,  # Bear=0, Sideways=1, Bull=2
-        dropout: float = 0.2,
-    ) -> 'EnhancedTCN':
-        """Create TCN with profile-optimized architecture."""
-        profile = profile.upper()
-        if profile not in cls.PROFILES:
-            raise ValueError(f"Unknown profile: {profile}. Use {list(cls.PROFILES.keys())}")
-
-        config = cls.PROFILES[profile]
-        return cls(
-            input_dim=input_dim,
-            hidden_dim=hidden_dim,
-            num_layers=config['num_layers'],
-            num_classes=num_classes,
-            dropout=dropout,
-            kernel_size=config['kernel_size'],
-        )
-
-    def forward(self, x: torch.Tensor, mode: str = 'classify') -> torch.Tensor:
-        """
-        Forward pass.
-
-        Args:
-            x: (batch, seq_len, input_dim)
-            mode: 'features' or 'classify'
-        """
-        # TCN expects (batch, channels, seq_len)
-        x = x.transpose(1, 2)
-
-        # TCN forward
-        tcn_out = self.tcn(x)  # (batch, hidden_dim, seq_len)
-
-        # Back to (batch, seq_len, hidden_dim)
-        tcn_out = tcn_out.transpose(1, 2)
-
-        # Simple aggregation: last timestep + global average
-        last_step = tcn_out[:, -1, :]
-        global_avg = tcn_out.mean(dim=1)
-        features = 0.7 * last_step + 0.3 * global_avg
-        features = self.layer_norm(features)
-
-        if mode == 'features':
-            return features
-        return self.classifier(features)
-
-    def get_feature_dim(self) -> int:
-        return self.feature_dim
+        return X, y
 
 
 # =============================================================================
@@ -822,6 +708,7 @@ class TCNTrainer:
         features: Optional[List[str]] = None,
         skip_feature_selection: bool = False,
         profile: Optional[str] = None,
+        max_rows: Optional[int] = None,
     ) -> Tuple[DataLoader, DataLoader, DataLoader]:
         """
         Load data, optionally discover features, prepare loaders.
@@ -833,7 +720,7 @@ class TCNTrainer:
             profile: Trading profile for feature prioritization
         """
         # Load data
-        df = self.data_loader.load_csv(data_path)
+        df = self.data_loader.load_csv(data_path, max_rows=max_rows)
 
         # Feature selection
         if features:
@@ -846,110 +733,97 @@ class TCNTrainer:
             # Use all features
             self.selected_features = self.data_loader.all_feature_columns.copy()
             logger.info(f"Using all {len(self.selected_features)} features (no selection)")
+            self.data_loader.set_feature_columns(self.selected_features)
 
         else:
-            # Auto-discover features
-            # First, prepare data for feature importance (using all features)
             train_scaled, _, _ = self.data_loader.split_and_scale(
                 df,
                 train_ratio=self.training_config.train_split,
                 val_ratio=self.training_config.val_split,
             )
 
-            # Extract timeframe from data path for adaptive thresholds
-            timeframe_hint = None
-            if 'M1' in data_path:
-                timeframe_hint = 'M1'
-            elif 'M5' in data_path:
-                timeframe_hint = 'M5'
-            elif 'M15' in data_path:
-                timeframe_hint = 'M15'
-            elif 'M30' in data_path:
-                timeframe_hint = 'M30'
-            elif 'H1' in data_path:
-                timeframe_hint = 'H1'
-            elif 'H4' in data_path:
-                timeframe_hint = 'H4'
-            elif 'D1' in data_path:
-                timeframe_hint = 'D1'
+            seq_len = self.training_config.sequence_length
+            horizon = 3
+            limit = len(train_scaled) - seq_len - horizon + 1
+            if limit <= 0:
+                raise ValueError("Insufficient data for feature selection")
 
-            X_train, y_train = self.data_loader.create_sequences(
-                train_scaled,
-                self.data_loader.train_close,
-                self.training_config.sequence_length,
-                timeframe_hint=timeframe_hint,
-            )
+            entry_idx = np.arange(limit, dtype=np.int64) + (seq_len - 1)
+            exit_idx = entry_idx + horizon
+            entry_price = self.data_loader.train_close[entry_idx]
+            exit_price = self.data_loader.train_close[exit_idx]
+            returns = (exit_price - entry_price) / entry_price
 
-            # Run feature importance analysis
+            p33 = np.percentile(returns, 33)
+            p67 = np.percentile(returns, 67)
+            y_fs = np.where(returns <= p33, 0, np.where(returns >= p67, 2, 1)).astype(np.int64)
+            X_fs = train_scaled[entry_idx]
+
+            max_fs_samples = 50000
+            if len(y_fs) > max_fs_samples:
+                start = len(y_fs) - max_fs_samples
+                X_fs = X_fs[start:]
+                y_fs = y_fs[start:]
+
             self.selected_features = self.feature_analyzer.analyze(
-                X_train, y_train,
+                X_fs,
+                y_fs,
                 self.data_loader.feature_columns,
                 profile=profile,
             )
-
-            # Now reload with selected features only
             self.data_loader.set_feature_columns(self.selected_features)
 
-        # Prepare final data splits
         train_scaled, val_scaled, test_scaled = self.data_loader.split_and_scale(
             df,
             train_ratio=self.training_config.train_split,
             val_ratio=self.training_config.val_split,
         )
 
-        # Extract timeframe from data path for adaptive thresholds
-        timeframe_hint = None
-        if 'M1' in data_path:
-            timeframe_hint = 'M1'
-        elif 'M5' in data_path:
-            timeframe_hint = 'M5'
-        elif 'M15' in data_path:
-            timeframe_hint = 'M15'
-        elif 'M30' in data_path:
-            timeframe_hint = 'M30'
-        elif 'H1' in data_path:
-            timeframe_hint = 'H1'
-        elif 'H4' in data_path:
-            timeframe_hint = 'H4'
-        elif 'D1' in data_path:
-            timeframe_hint = 'D1'
+        seq_len = self.training_config.sequence_length
+        horizon = 3
 
-        # Create sequences with adaptive thresholds
-        X_train, y_train = self.data_loader.create_sequences(
-            train_scaled, self.data_loader.train_close,
-            self.training_config.sequence_length,
-            timeframe_hint=timeframe_hint,
-        )
-        X_val, y_val = self.data_loader.create_sequences(
-            val_scaled, self.data_loader.val_close,
-            self.training_config.sequence_length,
-            timeframe_hint=timeframe_hint,
-        )
-        X_test, y_test = self.data_loader.create_sequences(
-            test_scaled, self.data_loader.test_close,
-            self.training_config.sequence_length,
-            timeframe_hint=timeframe_hint,
-        )
+        train_returns_limit = len(self.data_loader.train_close) - seq_len - horizon + 1
+        if train_returns_limit <= 0:
+            raise ValueError("Insufficient data for sequence labeling")
+        train_entry_idx = np.arange(train_returns_limit, dtype=np.int64) + (seq_len - 1)
+        train_exit_idx = train_entry_idx + horizon
+        train_entry = self.data_loader.train_close[train_entry_idx]
+        train_exit = self.data_loader.train_close[train_exit_idx]
+        train_returns = (train_exit - train_entry) / train_entry
+        p33 = np.percentile(train_returns, 33)
+        p67 = np.percentile(train_returns, 67)
 
-        logger.info(f"   Train: {len(X_train)}, Val: {len(X_val)}, Test: {len(X_test)}")
+        def _make_labels(close_prices: np.ndarray) -> np.ndarray:
+            limit_local = len(close_prices) - seq_len - horizon + 1
+            if limit_local <= 0:
+                return np.array([], dtype=np.int64)
+            entry_idx = np.arange(limit_local, dtype=np.int64) + (seq_len - 1)
+            exit_idx = entry_idx + horizon
+            entry_price = close_prices[entry_idx]
+            exit_price = close_prices[exit_idx]
+            returns = (exit_price - entry_price) / entry_price
+            return np.where(returns <= p33, 0, np.where(returns >= p67, 2, 1)).astype(np.int64)
 
-        # Check class balance
-        unique, counts = np.unique(y_train, return_counts=True)
-        logger.info(f"   Class distribution: {dict(zip(['Bear', 'Sideways', 'Bull'], counts))}")
+        y_train = _make_labels(self.data_loader.train_close)
+        y_val = _make_labels(self.data_loader.val_close)
+        y_test = _make_labels(self.data_loader.test_close)
 
-        # Create DataLoaders
-        train_ds = TensorDataset(
-            torch.tensor(X_train, dtype=torch.float32),
-            torch.tensor(y_train, dtype=torch.long)
-        )
-        val_ds = TensorDataset(
-            torch.tensor(X_val, dtype=torch.float32),
-            torch.tensor(y_val, dtype=torch.long)
-        )
-        test_ds = TensorDataset(
-            torch.tensor(X_test, dtype=torch.float32),
-            torch.tensor(y_test, dtype=torch.long)
-        )
+        def _label_summary(y: np.ndarray) -> Dict[str, str]:
+            if len(y) == 0:
+                return {'Bear': '0', 'Sideways': '0', 'Bull': '0'}
+            counts = np.bincount(y, minlength=3)
+            total = int(len(y))
+            return {
+                'Bear': f"{int(counts[0])} ({counts[0] / total:.1%})",
+                'Sideways': f"{int(counts[1])} ({counts[1] / total:.1%})",
+                'Bull': f"{int(counts[2])} ({counts[2] / total:.1%})",
+            }
+
+        logger.info(f"   3-class labels (horizon={horizon}): {_label_summary(y_train)}")
+
+        train_ds = SequenceWindowDataset(train_scaled, y_train, seq_len)
+        val_ds = SequenceWindowDataset(val_scaled, y_val, seq_len)
+        test_ds = SequenceWindowDataset(test_scaled, y_test, seq_len)
 
         train_loader = DataLoader(train_ds, batch_size=self.training_config.batch_size, shuffle=True)
         val_loader = DataLoader(val_ds, batch_size=self.training_config.batch_size)
@@ -999,10 +873,14 @@ class TCNTrainer:
             raise RuntimeError("Model not built. Call build_model() first.")
 
         # Class weights for imbalanced data
-        all_labels = []
-        for _, y in train_loader:
-            all_labels.extend(y.numpy())
-        class_counts = np.bincount(all_labels, minlength=3)
+        ds_labels = getattr(getattr(train_loader, 'dataset', None), 'labels', None)
+        if ds_labels is not None:
+            class_counts = np.bincount(np.asarray(ds_labels, dtype=np.int64), minlength=3)
+        else:
+            all_labels = []
+            for _, y in train_loader:
+                all_labels.extend(y.numpy())
+            class_counts = np.bincount(all_labels, minlength=3)
         class_weights = 1.0 / (class_counts + 1e-10)
         class_weights = class_weights / class_weights.sum() * 3
         class_weights = torch.tensor(class_weights, dtype=torch.float32).to(self.device)
@@ -1307,6 +1185,8 @@ Examples:
     parser.add_argument('--lr', type=float, default=1e-3, help='Learning rate')
     parser.add_argument('--seq-len', type=int, default=30, help='Sequence length')
     parser.add_argument('--seed', type=int, default=42, help='Random seed')
+    parser.add_argument('--max-rows', type=int, default=None, help='Limit dataset rows (use most recent)')
+
     parser.add_argument('--threshold', type=float, default=0.05,
                         help='Trend threshold (default: 0.05 = 5 pips)')
     parser.add_argument('--patience', type=int, default=10, help='Early stopping patience')
@@ -1378,6 +1258,7 @@ Examples:
         features=features,
         skip_feature_selection=args.skip_feature_selection,
         profile=args.profile,
+        max_rows=args.max_rows,
     )
 
     # Build model

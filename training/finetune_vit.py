@@ -37,6 +37,9 @@ import timm
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from utils.feature_schema import get_feature_schema_version
+from utils.training_utils import copy_schema_tagged, set_global_seed
+
 # =============================================================================
 # Profile Configurations
 # =============================================================================
@@ -170,8 +173,13 @@ def get_args():
     parser.add_argument("--device", type=str, default=detected_device)
     parser.add_argument("--resume", type=str, default=None,
                         help="Path to checkpoint to resume from")
+    parser.add_argument("--seed", type=int, default=42,
+                        help="Random seed")
 
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.profile is None and not args.data_dir:
+        parser.error("--data_dir is required when --profile is not provided")
+    return args
 
 
 # -----------------------------------------------------
@@ -372,6 +380,10 @@ def train(args):
     os.makedirs(args.save_dir, exist_ok=True)
     device = torch.device(args.device)
     
+    set_global_seed(args.seed)
+
+    schema_version = get_feature_schema_version()
+    
     # Force CUDA check
     if args.device == "cuda" and not torch.cuda.is_available():
         print("⚠️  CUDA requested but not available, falling back to CPU")
@@ -458,7 +470,7 @@ def train(args):
     best_acc = 0
     if args.resume:
         print(f"📂 Resuming from {args.resume}")
-        checkpoint = torch.load(args.resume, map_location=device)
+        checkpoint = torch.load(args.resume, map_location=device, weights_only=False)
         model.load_state_dict(checkpoint['model_state'])
         optimizer.load_state_dict(checkpoint['optimizer_state'])
         start_epoch = checkpoint['epoch'] + 1
@@ -502,11 +514,13 @@ def train(args):
                 'best_acc': best_acc,
                 'num_classes': num_classes,
                 'classes': train_dataset.classes,
-                'args': vars(args)
+                'args': vars(args),
+                'feature_schema_version': schema_version,
             }
             
             ckpt_path = os.path.join(args.save_dir, "best_model.pth")
             torch.save(checkpoint, ckpt_path)
+            copy_schema_tagged(ckpt_path, schema_version)
             print(f"  💾 Saved best model → {ckpt_path} (acc: {val_acc:.4f})")
         else:
             patience_counter += 1
@@ -525,15 +539,19 @@ def train(args):
                 'optimizer_state': optimizer.state_dict(),
                 'best_acc': best_acc,
                 'num_classes': num_classes,
-                'args': vars(args)
+                'args': vars(args),
+                'feature_schema_version': schema_version,
             }
-            torch.save(periodic_ckpt, os.path.join(args.save_dir, f"checkpoint_epoch_{epoch}.pth"))
+            periodic_path = os.path.join(args.save_dir, f"checkpoint_epoch_{epoch}.pth")
+            torch.save(periodic_ckpt, periodic_path)
+            copy_schema_tagged(periodic_path, schema_version)
     
     print(f"\n✅ Training complete! Best Val Acc: {best_acc:.4f}")
     
     # Save history
     history_path = os.path.join(args.save_dir, "training_history.pt")
     torch.save(history, history_path)
+    copy_schema_tagged(history_path, schema_version)
     print(f"📊 Saved training history → {history_path}")
     
     return model, best_acc
@@ -585,6 +603,7 @@ def train_profile(profile: str, args) -> dict:
         if best_ckpt.exists():
             import shutil
             shutil.copy(best_ckpt, profile_ckpt)
+            copy_schema_tagged(profile_ckpt, get_feature_schema_version())
             print(f"📦 Saved profile model → {profile_ckpt}")
         
         return {'profile': profile, 'status': 'SUCCESS', 'best_acc': best_acc}

@@ -158,8 +158,8 @@ class PositionCoordinator:
     def close_position(
         self, 
         ticket: int, 
-        exit_price: float,
-        pnl: float,
+        exit_price: Optional[float] = None,
+        pnl: float = 0.0,
     ) -> Optional[TrackedPosition]:
         """
         Mark position as closed and update stats.
@@ -173,7 +173,9 @@ class PositionCoordinator:
         
         position = self.positions[ticket]
         position.is_open = False
-        position.current_price = exit_price
+        if exit_price is None:
+            exit_price = float(position.current_price or position.entry_price)
+        position.current_price = float(exit_price)
         position.unrealized_pnl = pnl
         
         # Update style stats

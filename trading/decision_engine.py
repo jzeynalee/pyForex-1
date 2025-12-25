@@ -142,6 +142,8 @@ class DecisionEngineConfig:
     min_direction_confidence: float = 0.55
     min_meta_score: float = 0.5
     min_mtf_alignment: float = 0.6
+
+    use_meta_labeling: bool = True
     
     # Risk parameters
     base_risk_percent: float = 1.0
@@ -499,7 +501,8 @@ class EnhancedDecisionEngine:
         decision.risk_reward_ratio = sltp_result.risk_reward_ratio
         
         # Check risk-reward
-        if sltp_result.risk_reward_ratio < self.config.min_risk_reward:
+        rr_eps = 1e-9
+        if (float(sltp_result.risk_reward_ratio) + rr_eps) < float(self.config.min_risk_reward):
             decision.rejection_reasons.append(
                 f"Low R:R ratio: {sltp_result.risk_reward_ratio:.2f} < {self.config.min_risk_reward}"
             )

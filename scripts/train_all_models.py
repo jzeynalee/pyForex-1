@@ -216,6 +216,13 @@ def train_multihead_tcn(
     logger.info(f"Prepared {len(X):,} samples")
     logger.info(f"Direction distribution: BEAR={np.sum(targets_direction==0)}, SIDE={np.sum(targets_direction==1)}, BULL={np.sum(targets_direction==2)}")
     
+    # Calculate class weights
+    class_counts = np.bincount(targets_direction)
+    total_samples = len(targets_direction)
+    class_weights = total_samples / (len(class_counts) * class_counts)
+    class_weights = torch.tensor(class_weights, dtype=torch.float32)
+    logger.info(f"Class weights: {class_weights}")
+
     # Create dataset - RiskDataset creates sequences internally
     dataset = RiskDataset(
         features=X,
@@ -264,13 +271,13 @@ def train_multihead_tcn(
         batch_size=batch_size,
         warmup_epochs=5,
         patience=15,
-        direction_weight=1.0,
+        direction_weight=2.0,  # Increase weight for direction loss
         volatility_weight=0.5,
         quantile_weight=0.5
     )
     
     # Train
-    trainer = MultiHeadTCNTrainer(model, train_config, device=device)
+    trainer = MultiHeadTCNTrainer(model, train_config, device=device, class_weights=class_weights)
     history = trainer.train(train_loader, val_loader)
     
     # Save checkpoint

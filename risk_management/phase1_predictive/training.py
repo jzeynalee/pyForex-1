@@ -474,7 +474,8 @@ class MultiHeadTCNTrainer:
         self,
         model: nn.Module,
         config: TrainingConfig,
-        device: str = 'cuda' if torch.cuda.is_available() else 'cpu'
+        device: str = 'cuda' if torch.cuda.is_available() else 'cpu',
+        class_weights: Optional[torch.Tensor] = None
     ):
         self.model = model.to(device)
         self.config = config
@@ -486,7 +487,8 @@ class MultiHeadTCNTrainer:
             volatility_weight=config.volatility_weight,
             quantile_weight=config.quantile_weight,
             outcome_weight=config.outcome_weight,
-            use_uncertainty_weighting=config.use_uncertainty_weighting
+            use_uncertainty_weighting=config.use_uncertainty_weighting,
+            class_weights=class_weights
         ).to(device)
         
         # Optimizer

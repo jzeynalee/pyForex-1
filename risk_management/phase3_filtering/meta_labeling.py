@@ -651,7 +651,12 @@ class TradeFilter:
                 
                 if feature_values:
                     X = np.array([feature_values])
-                    meta_score = self.meta_model.predict_proba(X)[0]
+                    proba = self.meta_model.predict_proba(X)
+                    p = np.array(proba)
+                    if p.ndim >= 2 and p.shape[1] >= 2:
+                        meta_score = float(p[0, 1])
+                    else:
+                        meta_score = float(p.flatten()[0])
             except Exception as e:
                 # If prediction fails, use neutral score
                 meta_score = 0.5

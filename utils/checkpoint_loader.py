@@ -263,8 +263,10 @@ class ModelLoader:
             input_dim = model_config.get('input_dim', 0)
         
         feature_schema_version = None
-        if 'feature_schema_version' in config:
-            feature_schema_version = config['feature_schema_version']
+        if isinstance(config, dict) and 'feature_schema_version' in config:
+            feature_schema_version = config.get('feature_schema_version')
+        elif isinstance(self.checkpoint, dict):
+            feature_schema_version = self.checkpoint.get('feature_schema_version')
         
         return ModelInfo(
             model_type=model_type,

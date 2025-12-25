@@ -17,9 +17,9 @@ class MockPredictor:
     """Mock predictor that returns controlled predictions."""
     
     def __init__(self, direction_probs=None, volatility=0.001, quantiles=None):
-        self.direction_probs = direction_probs or np.array([0.05, 0.05, 0.90])
+        self.direction_probs = np.array([0.05, 0.05, 0.90]) if direction_probs is None else direction_probs
         self.volatility = volatility
-        self.quantiles = quantiles or np.array([-0.0005, -0.0002, 0.0, 0.0004, 0.0008])
+        self.quantiles = np.array([-0.0005, -0.0002, 0.0, 0.0004, 0.0008]) if quantiles is None else quantiles
         self.call_count = 0
         self.last_features = None
     

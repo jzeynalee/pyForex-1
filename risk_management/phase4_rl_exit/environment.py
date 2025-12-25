@@ -28,6 +28,7 @@ import numpy as np
 import pandas as pd
 from typing import Dict, List, Optional, Tuple, Union, Any
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import IntEnum
 import logging
 from collections import deque
@@ -43,10 +44,12 @@ class ExitAction(IntEnum):
     PARTIAL_25 = 3
     PARTIAL_50 = 4
     PARTIAL_75 = 5
+    PARTIAL_CLOSE = PARTIAL_50
+    TIGHTEN_STOP = TRAIL_STOP
 
 
 @dataclass
-class Position:
+class RLPosition:
     """Represents an open trading position."""
     direction: int          # 1 = long, -1 = short
     entry_price: float
@@ -71,10 +74,7 @@ class Position:
         return self.unrealized_pnl(current_price) / self.entry_price * 100
     
     def risk_reward_position(self, current_price: float) -> float:
-        """
-        Calculate position within SL-TP range.
-        -1 = at SL, 0 = at entry, +1 = at TP
-        """
+        """Calculate position within SL-TP range (-1 at SL, +1 at TP)."""
         if self.is_long:
             sl_distance = self.entry_price - self.stop_loss
             tp_distance = self.take_profit - self.entry_price
@@ -88,6 +88,75 @@ class Position:
             return pnl / tp_distance if tp_distance > 0 else 0
         else:
             return pnl / sl_distance if sl_distance > 0 else 0
+
+
+class Position:
+    def __init__(
+        self,
+        direction: int = 1,
+        entry_price: float = 0.0,
+        entry_time: Union[int, datetime, None] = 0,
+        initial_size: Optional[float] = None,
+        current_size: Optional[float] = None,
+        stop_loss: float = 0.0,
+        take_profit: float = 0.0,
+        initial_sl: Optional[float] = None,
+        initial_tp: Optional[float] = None,
+        ticket: Optional[str] = None,
+        symbol: Optional[str] = None,
+        volume: float = 0.0,
+        current_price: float = 0.0,
+        unrealized_pnl: float = 0.0,
+        **_kwargs,
+    ):
+        self.ticket = ticket
+        self.symbol = symbol
+
+        self.direction = int(direction)
+        self.entry_price = float(entry_price)
+        self.entry_time = entry_time
+        self.volume = float(volume)
+        self.stop_loss = float(stop_loss)
+        self.take_profit = float(take_profit)
+
+        if initial_size is None or float(initial_size) == 0.0:
+            initial_size = float(self.volume) if self.volume else 1.0
+        if current_size is None or float(current_size) == 0.0:
+            current_size = float(self.volume) if self.volume else float(initial_size)
+        if initial_sl is None or float(initial_sl) == 0.0:
+            initial_sl = float(self.stop_loss)
+        if initial_tp is None or float(initial_tp) == 0.0:
+            initial_tp = float(self.take_profit)
+
+        self.initial_size = float(initial_size)
+        self.current_size = float(current_size)
+        self.initial_sl = float(initial_sl)
+        self.initial_tp = float(initial_tp)
+
+        self.current_price = float(current_price)
+        self.unrealized_pnl = float(unrealized_pnl)
+
+    @property
+    def is_long(self) -> bool:
+        return int(self.direction) == 1
+
+    def unrealized_pnl_pct(self, current_price: float) -> float:
+        entry = float(self.entry_price) if self.entry_price else 1.0
+        pnl = (float(current_price) - float(self.entry_price)) * float(self.direction)
+        return pnl / entry * 100
+
+    def risk_reward_position(self, current_price: float) -> float:
+        return RLPosition(
+            direction=int(self.direction),
+            entry_price=float(self.entry_price),
+            entry_time=0,
+            initial_size=float(self.initial_size),
+            current_size=float(self.current_size),
+            stop_loss=float(self.stop_loss),
+            take_profit=float(self.take_profit),
+            initial_sl=float(self.initial_sl),
+            initial_tp=float(self.initial_tp),
+        ).risk_reward_position(float(current_price))
 
 
 @dataclass 

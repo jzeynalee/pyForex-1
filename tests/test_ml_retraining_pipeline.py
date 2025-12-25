@@ -23,6 +23,7 @@ Test Breakdown:
 
 from __future__ import annotations
 
+import logging
 import sys
 import unittest
 from datetime import datetime
@@ -39,6 +40,7 @@ if str(PROJECT_ROOT) not in sys.path:
 class TestRetrainingPipeline(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        logging.getLogger("ml.retraining_pipeline").setLevel(logging.CRITICAL)
         cls.pipeline_mod = import_module("ml.retraining_pipeline")
         cls.cfg_mod = import_module("ml.retraining_config")
         cls.mm_mod = import_module("ml.model_manager")
@@ -181,6 +183,56 @@ class TestRetrainingPipeline(unittest.TestCase):
             passed, comp = pipe._compare_models(new_metrics, profile_name=cfg.profile.value, force=False)
             self.assertTrue(passed)
             self.assertEqual(comp.get("reason"), "baseline_not_found")
+
+    def test_compare_models_schema_mismatch_blocks(self):
+        with TemporaryDirectory() as td:
+            cfg, mgr, pipe = self._make_pipeline(td)
+            meta = self.mm_mod.ModelMetadata(
+                model_id="baseline_1",
+                version="vtest",
+                created_at=datetime.now(),
+                training_start=datetime.now(),
+                training_end=datetime.now(),
+                model_type="xgboost",
+                hyperparameters={},
+                feature_names=["f1"],
+                feature_schema_version="old_schema",
+                training_samples=10,
+                validation_metrics={"val_accuracy": 0.4},
+                profile_name=cfg.profile.value,
+                data_hash="abc",
+            )
+            mgr.registry[meta.model_id] = meta
+            mgr.active_models[cfg.profile.value] = meta.model_id
+
+            passed, comp = pipe._compare_models({"val_accuracy": 0.5}, profile_name=cfg.profile.value, force=False)
+            self.assertFalse(passed)
+            self.assertEqual(comp.get("reason"), "feature_schema_mismatch")
+
+    def test_compare_models_schema_mismatch_force_allows(self):
+        with TemporaryDirectory() as td:
+            cfg, mgr, pipe = self._make_pipeline(td)
+            meta = self.mm_mod.ModelMetadata(
+                model_id="baseline_1",
+                version="vtest",
+                created_at=datetime.now(),
+                training_start=datetime.now(),
+                training_end=datetime.now(),
+                model_type="xgboost",
+                hyperparameters={},
+                feature_names=["f1"],
+                feature_schema_version="old_schema",
+                training_samples=10,
+                validation_metrics={"val_accuracy": 0.4},
+                profile_name=cfg.profile.value,
+                data_hash="abc",
+            )
+            mgr.registry[meta.model_id] = meta
+            mgr.active_models[cfg.profile.value] = meta.model_id
+
+            passed, comp = pipe._compare_models({"val_accuracy": 0.5}, profile_name=cfg.profile.value, force=True)
+            self.assertIn(passed, {True, False})
+            self.assertNotEqual(comp.get("reason"), "feature_schema_mismatch")
 
 
 if __name__ == "__main__":

@@ -39,6 +39,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from models.tcn import TCNModel, TCNWithAttention, MultiScaleTCN, create_tcn_model
 from utils.data_loader import DataLoader as MyDataLoader, DataConfig
+from utils.feature_schema import get_feature_schema_version
+from utils.training_utils import copy_schema_tagged, set_global_seed
 
 logging.basicConfig(
     level=logging.INFO,
@@ -106,6 +108,7 @@ def train_tcn_model(
     variant: Literal['standard', 'attention', 'multiscale'] = 'standard',
     use_onecycle: bool = True,
     device: Optional[str] = None,
+    seed: int = 42,
 ) -> Tuple[nn.Module, Dict]:
     """
     Train TCN model with proper data handling.
@@ -122,10 +125,14 @@ def train_tcn_model(
         variant: Model variant ('standard', 'attention', 'multiscale')
         use_onecycle: Use OneCycle LR scheduler
         device: Training device (auto-detect if None)
+        seed: Random seed
     
     Returns:
         Tuple of (trained model, training metrics)
     """
+    set_global_seed(seed)
+
+    schema_version = get_feature_schema_version()
     device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
     logger.info(f"Training TCN on {device}")
     
@@ -356,7 +363,9 @@ def train_tcn_model(
                 'profile': profile,
                 'variant': variant,
                 'hidden_dim': hidden_dim,
+                'feature_schema_version': schema_version,
             }, save_path)
+            copy_schema_tagged(save_path, schema_version)
             logger.info(f"💾 Saved best model (loss: {best_loss:.4f}, acc: {best_acc:.2%})")
         
         if improved:
@@ -383,10 +392,12 @@ def train_tcn_model(
     # Save scaler for inference
     scaler_path = Path(save_dir) / "scaler.joblib"
     loader.save_scaler(scaler_path)
+    copy_schema_tagged(scaler_path, schema_version)
     
     # Save training history
     history_path = Path(save_dir) / "tcn_training_history.pt"
     torch.save(history, history_path)
+    copy_schema_tagged(history_path, schema_version)
     
     logger.info(f"✅ Training complete. Best test acc: {best_acc:.2%}, loss: {best_loss:.4f}")
     
@@ -487,6 +498,10 @@ def main():
     parser.add_argument('--device', type=str, default=None,
                         help="Device (cuda/cpu)")
     
+    # Seed
+    parser.add_argument('--seed', type=int, default=42,
+                        help="Random seed")
+    
     args = parser.parse_args()
     
     # Determine variant
@@ -522,6 +537,7 @@ def main():
         variant=variant,
         use_onecycle=not args.no_onecycle,
         device=args.device,
+        seed=args.seed,
     )
 
 

@@ -62,6 +62,18 @@ logging.basicConfig(
     format='%(asctime)s | %(levelname)s | %(message)s'
 )
 
+def _invoke_train_tcn_enhanced(**kwargs):
+    try:
+        return train_tcn_enhanced(**kwargs)
+    except TypeError:
+        class Args:
+            pass
+
+        args = Args()
+        for k, v in kwargs.items():
+            setattr(args, k, v)
+        return train_tcn_enhanced(args)
+
 # Enhanced MTF training functions
 def check_missing_weights(styles: list[str], symbol: str = "EURUSD") -> dict:
     """
@@ -184,7 +196,28 @@ def train_timeframe_model(csv_path: Path, style: str, timeframe: str):
             name = f"{style.lower()}_{timeframe.lower()}_tcn"
         
         args = Args()
-        train_tcn_enhanced(args)
+        _invoke_train_tcn_enhanced(
+            data=args.data,
+            epochs=args.epochs,
+            batch_size=args.batch_size,
+            lr=args.lr,
+            seq_len=args.seq_len,
+            seed=args.seed,
+            save_dir=args.save_dir,
+            device=args.device,
+            profile=args.profile,
+            features=args.features,
+            skip_feature_selection=args.skip_feature_selection,
+            n_features=args.n_features,
+            hidden_dim=args.hidden_dim,
+            num_layers=args.num_layers,
+            dropout=args.dropout,
+            threshold=args.threshold,
+            patience=args.patience,
+            use_cosine=args.use_cosine,
+            no_onecycle=args.no_onecycle,
+            name=args.name,
+        )
         
         # Rename output file to match expected format
         original_name = f"models/weights/{args.name}_best.pt"
@@ -319,29 +352,28 @@ def auto_retrain_job():
     try:
         logging.info("🧠 Starting TCN Training...")
 
-        class Args:
-            data = str(csv_path)
-            epochs = 50
-            batch_size = 64
-            lr = 1e-3
-            seq_len = 60
-            seed = 42
-            save_dir = "models/weights"
-            device = "auto"
-            profile = "INTRADAY"
-            features = None
-            skip_feature_selection = False
-            n_features = 25
-            hidden_dim = 64
-            num_layers = 5
-            dropout = 0.2
-            threshold = 0.05
-            patience = 10
-            use_cosine = False
-            no_onecycle = False
-            name = "tcn_enhanced"
-
-        train_tcn_enhanced(Args())
+        _invoke_train_tcn_enhanced(
+            data=str(csv_path),
+            epochs=50,
+            batch_size=64,
+            lr=1e-3,
+            seq_len=60,
+            seed=42,
+            save_dir="models/weights",
+            device="auto",
+            profile="INTRADAY",
+            features=None,
+            skip_feature_selection=False,
+            n_features=25,
+            hidden_dim=64,
+            num_layers=5,
+            dropout=0.2,
+            threshold=0.05,
+            patience=10,
+            use_cosine=False,
+            no_onecycle=False,
+            name="tcn_enhanced",
+        )
         logging.info("✅ Retraining Complete. TCN model updated.")
 
     except Exception as e:

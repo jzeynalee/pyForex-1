@@ -136,14 +136,26 @@ class BacktestConnector:
 
     def execute_order(
         self,
-        signal: str,
-        volume: float,
-        sl: float,
-        tp: float,
+        signal: str = None,
+        volume: float = 0.0,
+        sl: float = 0.0,
+        tp: float = 0.0,
         symbol: Optional[str] = None,
-        comment: str = ""
+        comment: str = "",
+        **kwargs
     ) -> OrderResult:
         
+        # Handle aliases from NeuralHybridStrategy
+        if signal is None:
+            signal = kwargs.get('direction')
+        if sl == 0.0:
+            sl = kwargs.get('stop_loss', 0.0)
+        if tp == 0.0:
+            tp = kwargs.get('take_profit', 0.0)
+            
+        if signal is None:
+             return OrderResult(False, None, None, volume, "Missing signal/direction")
+
         self.ticket_counter += 1
         ticket = self.ticket_counter
         

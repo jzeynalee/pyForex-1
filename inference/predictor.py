@@ -114,6 +114,8 @@ class RiskAwareTCNPredictor:
     ):
         self.config = config or PredictorConfig()
         self.device = get_device(self.config.device)
+        self.model = None
+        self._use_risk_heads = bool(getattr(self.config, 'use_risk_heads', False))
         
         # Initialize model
         self._init_model()
@@ -195,8 +197,8 @@ class RiskAwareTCNPredictor:
         # Get config from checkpoint to reinitialize model with correct dimensions
         if 'config' in checkpoint and isinstance(checkpoint['config'], dict):
             ckpt_config = checkpoint['config']
-            input_dim = ckpt_config.get('input_dim', 64)
-            hidden_dim = ckpt_config.get('hidden_dim', 128)
+            input_dim = ckpt_config.get('input_dim', ckpt_config.get('input_channels', ckpt_config.get('input_features', 64)))
+            hidden_dim = ckpt_config.get('hidden_dim', ckpt_config.get('hidden_channels', 128))
             num_layers = ckpt_config.get('num_layers', 4)
             
             # Reinitialize MultiHeadTCN with correct dimensions from checkpoint
@@ -292,10 +294,14 @@ class RiskAwareTCNPredictor:
         if 'scaler_params' in checkpoint:
             self._scaler = checkpoint['scaler_params']
         if 'config' in checkpoint:
-            # Update config from checkpoint
             ckpt_config = checkpoint['config']
-            if hasattr(ckpt_config, 'input_channels'):
-                self.config.input_features = ckpt_config.input_channels
+            if isinstance(ckpt_config, dict):
+                input_features = ckpt_config.get('input_channels', ckpt_config.get('input_dim', ckpt_config.get('input_features')))
+                if input_features is not None:
+                    self.config.input_features = int(input_features)
+            else:
+                if hasattr(ckpt_config, 'input_channels'):
+                    self.config.input_features = ckpt_config.input_channels
         
         self.model.eval()
         logger.info(f"Loaded weights from {path}")
@@ -328,8 +334,9 @@ class RiskAwareTCNPredictor:
                 direction_probs = outputs['direction'].cpu().numpy()[0]
                 volatility = outputs['volatility'].cpu().numpy().item()
                 quantiles = outputs['quantiles'].cpu().numpy()[0]
-                p_long = float(outputs['p_long'].cpu().numpy().item()) if 'p_long' in outputs else None
-                p_short = float(outputs['p_short'].cpu().numpy().item()) if 'p_short' in outputs else None
+                # Disable p_long/p_short as they are not currently trained
+                p_long = None # float(outputs['p_long'].cpu().numpy().item()) if 'p_long' in outputs else None
+                p_short = None # float(outputs['p_short'].cpu().numpy().item()) if 'p_short' in outputs else None
                 hidden_features = outputs.get('features')
                 if hidden_features is not None:
                     hidden_features = hidden_features.cpu().numpy()[0]
@@ -490,6 +497,18 @@ class RiskAwareTCNPredictor:
             flat = (flat - self._scaler['mean']) / (self._scaler['std'] + 1e-8)
         elif 'min' in self._scaler and 'max' in self._scaler:
             flat = (flat - self._scaler['min']) / (self._scaler['max'] - self._scaler['min'] + 1e-8)
+        elif 'center' in self._scaler and 'scale' in self._scaler:
+            # RobustScaler support
+            center = np.array(self._scaler['center'])
+            scale = np.array(self._scaler['scale'])
+            # Handle mismatch in feature dimensions if necessary
+            if flat.shape[1] == len(center):
+                flat = (flat - center) / (scale + 1e-8)
+            else:
+                # Try to scale matching columns or broadcast if possible
+                # For safety, if dims don't match, we might skip or trim
+                common_dim = min(flat.shape[1], len(center))
+                flat[:, :common_dim] = (flat[:, :common_dim] - center[:common_dim]) / (scale[:common_dim] + 1e-8)
         
         return flat.reshape(original_shape)
     

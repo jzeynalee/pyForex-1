@@ -46,6 +46,7 @@ class PipelineResult:
     status: PipelineStage
     success: bool
     model_id: Optional[str]
+    feature_schema_version: Optional[str] = None
     
     # Metrics
     training_metrics: Dict[str, float] = field(default_factory=dict)
@@ -76,6 +77,7 @@ class PipelineResult:
             'status': self.status.value,
             'success': self.success,
             'model_id': self.model_id,
+            'feature_schema_version': self.feature_schema_version,
             'training_metrics': self.training_metrics,
             'validation_metrics': self.validation_metrics,
             'comparison_result': self.comparison_result,
@@ -209,7 +211,8 @@ class RetrainingPipeline:
             completed_at=None,
             status=PipelineStage.INITIALIZED,
             success=False,
-            model_id=None
+            model_id=None,
+            feature_schema_version=get_feature_schema_version(),
         )
         
         logger.info(f"Starting retraining pipeline: {run_id}")
@@ -796,6 +799,24 @@ class RetrainingPipeline:
         current_meta = self.model_manager.registry.get(current_id)
         if current_meta is None:
             return True, {'reason': 'baseline_not_found', 'passed': True}
+
+        current_schema = current_meta.feature_schema_version
+        new_schema = get_feature_schema_version()
+        if current_schema and current_schema != new_schema:
+            msg = (
+                f"Feature schema mismatch for profile {profile_name}: "
+                f"baseline={current_schema} new={new_schema}"
+            )
+            if force:
+                logger.warning(msg)
+            else:
+                logger.error(msg)
+                return False, {
+                    'reason': 'feature_schema_mismatch',
+                    'passed': False,
+                    'baseline_schema': current_schema,
+                    'new_schema': new_schema,
+                }
         
         current_metrics = current_meta.validation_metrics
         

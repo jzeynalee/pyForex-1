@@ -20,7 +20,7 @@ import pandas as pd
 from pathlib import Path
 from tqdm import tqdm
 import json
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 import logging
 
 # Add project root to path
@@ -33,6 +33,8 @@ from utils.candle_to_image import CandlestickRenderer
 from models.yolo_detector import YOLOPatternDetector
 from utils.checkpoint_loader import ModelLoader
 from utils.mtf_config import Timeframe, get_profile
+from utils.feature_schema import get_feature_schema_version
+from utils.training_utils import copy_schema_tagged, set_global_seed
 # RiskManager is used by DecisionFusionLayer internally, not needed here
 
 # Set up logging
@@ -60,7 +62,7 @@ class _ViTHead(torch.nn.Module):
         return self.classifier(x)
 
 
-def _load_vit_head(vit_checkpoint: str | None, device: str) -> torch.nn.Module | None:
+def _load_vit_head(vit_checkpoint: Optional[str], device: str) -> Optional[torch.nn.Module]:
     if not vit_checkpoint:
         return None
     p = Path(vit_checkpoint)
@@ -80,7 +82,7 @@ def _load_vit_head(vit_checkpoint: str | None, device: str) -> torch.nn.Module |
     return head
 
 
-def _load_tcn_checkpoint(tcn_checkpoint: str | None, device: str) -> Tuple[EnhancedTCN, List[str]]:
+def _load_tcn_checkpoint(tcn_checkpoint: Optional[str], device: str) -> Tuple[EnhancedTCN, List[str]]:
     if tcn_checkpoint:
         p = Path(tcn_checkpoint)
         if p.exists():
@@ -95,7 +97,7 @@ def _load_tcn_checkpoint(tcn_checkpoint: str | None, device: str) -> Tuple[Enhan
 
 
 def _load_tcn_checkpoint_for_profile(
-    tcn_checkpoint: str | None,
+    tcn_checkpoint: Optional[str],
     profile: str,
     device: str,
 ) -> Tuple[EnhancedTCN, List[str]]:
@@ -108,7 +110,7 @@ def _load_tcn_checkpoint_for_profile(
     return fallback, (features or ['open', 'high', 'low', 'close'])
 
 
-def _load_yolo_detector(yolo_checkpoint: str | None, include_confidence: bool = False) -> YOLOPatternDetector:
+def _load_yolo_detector(yolo_checkpoint: Optional[str], include_confidence: bool = False) -> YOLOPatternDetector:
     if yolo_checkpoint:
         p = Path(yolo_checkpoint)
         if p.exists():
@@ -157,7 +159,7 @@ def _resolve_vit_checkpoint(profile: str) -> str:
     return f"models/vit/vit_{profile.lower()}.pt"
 
 
-def _default_hparams_for_timeframe(timeframe: str) -> Dict[str, int | float]:
+def _default_hparams_for_timeframe(timeframe: str) -> Dict[str, Union[int, float]]:
     tf = timeframe.upper()
     if tf == 'M5':
         return {'sequence_length': 30, 'window_bars': 30, 'stride': 5, 'forward_bars': 6, 'threshold_pct': 0.15}
@@ -190,10 +192,10 @@ class MultiModalDataset(Dataset):
         forward_bars: int = 10,
         threshold_pct: float = 0.3,
         mode: str = 'train',
-        max_samples: int | None = None,
-        vit_checkpoint: str | None = None,
-        tcn_checkpoint: str | None = None,
-        yolo_checkpoint: str | None = None,
+        max_samples: Optional[int] = None,
+        vit_checkpoint: Optional[str] = None,
+        tcn_checkpoint: Optional[str] = None,
+        yolo_checkpoint: Optional[str] = None,
         yolo_include_confidence: bool = False,
     ):
         self.data = pd.read_csv(data_csv)
@@ -519,6 +521,8 @@ class DecisionFusionTrainer:
         """Train the model."""
         save_dir = Path(save_dir)
         save_dir.mkdir(parents=True, exist_ok=True)
+
+        schema_version = get_feature_schema_version()
         
         best_val_acc = 0
         patience_counter = 0
@@ -559,8 +563,11 @@ class DecisionFusionTrainer:
                     'model_state_dict': self.model.state_dict(),
                     'optimizer_state_dict': self.optimizer.state_dict(),
                     'val_acc': val_metrics['acc'],
-                    'history': self.history
+                    'history': self.history,
+                    'feature_schema_version': schema_version,
                 }, save_dir / 'best_model.pt')
+
+                copy_schema_tagged(save_dir / 'best_model.pt', schema_version)
                 
                 logger.info(f"New best model saved with val acc: {best_val_acc:.4f}")
             else:
@@ -577,12 +584,17 @@ class DecisionFusionTrainer:
             'model_state_dict': self.model.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(),
             'val_acc': val_metrics['acc'],
-            'history': self.history
+            'history': self.history,
+            'feature_schema_version': schema_version,
         }, save_dir / 'final_model.pt')
+
+        copy_schema_tagged(save_dir / 'final_model.pt', schema_version)
         
         # Save training history
         with open(save_dir / 'training_history.json', 'w') as f:
             json.dump(self.history, f, indent=2)
+
+        copy_schema_tagged(save_dir / 'training_history.json', schema_version)
         
         return best_val_acc
 
@@ -609,10 +621,7 @@ def main():
     
     args = parser.parse_args()
 
-    torch.manual_seed(args.seed)
-    np.random.seed(args.seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(args.seed)
+    set_global_seed(args.seed)
     
     # Check device
     if args.device == 'cuda' and not torch.cuda.is_available():

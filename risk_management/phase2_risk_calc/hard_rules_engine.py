@@ -239,6 +239,8 @@ class HardRulesEngine:
     
     def _check_session_rules(self, current_time: datetime) -> List[RuleViolation]:
         """Check if current session is allowed for trading."""
+        if bool(getattr(self.config, 'skip_session_check', False)):
+            return []
         violations = []
         
         current_session = self._get_current_session(current_time)
@@ -276,6 +278,8 @@ class HardRulesEngine:
     
     def _check_weekend_rule(self, current_time: datetime) -> List[RuleViolation]:
         """Check if market is closed for weekend."""
+        if bool(getattr(self.config, 'skip_weekend_check', False)):
+            return []
         violations = []
         
         weekday = current_time.weekday()
@@ -382,18 +386,42 @@ class HardRulesEngine:
                 ))
                 adjusted_size *= (available / new_exposure_pct)
         
+        # If we adjusted size, recompute exposure for downstream checks.
+        if adjusted_size != position_size:
+            if adjusted_size <= 0:
+                return violations, 0
+            position_value = adjusted_size * 100000 * entry_price
+            new_exposure_pct = (position_value / account_balance) * 100
+        
         # Total exposure
         total_exposure = self._get_total_exposure(account_balance) + new_exposure_pct
         
         if total_exposure > self.config.max_total_exposure:
-            violations.append(RuleViolation(
-                rule_name='max_total_exposure',
-                severity='block',
-                message=f"Total exposure {total_exposure:.1f}% exceeds max {self.config.max_total_exposure}%",
-                current_value=total_exposure,
-                limit_value=self.config.max_total_exposure
-            ))
-            adjusted_size = 0
+            current_total = self._get_total_exposure(account_balance)
+            available = max(0.0, float(self.config.max_total_exposure) - float(current_total))
+            if available <= 0.0:
+                violations.append(RuleViolation(
+                    rule_name='max_total_exposure',
+                    severity='block',
+                    message=f"Total exposure {total_exposure:.1f}% exceeds max {self.config.max_total_exposure}%",
+                    current_value=total_exposure,
+                    limit_value=self.config.max_total_exposure
+                ))
+                adjusted_size = 0
+            else:
+                violations.append(RuleViolation(
+                    rule_name='max_total_exposure',
+                    severity='warning',
+                    message=f"Position reduced to stay within total exposure limit",
+                    current_value=total_exposure,
+                    limit_value=self.config.max_total_exposure
+                ))
+                if new_exposure_pct > 0:
+                    adjusted_size *= (available / new_exposure_pct)
+                    if adjusted_size <= 0:
+                        return violations, 0
+                    position_value = adjusted_size * 100000 * entry_price
+                    new_exposure_pct = (position_value / account_balance) * 100
         
         # Directional exposure
         direction_exposure = self._get_directional_exposure(direction, account_balance)

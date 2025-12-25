@@ -616,6 +616,17 @@ class NeuralHybridStrategy:
             if market_data is None or len(market_data) < self.config.sequence_length:
                 logger.warning("Insufficient data")
                 return None
+
+            try:
+                window = market_data.tail(int(self.config.sequence_length)).copy()
+                window.columns = [str(c).lower() for c in window.columns]
+                required = ['open', 'high', 'low', 'close']
+                if set(required).issubset(set(window.columns)):
+                    cols = [c for c in ['open', 'high', 'low', 'close', 'volume', 'tick_volume', 'real_volume'] if c in window.columns]
+                    if cols and window[cols].isna().any().any():
+                        return None
+            except Exception:
+                pass
             
             # Get current price and spread
             entry_price = float(market_data['close'].iloc[-1])
@@ -817,33 +828,6 @@ class NeuralHybridStrategy:
                 )
             else:
                 logger.warning("Executor does not support execute_order or entry")
-                return False
-            
-            if result.get('success'):
-                ticket = result.get('ticket', str(datetime.utcnow().timestamp()))
-                order.ticket = ticket
-                order.price = float(result.get('price', order.price) or order.price)
-                
-                # Track position
-                self._open_positions[ticket] = OpenPosition(
-                    ticket=ticket,
-                    direction=1 if order.direction == 'BUY' else -1,
-                    entry_price=result.get('price', order.price),
-                    entry_time=datetime.utcnow(),
-                    volume=order.volume,
-                    stop_loss=order.stop_loss,
-                    take_profit=order.take_profit
-                )
-                
-                self._daily_trades += 1
-                
-                logger.info(
-                    f"Order executed: {order.direction} {order.volume} {order.symbol} | "
-                    f"Ticket: {ticket} | Protection: {order.protection_level}"
-                )
-                return True
-            else:
-                logger.warning(f"Order execution failed: {result.get('error')}")
                 return False
                 
         except Exception as e:
@@ -1076,7 +1060,7 @@ class NeuralHybridStrategy:
         """
         # Get expected feature columns and count from predictor.
         expected_feature_cols = None
-        expected_feature_count = 64  # Default
+        expected_feature_count = 5  # Default
 
         if hasattr(self.predictor, '_feature_names') and getattr(self.predictor, '_feature_names', None):
             expected_feature_cols = self.predictor._feature_names
