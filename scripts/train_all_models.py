@@ -31,6 +31,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 import torch
 import numpy as np
 import pandas as pd
+import shutil
 
 logging.basicConfig(
     level=logging.INFO,
@@ -42,6 +43,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+from utils.feature_schema import get_feature_schema_version
+from utils.training_utils import set_global_seed, copy_schema_tagged
 
 # =============================================================================
 # Configuration
@@ -107,7 +110,7 @@ def train_multihead_tcn(
         create_tcn_for_profile, MultiHeadTCN, TrainingConfig, 
         RiskDataset, MultiHeadTCNTrainer
     )
-    from torch.utils.data import DataLoader, random_split
+    from torch.utils.data import DataLoader, Subset
     
     # Device selection
     if device == 'auto':
@@ -233,11 +236,15 @@ def train_multihead_tcn(
         # Vision is None for all items, return None
         return seqs, targets, None
     
-    # Split train/val
-    train_size = int(0.8 * len(dataset))
-    val_size = len(dataset) - train_size
-    train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
-    
+    # Split train/val chronologically with purge gap to reduce leakage from overlapping sequences
+    n_total = len(dataset)
+    split_idx = int(0.8 * n_total)
+    purge_gap = int(seq_len)
+    val_start = min(split_idx + purge_gap, n_total)
+
+    train_dataset = Subset(dataset, range(0, split_idx))
+    val_dataset = Subset(dataset, range(val_start, n_total))
+
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0, collate_fn=collate_fn)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=0, collate_fn=collate_fn)
     
@@ -268,6 +275,7 @@ def train_multihead_tcn(
     
     # Save checkpoint
     checkpoint_path = CHECKPOINTS_DIR / "multihead_tcn" / f"multihead_tcn_{profile}.pth"
+    schema_version = get_feature_schema_version()
     torch.save({
         'state_dict': trainer.best_model_state or model.state_dict(),
         'config': {
@@ -275,7 +283,8 @@ def train_multihead_tcn(
             'input_dim': len(feature_cols),
             'hidden_dim': hidden_dim,
             'num_layers': num_layers,
-            'seq_len': seq_len
+            'seq_len': seq_len,
+            'feature_schema_version': schema_version,
         },
         'feature_columns': feature_cols,
         'scaler_params': {
@@ -285,6 +294,8 @@ def train_multihead_tcn(
         'history': history,
         'timestamp': datetime.now().isoformat()
     }, checkpoint_path)
+
+    copy_schema_tagged(checkpoint_path, schema_version)
     
     logger.info(f"Saved checkpoint: {checkpoint_path}")
     
@@ -297,13 +308,16 @@ def train_multihead_tcn(
             'input_dim': len(feature_cols),
             'hidden_dim': hidden_dim,
             'num_layers': num_layers,
-            'seq_len': seq_len
+            'seq_len': seq_len,
+            'feature_schema_version': schema_version,
         },
         'feature_columns': feature_cols,
         'num_classes': 3,
         'num_directions': 3,
         'num_quantiles': 5
     }, weights_path)
+
+    copy_schema_tagged(weights_path, schema_version)
     
     logger.info(f"Saved weights: {weights_path}")
     
@@ -806,10 +820,14 @@ def main():
                         help='Batch size')
     parser.add_argument('--device', type=str, default='auto',
                         help='Device (auto, cuda, cpu)')
+    parser.add_argument('--seed', type=int, default=42,
+                        help='Random seed')
     parser.add_argument('--skip-yolo', action='store_true',
                         help='Skip YOLO training')
     
     args = parser.parse_args()
+
+    set_global_seed(args.seed)
     
     # Resolve 'all' options
     if 'all' in args.models:
