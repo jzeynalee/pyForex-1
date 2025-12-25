@@ -191,7 +191,7 @@ class TestFusionNet:
 
         assert model.seq_dim == 64  # Changed from tcn_dim to seq_dim
         assert model.vit_dim == 768
-        assert model.yolo_dim == 20
+        assert model.yolo_dim == 25
     
     def test_forward(self):
         """Test FusionNet forward pass."""
@@ -201,7 +201,7 @@ class TestFusionNet:
         batch_size = 4
         tcn_feat = torch.randn(batch_size, 64)
         vit_feat = torch.randn(batch_size, 768)
-        yolo_feat = torch.randn(batch_size, 20)
+        yolo_feat = torch.randn(batch_size, 25)
         
         with torch.no_grad():
             logits = model(tcn_feat, vit_feat, yolo_feat)
@@ -215,7 +215,7 @@ class TestFusionNet:
         
         tcn_feat = torch.randn(4, 64)
         vit_feat = torch.randn(4, 768)
-        yolo_feat = torch.randn(4, 20)
+        yolo_feat = torch.randn(4, 25)
         
         with torch.no_grad():
             logits, gates = model.forward_with_gates(tcn_feat, vit_feat, yolo_feat)
@@ -238,7 +238,7 @@ class TestSimpleFusion:
         
         tcn_feat = torch.randn(4, 64)
         vit_feat = torch.randn(4, 768)
-        yolo_feat = torch.randn(4, 20)
+        yolo_feat = torch.randn(4, 25)
         
         with torch.no_grad():
             logits = model(tcn_feat, vit_feat, yolo_feat)
@@ -256,7 +256,7 @@ class TestAttentionFusion:
         
         tcn_feat = torch.randn(4, 64)
         vit_feat = torch.randn(4, 768)
-        yolo_feat = torch.randn(4, 20)
+        yolo_feat = torch.randn(4, 25)
         
         with torch.no_grad():
             logits = model(tcn_feat, vit_feat, yolo_feat)

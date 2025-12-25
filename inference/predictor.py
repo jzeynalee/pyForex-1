@@ -624,7 +624,7 @@ class HybridPredictor:
                 except Exception:
                     yolo_dim = 0
                 if yolo_dim <= 0:
-                    yolo_dim = 20
+                    yolo_dim = 25
             
             self.fusion_model = FusionNet(
                 seq_dim=seq_dim,
