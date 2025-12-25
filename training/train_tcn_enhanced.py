@@ -50,6 +50,9 @@ from sklearn.preprocessing import RobustScaler
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from utils.feature_schema import get_feature_schema_version
+from utils.training_utils import set_global_seed, copy_schema_tagged
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s | %(levelname)s | %(message)s',
@@ -339,8 +342,24 @@ class EnhancedDataLoaderV3:
         if missing:
             raise ValueError(f"Missing required columns: {missing}")
 
-        # Add technical features if not present
-        df = self._add_technical_features(df)
+        # Ensure a usable volume column for feature engineering
+        if 'volume' not in df.columns:
+            if 'tick_volume' in df.columns:
+                df['volume'] = df['tick_volume']
+            elif 'real_volume' in df.columns:
+                df['volume'] = df['real_volume']
+            else:
+                df['volume'] = 0.0
+
+        # Add enriched features (includes pa_* and all engineered columns)
+        try:
+            from utils.features_engineering import FeatureEngineer
+            fe = FeatureEngineer()
+            df = fe.generate_features(df, batch_processing=False)
+            df = df.replace([np.inf, -np.inf], np.nan).dropna()
+        except Exception as e:
+            logger.warning(f"FeatureEngineer failed ({e}), falling back to basic technical features")
+            df = self._add_technical_features(df)
 
         # Store all available feature columns (excluding OHLCV and labels)
         exclude = ['open', 'high', 'low', 'close', 'volume', 'time', 'date',
@@ -1183,6 +1202,7 @@ class TCNTrainer:
                     'hidden_dim': self.model.hidden_dim,
                     'receptive_field': self.model.receptive_field,
                 },
+                'feature_schema_version': get_feature_schema_version(),
             },
             training_history=self.training_history,
             created_at=datetime.now().isoformat(),
@@ -1255,7 +1275,7 @@ Examples:
   # Use SCALP profile (faster trading)
   python train_tcn_enhanced.py --data data/raw/eurusd_latest.csv --profile SCALP
 
-  # Skip feature selection, use all
+  # Skip feature discovery, use all
   python train_tcn_enhanced.py --data data/raw/eurusd_latest.csv --skip-feature-selection
 
   # Use specific features
@@ -1286,6 +1306,7 @@ Examples:
     parser.add_argument('--batch-size', type=int, default=64, help='Batch size')
     parser.add_argument('--lr', type=float, default=1e-3, help='Learning rate')
     parser.add_argument('--seq-len', type=int, default=30, help='Sequence length')
+    parser.add_argument('--seed', type=int, default=42, help='Random seed')
     parser.add_argument('--threshold', type=float, default=0.05,
                         help='Trend threshold (default: 0.05 = 5 pips)')
     parser.add_argument('--patience', type=int, default=10, help='Early stopping patience')
@@ -1303,6 +1324,12 @@ Examples:
     # Use provided args or parse from command line
     if args is None:
         args = parser.parse_args()
+
+    try:
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+    except Exception:
+        pass
 
     print("=" * 60)
     print("🚀 Enhanced TCN Training with Feature Discovery")
@@ -1329,7 +1356,10 @@ Examples:
         early_stopping_patience=args.patience,
         use_onecycle=not args.no_onecycle,
         use_cosine=args.use_cosine,
+        seed=args.seed,
     )
+
+    set_global_seed(training_config.seed)
 
     # Create trainer
     trainer = TCNTrainer(
@@ -1366,6 +1396,8 @@ Examples:
         profile=args.profile,
         metrics={**train_metrics, **test_metrics},
     )
+
+    copy_schema_tagged(save_path, get_feature_schema_version())
 
     print("\n" + "=" * 60)
     print("✅ Training Complete!")
