@@ -339,7 +339,7 @@ class DecisionFusionLayer(nn.Module):
     
     def __init__(
         self,
-        yolo_dim: int = 20,
+        yolo_dim: int = 25,
         vit_dim: int = 768,
         tcn_dim: int = 64,
         hidden_dim: int = 256,
@@ -523,7 +523,7 @@ class DecisionFusionLayer(nn.Module):
 
 def create_decision_fusion(
     fusion_type: str = "production",
-    yolo_dim: int = 20,
+    yolo_dim: int = 25,
     vit_dim: int = 768,
     tcn_dim: int = 64,
     hidden_dim: int = 256,

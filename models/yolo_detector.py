@@ -39,6 +39,11 @@ PATTERN_CLASSES = [
     "spinning_top",
     "marubozu_bull",
     "marubozu_bear",
+    "inside_bar",
+    "outside_bar",
+    "pin_bar",
+    "two_bar_reversal",
+    "three_bar_play",
 ]
 
 
@@ -53,7 +58,7 @@ class YOLOPatternDetector:
     def __init__(
         self,
         model_path: str = "models/weights/yolo_best.pt",
-        num_classes: int = 20,
+        num_classes: int = 25,
         confidence_threshold: float = 0.5,
         include_confidence: bool = False,
     ):
@@ -174,7 +179,7 @@ class MockYOLODetector:
     Generates random but consistent features based on image hash.
     """
     
-    def __init__(self, num_classes: int = 20):
+    def __init__(self, num_classes: int = 25):
         self.num_classes = num_classes
         self.feature_dim = num_classes
     

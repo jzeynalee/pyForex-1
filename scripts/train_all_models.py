@@ -753,9 +753,11 @@ def train_yolo(
     logger.info("=" * 60)
     
     # Check if YOLO dataset exists
-    yolo_yaml = PROJECT_ROOT / "data" / "yolo.yaml"
+    yolo_yaml = PROJECT_ROOT / "data" / "yolo.yml"
     if not yolo_yaml.exists():
-        logger.warning("YOLO dataset config not found at data/yolo.yaml")
+        yolo_yaml = PROJECT_ROOT / "data" / "yolo.yaml"
+    if not yolo_yaml.exists():
+        logger.warning("YOLO dataset config not found at data/yolo.yml or data/yolo.yaml")
         logger.info("Skipping YOLO training - please prepare dataset first.")
         return {'status': 'skipped', 'reason': 'Dataset not found'}
     

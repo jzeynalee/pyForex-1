@@ -3,6 +3,7 @@
 YOLOv8 training script with GPU acceleration.
 """
 from ultralytics import YOLO
+import os
 import torch
 
 # Verify CUDA is available
@@ -22,8 +23,9 @@ print("=" * 50)
 model = YOLO("yolov8n.pt")
 
 # Train with GPU acceleration
+data_cfg = "data/yolo.yml" if os.path.exists("data/yolo.yml") else "data/yolo.yaml"
 model.train(
-    data="data/yolo.yaml",
+    data=data_cfg,
     epochs=80,
     imgsz=256,
     device=0,           # Force GPU (use 'cpu' to force CPU, or [0,1] for multi-GPU)

@@ -27,7 +27,7 @@ class FusionNet(nn.Module):
         self,
         seq_dim: int = 64,       # Sequential model (TCN/LSTM) feature dim
         vit_dim: int = 768,      # ViT feature dimension
-        yolo_dim: int = 20,      # YOLO pattern vector dimension
+        yolo_dim: int = 25,      # YOLO pattern vector dimension
         hidden_dim: int = 256,   # Projection dimension
         num_classes: int = 3,    # BUY, SELL, HOLD
         dropout: float = 0.3,
@@ -172,7 +172,7 @@ class SimpleFusion(nn.Module):
         self,
         seq_dim: int = 64,
         vit_dim: int = 768,
-        yolo_dim: int = 20,
+        yolo_dim: int = 25,
         num_classes: int = 3,
         dropout: float = 0.3,
     ):
@@ -214,7 +214,7 @@ class AttentionFusion(nn.Module):
         self,
         seq_dim: int = 64,
         vit_dim: int = 768,
-        yolo_dim: int = 20,
+        yolo_dim: int = 25,
         hidden_dim: int = 128,
         num_heads: int = 4,
         num_classes: int = 3,
@@ -308,7 +308,7 @@ class HierarchicalFusion(nn.Module):
         self,
         seq_dim: int = 64,
         vit_dim: int = 768,
-        yolo_dim: int = 20,
+        yolo_dim: int = 25,
         hidden_dim: int = 128,
         num_classes: int = 3,
         dropout: float = 0.3,
@@ -377,7 +377,7 @@ def create_fusion_model(
     fusion_type: str = "gated",
     seq_dim: int = 64,
     vit_dim: int = 768,
-    yolo_dim: int = 20,
+    yolo_dim: int = 25,
     num_classes: int = 3,
     **kwargs
 ) -> nn.Module:

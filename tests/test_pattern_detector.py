@@ -451,7 +451,7 @@ class TestConvenienceFunctions:
 
 class TestPatternNamesConstant:
     def test_pattern_names_count(self):
-        assert len(PATTERN_NAMES) == 20
+        assert len(PATTERN_NAMES) == 25
 
     def test_pattern_names_correct(self):
         assert "doji" in PATTERN_NAMES

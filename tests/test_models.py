@@ -403,8 +403,8 @@ class TestMockYOLODetector:
         """Test MockYOLODetector initialization."""
         detector = MockYOLODetector()
         
-        assert detector.num_classes == 20
-        assert detector.feature_dim == 20
+        assert detector.num_classes == 25
+        assert detector.feature_dim == 25
     
     def test_detect(self):
         """Test detection output."""
@@ -415,7 +415,7 @@ class TestMockYOLODetector:
         
         features = detector.detect(img)
         
-        assert features.shape == (20,)
+        assert features.shape == (25,)
         assert features.dtype == np.float32
         
         # Values should be binary (0 or 1)
