@@ -151,6 +151,7 @@ New checkpoints include:
         'training': {...},          # Hyperparameters
         'feature': {...},           # Feature selection config
         'model': {...},             # Architecture config
+        'feature_schema_version': 'pa_v1',  # Feature generator version
     },
     'training_history': {...},      # Loss/accuracy curves
     'profile': 'SCALP',             # Trading profile
@@ -158,6 +159,18 @@ New checkpoints include:
     'created_at': '...',            # Timestamp
 }
 ```
+
+### Artifact Naming (Option A)
+
+To keep compatibility with existing consumers while retaining traceability, training may write both:
+
+- Legacy filename: `*_best.pt` / `*.pth`
+- Schema-tagged copy: `*_{feature_schema_version}_best.pt` / `*_{feature_schema_version}.pth`
+
+Example:
+
+- `models/weights/scalp_m5_best.pt`
+- `models/weights/scalp_m5_pa_v1_best.pt`
 
 ---
 

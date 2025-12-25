@@ -4,6 +4,53 @@
 
 The ML Retraining System provides automated model lifecycle management for the pyForex trading system. It monitors model performance and data quality in real-time, triggering retraining when necessary.
 
+## Feature Schema and Retraining Policy
+
+This project uses a versioned feature generation pipeline to keep model retraining reproducible while still allowing the feature set to evolve.
+
+### Feature Schema Version
+
+- The current schema version is defined in `utils/feature_schema.py` (e.g., `pa_v1`).
+- Every retrained model should record which schema version was used so you can audit or reproduce it later.
+
+Where it is stored:
+
+- **EnhancedTCN checkpoints** (`training/train_tcn_enhanced.py`): stored under `checkpoint['config']['feature_schema_version']`.
+- **MultiHeadTCN checkpoints/weights** (`scripts/train_all_models.py`): stored under `checkpoint['config']['feature_schema_version']`.
+- **ML Model Manager metadata** (`ml/model_manager.py`): stored as `ModelMetadata.feature_schema_version`.
+
+### Option 1 (Selected Policy): Dynamic Feature Selection per Profile
+
+For TCN-style models, the retraining policy is:
+
+- **Dynamic RF top-N feature selection** (profile-aware) during retraining.
+- **Exact feature list is always stored** in the artifact.
+
+Implications:
+
+- A schema version (e.g., `pa_v1`) only describes the **feature generator** (what features are available), not the exact set used by a specific model.
+- The model artifact is the source of truth for the **exact feature list**:
+  - EnhancedTCN: `feature_columns`
+  - MultiHeadTCN: `feature_columns`
+
+### Backward Compatibility
+
+- If a checkpoint was trained before schema versioning existed, it may not contain `feature_schema_version`.
+- The system should still load it, but you lose traceability.
+- If a checkpoint does not store `feature_columns`, retrain is required to guarantee inference uses the same feature ordering.
+
+### Artifact Naming (Option A)
+
+To make traceability explicit on disk, training utilities may write both:
+
+- Legacy filename (compat): `*_best.pt` / `*.pth`
+- Schema-tagged copy: `*_{schema}_best.pt` / `*_{schema}.pth`
+
+Example:
+
+- `models/weights/scalp_m5_best.pt`
+- `models/weights/scalp_m5_pa_v1_best.pt`
+
 ## Components
 
 ### 1. Drift Detector (`drift_detector.py`)
