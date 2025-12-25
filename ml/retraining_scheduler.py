@@ -18,6 +18,8 @@ import time
 import json
 from pathlib import Path
 
+from utils.feature_schema import get_feature_schema_version
+
 from .drift_detector import (
     DriftDetector, ConceptDriftDetector, DriftConfig, 
     DriftResult, DriftSeverity, DriftType
@@ -512,6 +514,7 @@ class RetrainingScheduler:
                 model_type=self.model_trainer.get_model_type(),
                 hyperparameters=hyperparameters,
                 feature_names=self.data_preparer.get_feature_names(),
+                feature_schema_version=get_feature_schema_version(),
                 training_data=X_train,
                 training_start=start_date,
                 training_end=end_date,
