@@ -1153,6 +1153,33 @@ class FeatureEngineerOptimized:
         bull = df['close'] > df['open']
         bear = df['close'] < df['open']
         small_body = body <= 0.25 * range_hl
+
+        prev_high = df['high'].shift(1)
+        prev_low = df['low'].shift(1)
+        cols['pa_inside_bar'] = ((df['high'] < prev_high) & (df['low'] > prev_low)).astype(int)
+        cols['pa_outside_bar'] = ((df['high'] > prev_high) & (df['low'] < prev_low)).astype(int)
+
+        body_pct = (body / (range_hl + 1e-10)).clip(lower=0.0, upper=1.0)
+        upper_wick_pct = (upper_shadow / (range_hl + 1e-10)).clip(lower=0.0, upper=1.0)
+        lower_wick_pct = (lower_shadow / (range_hl + 1e-10)).clip(lower=0.0, upper=1.0)
+        cols['pa_body_pct'] = body_pct
+        cols['pa_upper_wick_pct'] = upper_wick_pct
+        cols['pa_lower_wick_pct'] = lower_wick_pct
+
+        cols['pa_pin_bar_up'] = ((upper_shadow >= 3.0 * body) & (body_pct <= 0.25)).astype(int)
+        cols['pa_pin_bar_down'] = ((lower_shadow >= 3.0 * body) & (body_pct <= 0.25)).astype(int)
+
+        c0 = df['close']
+        o0 = df['open']
+        c1 = c0.shift(1)
+        o1 = o0.shift(1)
+        med_range = range_hl.rolling(20, min_periods=1).median()
+        cols['pa_two_bar_reversal'] = (((c1 - o1) * (c0 - o0) < 0) & (range_hl >= 1.5 * med_range)).astype(int)
+
+        impulse = (range_hl >= 1.5 * med_range) & (body_pct >= 0.5)
+        inside = (df['high'] < prev_high) & (df['low'] > prev_low)
+        reversal = ((c0 - o0) * (c1 - o1) < 0) & (range_hl >= med_range)
+        cols['pa_three_bar_play'] = (impulse.shift(2) & inside.shift(1) & reversal).astype(int)
         
         cols['pattern_hammer'] = ((lower_shadow > 2 * body) & (upper_shadow <= body)).astype(int)
         cols['pattern_inverted_hammer'] = ((upper_shadow > 2 * body) & (lower_shadow <= body) & bull).astype(int)
@@ -1233,6 +1260,24 @@ class FeatureEngineerOptimized:
         swing_low_series = pd.Series(cols['swing_low'], index=idx)
         cols['last_swing_high'] = df['high'].where(swing_high_series == 1).ffill()
         cols['last_swing_low'] = df['low'].where(swing_low_series == 1).ffill()
+
+        last_swing_high_series = pd.Series(cols['last_swing_high'], index=idx)
+        last_swing_low_series = pd.Series(cols['last_swing_low'], index=idx)
+        prior_trend = pd.Series(cols['trend_medium'], index=idx).shift(1)
+
+        cols['pa_bos_up'] = ((df['close'] > last_swing_high_series.shift(1)) & last_swing_high_series.shift(1).notna()).astype(int)
+        cols['pa_bos_down'] = ((df['close'] < last_swing_low_series.shift(1)) & last_swing_low_series.shift(1).notna()).astype(int)
+        cols['pa_choch_up'] = ((prior_trend == -1) & (pd.Series(cols['pa_bos_up'], index=idx) == 1)).astype(int)
+        cols['pa_choch_down'] = ((prior_trend == 1) & (pd.Series(cols['pa_bos_down'], index=idx) == 1)).astype(int)
+
+        atr_for_pa = pd.Series(cols['atr'], index=idx)
+        eq_tol = (0.5 * atr_for_pa).fillna(0.0)
+        swing_high_price = df['high'].where(swing_high_series == 1)
+        swing_low_price = df['low'].where(swing_low_series == 1)
+        prev_swing_high_price = swing_high_price.ffill().shift(1)
+        prev_swing_low_price = swing_low_price.ffill().shift(1)
+        cols['pa_equal_highs'] = (swing_high_series.eq(1) & (swing_high_price - prev_swing_high_price).abs().le(eq_tol)).astype(int)
+        cols['pa_equal_lows'] = (swing_low_series.eq(1) & (swing_low_price - prev_swing_low_price).abs().le(eq_tol)).astype(int)
         
         # Pullback percentages
         cols['pullback_from_high_pct'] = ((df['close'] - cols['last_swing_high']) / (cols['last_swing_high'] + 1e-10) * 100)
@@ -1470,6 +1515,33 @@ class FeatureEngineerOptimized:
             
             cols['is_friday'] = (dow == 4).astype(np.int8)
             cols['is_monday'] = (dow == 0).astype(np.int8)
+
+            day_key = dt_series.dt.floor('D')
+            asia_mask = (hour >= 0) & (hour < 6)
+            london_mask = (hour >= 6) & (hour < 13)
+            ny_mask = (hour >= 13) & (hour < 20)
+
+            asia_high = df['high'].where(asia_mask).groupby(day_key).transform('max')
+            asia_low = df['low'].where(asia_mask).groupby(day_key).transform('min')
+            london_high = df['high'].where(london_mask).groupby(day_key).transform('max')
+            london_low = df['low'].where(london_mask).groupby(day_key).transform('min')
+            ny_high = df['high'].where(ny_mask).groupby(day_key).transform('max')
+            ny_low = df['low'].where(ny_mask).groupby(day_key).transform('min')
+
+            cols['pa_asia_high'] = asia_high.fillna(0.0)
+            cols['pa_asia_low'] = asia_low.fillna(0.0)
+            cols['pa_london_high'] = london_high.fillna(0.0)
+            cols['pa_london_low'] = london_low.fillna(0.0)
+            cols['pa_ny_high'] = ny_high.fillna(0.0)
+            cols['pa_ny_low'] = ny_low.fillna(0.0)
+
+            asia_range = (asia_high - asia_low)
+            cols['pa_asia_range'] = asia_range.fillna(0.0)
+            cols['pa_asia_range_pos'] = ((df['close'] - asia_low) / (asia_range + 1e-10)).clip(lower=0.0, upper=1.0).fillna(0.5)
+
+            london_open_window = (hour >= 6) & (hour <= 8)
+            cols['pa_london_open_breakout_up'] = (london_open_window & (df['close'] > asia_high) & (df['close'].shift(1) <= asia_high)).astype(int)
+            cols['pa_london_open_breakout_down'] = (london_open_window & (df['close'] < asia_low) & (df['close'].shift(1) >= asia_low)).astype(int)
         
         # ================================================================
         # FINAL ASSEMBLY - Single pd.concat (avoids fragmentation)
