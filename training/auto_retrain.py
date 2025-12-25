@@ -50,6 +50,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from trading.mt5_connector import MT5Connector
 from training.train_tcn_enhanced import main as train_tcn_enhanced
 from utils.mtf_config import PROFILES, get_profile
+from utils.feature_schema import get_feature_schema_version
+from utils.training_utils import move_with_schema_copy
 
 import warnings
 # Silence all FutureWarnings (pandas updates, etc.)
@@ -165,6 +167,7 @@ def train_timeframe_model(csv_path: Path, style: str, timeframe: str):
             batch_size = 64
             lr = 1e-3
             seq_len = 60
+            seed = 42
             save_dir = "models/weights"
             device = "auto"
             profile = style
@@ -186,10 +189,14 @@ def train_timeframe_model(csv_path: Path, style: str, timeframe: str):
         # Rename output file to match expected format
         original_name = f"models/weights/{args.name}_best.pt"
         expected_name = f"models/weights/{style.lower()}_{timeframe.lower()}_best.pt"
+        schema_version = get_feature_schema_version()
         
         if Path(original_name).exists():
-            Path(original_name).rename(expected_name)
+            # Option A: keep legacy filename (compat) AND save schema-versioned filename (traceable)
+            _, schema_path = move_with_schema_copy(original_name, expected_name, schema_version)
             logging.info(f"✅ {style}_{timeframe} model trained and saved.")
+            if schema_path and schema_path.exists():
+                logging.info(f"✅ Schema-tagged copy saved: {schema_path}")
         else:
             logging.warning(f"⚠️ Expected output file not found: {original_name}")
             
@@ -312,28 +319,29 @@ def auto_retrain_job():
     try:
         logging.info("🧠 Starting TCN Training...")
 
-        # Call train_tcn_enhanced with individual parameters as expected by tests
-        train_tcn_enhanced(
-            data=str(csv_path),
-            epochs=50,
-            batch_size=64,
-            lr=1e-3,
-            seq_len=60,
-            save_dir="models/weights",
-            device="auto",
-            profile="INTRADAY",
-            features=None,
-            skip_feature_selection=False,
-            n_features=25,
-            hidden_dim=64,
-            num_layers=5,
-            dropout=0.2,
-            threshold=0.05,
-            patience=10,
-            use_cosine=False,
-            no_onecycle=False,
-            name="tcn_enhanced"
-        )
+        class Args:
+            data = str(csv_path)
+            epochs = 50
+            batch_size = 64
+            lr = 1e-3
+            seq_len = 60
+            seed = 42
+            save_dir = "models/weights"
+            device = "auto"
+            profile = "INTRADAY"
+            features = None
+            skip_feature_selection = False
+            n_features = 25
+            hidden_dim = 64
+            num_layers = 5
+            dropout = 0.2
+            threshold = 0.05
+            patience = 10
+            use_cosine = False
+            no_onecycle = False
+            name = "tcn_enhanced"
+
+        train_tcn_enhanced(Args())
         logging.info("✅ Retraining Complete. TCN model updated.")
 
     except Exception as e:
