@@ -75,19 +75,19 @@ class YOLODatasetGenerator:
             raise ValueError(f"Missing columns: {missing}")
         
         self._setup_directories()
-        windows = self._create_windows(df, max_samples)
+        starts = self._create_window_starts(df, max_samples)
         
-        n_val = int(len(windows) * self.val_split)
-        np.random.shuffle(windows)
-        val_windows = windows[:n_val]
-        train_windows = windows[n_val:]
+        n_val = int(len(starts) * self.val_split)
+        np.random.shuffle(starts)
+        val_starts = starts[:n_val]
+        train_starts = starts[n_val:]
         
-        print(f"Generating {len(train_windows)} train + {len(val_windows)} val images...")
+        print(f"Generating {len(train_starts)} train + {len(val_starts)} val images...")
         
         stats = {'train': 0, 'val': 0, 'patterns_found': {}}
         
-        for name, w_list in [('train', train_windows), ('val', val_windows)]:
-            count, pattern_counts = self._generate_split(w_list, name, symbol)
+        for name, s_list in [('train', train_starts), ('val', val_starts)]:
+            count, pattern_counts = self._generate_split(df, s_list, name, symbol)
             stats[name] = count
             for k, v in pattern_counts.items():
                 stats['patterns_found'][k] = stats['patterns_found'].get(k, 0) + v
@@ -119,8 +119,14 @@ class YOLODatasetGenerator:
             if max_samples and len(windows) >= max_samples:
                 break
         return windows
+
+    def _create_window_starts(self, df: pd.DataFrame, max_samples: Optional[int]) -> np.ndarray:
+        starts = np.arange(0, max(0, len(df) - self.window_size + 1), self.stride, dtype=np.int64)
+        if max_samples is not None and max_samples > 0 and len(starts) > max_samples:
+            starts = starts[:max_samples]
+        return starts
     
-    def _generate_split(self, windows: List[pd.DataFrame], split: str, symbol: str) -> Tuple[int, Dict]:
+    def _generate_split(self, df: pd.DataFrame, starts: np.ndarray, split: str, symbol: str) -> Tuple[int, Dict]:
         """Generate images and labels for a split."""
         img_dir = self.output_dir / "images" / split
         label_dir = self.output_dir / "labels" / split
@@ -128,7 +134,9 @@ class YOLODatasetGenerator:
         count = 0
         pattern_counts = {}
         
-        for i, window in enumerate(tqdm(windows, desc=f"Generating {split}")):
+        for _, start in enumerate(tqdm(starts, desc=f"Generating {split}")):
+            start_i = int(start)
+            window = df.iloc[start_i:start_i + self.window_size]
             patterns = self.detector.detect_all_patterns(window)
             
             if len(patterns) < self.min_patterns_per_image:
