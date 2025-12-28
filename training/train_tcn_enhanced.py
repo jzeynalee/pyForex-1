@@ -601,6 +601,7 @@ class EnhancedDataLoaderV3:
             logger.warning(f"Features not found (skipped): {missing}")
         self.feature_columns = valid
         logger.info(f"   Using {len(self.feature_columns)} features")
+        return self.feature_columns
 
     def split_and_scale(
         self,
@@ -886,8 +887,9 @@ class TCNTrainer:
         class_weights = torch.tensor(class_weights, dtype=torch.float32).to(self.device)
 
         criterion = nn.CrossEntropyLoss(weight=class_weights)
+        trainable_params = [p for p in self.model.parameters() if p.requires_grad]
         optimizer = torch.optim.AdamW(
-            self.model.parameters(),
+            trainable_params,
             lr=self.training_config.learning_rate,
             weight_decay=self.training_config.weight_decay,
         )
@@ -1200,6 +1202,10 @@ Examples:
                         help='Directory to save model')
     parser.add_argument('--name', type=str, default='tcn_enhanced',
                         help='Model name for checkpoint')
+    parser.add_argument('--init-from', type=str, default=None,
+                        help='Warm-start from an existing Enhanced TCN checkpoint (.pt)')
+    parser.add_argument('--freeze-backbone', action='store_true',
+                        help='Freeze TCN backbone layers after warm-start (train classifier only)')
 
     # Use provided args or parse from command line
     if args is None:
@@ -1247,10 +1253,22 @@ Examples:
         training_config=training_config,
     )
 
-    # Parse features if provided
+    # Parse features if provided / inferred from init-from
     features = None
-    if args.features:
-        features = [f.strip() for f in args.features.split(',')]
+    init_checkpoint = None
+    if args.init_from:
+        p = Path(args.init_from)
+        if not p.exists():
+            raise FileNotFoundError(f"Init checkpoint not found: {p}")
+        init_checkpoint = torch.load(p, map_location='cpu', weights_only=False)
+        if (not args.features) and (not args.skip_feature_selection):
+            ckpt_features = init_checkpoint.get('feature_columns')
+            if not isinstance(ckpt_features, list) or not ckpt_features:
+                raise ValueError("Init checkpoint does not contain feature_columns; provide --features explicitly")
+            features = [str(f).strip() for f in ckpt_features if str(f).strip()]
+            args.skip_feature_selection = True
+    if args.features and features is None:
+        features = [f.strip() for f in args.features.split(',') if f.strip()]
 
     # Prepare data
     train_loader, val_loader, test_loader = trainer.prepare_data(
@@ -1263,6 +1281,32 @@ Examples:
 
     # Build model
     trainer.build_model(profile=args.profile)
+
+    # Warm-start
+    if args.init_from:
+        if init_checkpoint is None:
+            init_checkpoint = torch.load(Path(args.init_from), map_location='cpu', weights_only=False)
+        state = init_checkpoint.get('model_state')
+        if not isinstance(state, dict):
+            raise ValueError("Init checkpoint missing model_state")
+
+        ckpt_cfg = (init_checkpoint.get('config') or {}).get('model') or {}
+        ckpt_input_dim = ckpt_cfg.get('input_dim')
+        if ckpt_input_dim is not None and int(ckpt_input_dim) != int(trainer.model.input_dim):
+            raise ValueError(
+                f"Init checkpoint input_dim={ckpt_input_dim} does not match current input_dim={trainer.model.input_dim}. "
+                "Use the same features as the checkpoint or retrain without --init-from."
+            )
+        trainer.model.load_state_dict(state, strict=True)
+        logger.info(f"✅ Warm-started weights from: {args.init_from}")
+
+        if args.freeze_backbone:
+            for p in trainer.model.tcn.parameters():
+                p.requires_grad = False
+            if hasattr(trainer.model, 'layer_norm'):
+                for p in trainer.model.layer_norm.parameters():
+                    p.requires_grad = False
+            logger.info("✅ Frozen backbone parameters (training classifier only)")
 
     # Train
     train_metrics = trainer.train(train_loader, val_loader)
