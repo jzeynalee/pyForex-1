@@ -20,6 +20,7 @@ import pandas as pd
 from pathlib import Path
 from tqdm import tqdm
 import json
+import hashlib
 from typing import Dict, List, Optional, Tuple, Union
 import logging
 
@@ -197,7 +198,11 @@ class MultiModalDataset(Dataset):
         tcn_checkpoint: Optional[str] = None,
         yolo_checkpoint: Optional[str] = None,
         yolo_include_confidence: bool = False,
+        cache_dir: Optional[str] = None,
+        use_cache: bool = False,
+        refresh_cache: bool = False,
     ):
+        self.data_csv = data_csv
         self.data = pd.read_csv(data_csv)
         self.profile = profile.upper()
         self.timeframe = timeframe.upper()
@@ -211,9 +216,16 @@ class MultiModalDataset(Dataset):
         self.threshold_pct = threshold_pct
         self.mode = mode
         self.max_samples = max_samples
+        self.cache_dir = cache_dir
+        self.use_cache = bool(use_cache)
+        self.refresh_cache = bool(refresh_cache)
+        self.vit_checkpoint = vit_checkpoint
+        self.tcn_checkpoint = tcn_checkpoint
+        self.yolo_checkpoint = yolo_checkpoint
+        self.yolo_include_confidence = bool(yolo_include_confidence)
         
         # Initialize components
-        self.vit_extractor = ViTExtractor(pretrained=True, freeze=True).eval()
+        self.vit_extractor = ViTExtractor(pretrained=True, freeze=True).to(self.device).eval()
         self.vit_head = _load_vit_head(vit_checkpoint, device=self.device)
 
         self.tcn_model, self.tcn_feature_columns = _load_tcn_checkpoint_for_profile(
@@ -224,11 +236,81 @@ class MultiModalDataset(Dataset):
 
         self.yolo_detector = _load_yolo_detector(yolo_checkpoint, include_confidence=yolo_include_confidence)
         self.renderer = CandlestickRenderer(image_size=(image_size, image_size))
-        
-        # Generate samples
-        self.samples = self._generate_samples()
+
+        # Generate samples (optionally cached)
+        self.samples = self._load_or_generate_samples()
         
         logger.info(f"Created {mode} dataset with {len(self.samples)} samples")
+
+    def _cache_key_dict(self) -> Dict[str, Union[str, int, float, bool]]:
+        def _mtime(p: Optional[str]) -> int:
+            if not p:
+                return 0
+            try:
+                return int(Path(p).stat().st_mtime)
+            except Exception:
+                return 0
+
+        try:
+            data_mtime = int(Path(self.data_csv).stat().st_mtime)
+        except Exception:
+            data_mtime = 0
+
+        return {
+            'data_csv': str(self.data_csv),
+            'data_mtime': data_mtime,
+            'profile': str(self.profile),
+            'timeframe': str(self.timeframe),
+            'image_size': int(self.image_size),
+            'sequence_length': int(self.sequence_length),
+            'window_bars': int(self.window_bars),
+            'stride': int(self.stride),
+            'forward_bars': int(self.forward_bars),
+            'threshold_pct': float(self.threshold_pct),
+            'max_samples': int(self.max_samples) if self.max_samples is not None else -1,
+            'vit_checkpoint': str(self.vit_checkpoint or ''),
+            'vit_checkpoint_mtime': _mtime(self.vit_checkpoint),
+            'tcn_checkpoint': str(self.tcn_checkpoint or ''),
+            'tcn_checkpoint_mtime': _mtime(self.tcn_checkpoint),
+            'yolo_checkpoint': str(self.yolo_checkpoint or ''),
+            'yolo_checkpoint_mtime': _mtime(self.yolo_checkpoint),
+            'yolo_include_confidence': bool(self.yolo_include_confidence),
+        }
+
+    def _cache_path(self) -> Optional[Path]:
+        if not (self.use_cache and self.cache_dir):
+            return None
+
+        key_dict = self._cache_key_dict()
+        payload = json.dumps(key_dict, sort_keys=True, ensure_ascii=True).encode('utf-8')
+        key = hashlib.sha256(payload).hexdigest()[:16]
+
+        root = Path(self.cache_dir)
+        root.mkdir(parents=True, exist_ok=True)
+        return root / f"fusion_samples_{self.profile.lower()}_{self.timeframe.lower()}_{key}.pt"
+
+    def _load_or_generate_samples(self) -> List[Dict]:
+        cache_path = self._cache_path()
+        if cache_path is not None and cache_path.exists() and (not self.refresh_cache):
+            try:
+                samples = torch.load(cache_path, map_location='cpu', weights_only=False)
+                if isinstance(samples, list) and samples:
+                    logger.info(f"Loaded cached fusion samples: {cache_path}")
+                    return samples
+                logger.warning(f"Cache exists but invalid/empty, regenerating: {cache_path}")
+            except Exception as e:
+                logger.warning(f"Failed to load cache ({cache_path}): {e}. Regenerating...")
+
+        samples = self._generate_samples()
+
+        if cache_path is not None:
+            try:
+                torch.save(samples, cache_path)
+                logger.info(f"Saved cached fusion samples: {cache_path}")
+            except Exception as e:
+                logger.warning(f"Failed to save cache ({cache_path}): {e}")
+
+        return samples
     
     def _generate_samples(self) -> List[Dict]:
         """Generate training samples from OHLCV data."""
@@ -618,6 +700,9 @@ def main():
     parser.add_argument('--tcn_checkpoint', type=str, default=None)
     parser.add_argument('--yolo_checkpoint', type=str, default=None)
     parser.add_argument('--yolo_include_confidence', action='store_true')
+    parser.add_argument('--use_cache', action='store_true', help='Cache extracted fusion samples to disk')
+    parser.add_argument('--refresh_cache', action='store_true', help='Rebuild cache even if present')
+    parser.add_argument('--cache_dir', type=str, default='cache/decision_fusion', help='Cache directory for fusion samples')
     
     args = parser.parse_args()
 
@@ -680,6 +765,9 @@ def main():
         tcn_checkpoint=tcn_checkpoint,
         yolo_checkpoint=yolo_checkpoint,
         yolo_include_confidence=args.yolo_include_confidence,
+        cache_dir=args.cache_dir,
+        use_cache=args.use_cache,
+        refresh_cache=args.refresh_cache,
         **config,
     )
 
