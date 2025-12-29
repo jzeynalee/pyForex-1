@@ -3,6 +3,7 @@ datasets/
 *.jpg
 *.png
 SYN_*.jpg
+SYNTHETIC_*
 dataset_cache.pt
 checkpoints_vit_cached/
 
