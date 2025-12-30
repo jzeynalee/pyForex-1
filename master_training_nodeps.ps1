@@ -41,6 +41,10 @@ def main():
     p.add_argument('--tf', required=True)
     p.add_argument('--bars', type=int, required=True)
     p.add_argument('--mt5-path', default='')
+    p.add_argument('--login', default='')
+    p.add_argument('--password', default='')
+    p.add_argument('--server', default='')
+    p.add_argument('--portable', action='store_true')
     args = p.parse_args()
 
     try:
@@ -53,6 +57,19 @@ def main():
     init_kwargs = {}
     if args.mt5_path:
         init_kwargs['path'] = args.mt5_path
+
+    if args.login:
+        try:
+            init_kwargs['login'] = int(args.login)
+        except Exception:
+            print('Invalid MT5 login (must be numeric): {0}'.format(args.login), file=sys.stderr)
+            return 6
+    if args.password:
+        init_kwargs['password'] = args.password
+    if args.server:
+        init_kwargs['server'] = args.server
+    if args.portable:
+        init_kwargs['portable'] = True
 
     if not mt5.initialize(**init_kwargs):
         print('MT5 initialize failed: {0}'.format(mt5.last_error()), file=sys.stderr)
@@ -105,6 +122,18 @@ if __name__ == '__main__':
     if ($MT5_PATH) {
       $fetchArgs += @('--mt5-path',$MT5_PATH)
     }
+    if ($MT5_LOGIN) {
+      $fetchArgs += @('--login',$MT5_LOGIN)
+    }
+    if ($MT5_PASSWORD) {
+      $fetchArgs += @('--password',$MT5_PASSWORD)
+    }
+    if ($MT5_SERVER) {
+      $fetchArgs += @('--server',$MT5_SERVER)
+    }
+    if ($MT5_PORTABLE -eq '1') {
+      $fetchArgs += @('--portable')
+    }
     Invoke-PythonLogged $fetchArgs 'logs\fetch_data.log'
   } finally {
     if (Test-Path -LiteralPath $tmpScript) { Remove-Item -Force -LiteralPath $tmpScript }
@@ -127,6 +156,10 @@ $DATASET_MAX_SAMPLES = $env:DATASET_MAX_SAMPLES; if (-not $DATASET_MAX_SAMPLES) 
 
 $FETCH_CSV_FROM_MT5 = $env:FETCH_CSV_FROM_MT5; if (-not $FETCH_CSV_FROM_MT5) { $FETCH_CSV_FROM_MT5 = '1' }
 $MT5_PATH = $env:MT5_PATH; if (-not $MT5_PATH) { $MT5_PATH = '' }
+$MT5_LOGIN = $env:MT5_LOGIN; if (-not $MT5_LOGIN) { $MT5_LOGIN = '' }
+$MT5_PASSWORD = $env:MT5_PASSWORD; if (-not $MT5_PASSWORD) { $MT5_PASSWORD = '' }
+$MT5_SERVER = $env:MT5_SERVER; if (-not $MT5_SERVER) { $MT5_SERVER = '' }
+$MT5_PORTABLE = $env:MT5_PORTABLE; if (-not $MT5_PORTABLE) { $MT5_PORTABLE = '0' }
 $MT5_SYMBOL = $env:MT5_SYMBOL; if (-not $MT5_SYMBOL) { $MT5_SYMBOL = 'EURUSD' }
 $MT5_BARS = $env:MT5_BARS; if (-not $MT5_BARS) { $MT5_BARS = '1000000' }
 
