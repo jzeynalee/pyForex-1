@@ -26,10 +26,197 @@ $FORCE_REINSTALL_DEPS = $env:FORCE_REINSTALL_DEPS; if (-not $FORCE_REINSTALL_DEP
 
 $TORCH_CUDA_INDEX_URL = $env:TORCH_CUDA_INDEX_URL # allow override
 
+$FETCH_REQUIRED = $env:FETCH_REQUIRED; if (-not $FETCH_REQUIRED) { $FETCH_REQUIRED = '1' }
+$DATA_SOURCE_DIR = $env:DATA_SOURCE_DIR; if (-not $DATA_SOURCE_DIR) { $DATA_SOURCE_DIR = '' }
+$DATA_BASE_URL = $env:DATA_BASE_URL; if (-not $DATA_BASE_URL) { $DATA_BASE_URL = '' }
+$REFRESH_DATA = $env:REFRESH_DATA; if (-not $REFRESH_DATA) { $REFRESH_DATA = '0' }
+
+$GENERATE_DATASETS = $env:GENERATE_DATASETS; if (-not $GENERATE_DATASETS) { $GENERATE_DATASETS = '1' }
+$REFRESH_DATASETS = $env:REFRESH_DATASETS; if (-not $REFRESH_DATASETS) { $REFRESH_DATASETS = '0' }
+$DATASET_MAX_SAMPLES = $env:DATASET_MAX_SAMPLES; if (-not $DATASET_MAX_SAMPLES) { $DATASET_MAX_SAMPLES = '' }
+
 function Require-File([string]$Path) {
   if (-not (Test-Path -LiteralPath $Path)) {
     throw "[FATAL] Missing required file: $Path"
   }
+}
+
+function Ensure-DirForFile([string]$Path) {
+  $parent = Split-Path -Parent $Path
+  if ($parent -and -not (Test-Path -LiteralPath $parent)) {
+    New-Item -ItemType Directory -Force -Path $parent | Out-Null
+  }
+}
+
+function To-UrlPath([string]$Path) {
+  return ($Path -replace '\\', '/')
+}
+
+function Fetch-File([string]$RelativePath) {
+  if ($FETCH_REQUIRED -ne '1') {
+    return
+  }
+
+  $dest = $RelativePath
+  $need = (-not (Test-Path -LiteralPath $dest)) -or ($REFRESH_DATA -eq '1')
+  if (-not $need) {
+    return
+  }
+
+  Ensure-DirForFile $dest
+
+  if ($DATA_SOURCE_DIR) {
+    $src = Join-Path $DATA_SOURCE_DIR $RelativePath
+    if (Test-Path -LiteralPath $src) {
+      Write-Host "[FETCH] Copying: $src -> $dest"
+      Copy-Item -Force -LiteralPath $src -Destination $dest
+      return
+    }
+  }
+
+  if ($DATA_BASE_URL) {
+    $urlPath = To-UrlPath $RelativePath
+    $url = ($DATA_BASE_URL.TrimEnd('/') + '/' + $urlPath)
+    Write-Host "[FETCH] Downloading: $url -> $dest"
+    try {
+      Invoke-WebRequest -Uri $url -OutFile $dest -UseBasicParsing
+      return
+    } catch {
+      throw "[FATAL] Failed to download required file: $url"
+    }
+  }
+}
+
+function Ensure-RequiredInputs {
+  $requiredCsv = @(
+    'data\raw\EURUSD_M5_latest.csv',
+    'data\raw\EURUSD_M15_latest.csv',
+    'data\raw\EURUSD_H1_latest.csv',
+    'data\raw\EURUSD_H4_latest.csv',
+    'data\raw\EURUSD_D1_latest.csv'
+  )
+
+  $requiredYoloYaml = @(
+    'datasets\yolo_scalp\data.yaml',
+    'datasets\yolo_intraday\data.yaml',
+    'datasets\yolo_swing\data.yaml'
+  )
+
+  foreach ($p in ($requiredCsv + $requiredYoloYaml)) {
+    Fetch-File $p
+  }
+
+  foreach ($p in $requiredCsv) {
+    if (-not (Test-Path -LiteralPath $p)) {
+      $msg = "[FATAL] Missing required file: $p`n" +
+             "To enable auto-fetch, set one of:`n" +
+             "  - DATA_SOURCE_DIR to a folder containing the same relative paths (e.g. data\\raw\\..., datasets\\yolo_*\\...)`n" +
+             "  - DATA_BASE_URL to a URL base where these files are hosted`n" +
+             "Or place the files in the repo at the paths above."
+      throw $msg
+    }
+  }
+
+  if ($GENERATE_DATASETS -ne '1') {
+    foreach ($p in $requiredYoloYaml) {
+      if (-not (Test-Path -LiteralPath $p)) {
+        $msg = "[FATAL] Missing required file: $p`n" +
+               "You can either provide it (via DATA_SOURCE_DIR/DATA_BASE_URL) or set GENERATE_DATASETS=1 to generate datasets." 
+        throw $msg
+      }
+    }
+  }
+}
+
+function Invoke-PythonCode([string]$Code, [string]$LogPath) {
+  if ($LogPath) {
+    $Code | Out-Null
+    & python -c $Code 2>&1 | Tee-Object -FilePath $LogPath -Append
+  } else {
+    & python -c $Code
+  }
+  if ($LASTEXITCODE -ne 0) {
+    if ($LogPath) {
+      throw "[FATAL] Python step failed. See log: $LogPath"
+    }
+    throw "[FATAL] Python step failed."
+  }
+}
+
+function Generate-VisionDatasets {
+  if ($GENERATE_DATASETS -ne '1') {
+    Write-Host "[DATASET] GENERATE_DATASETS=0 (skipping dataset generation)"
+    return
+  }
+
+  if ($REFRESH_DATASETS -eq '1') {
+    $dirs = @('datasets\vit_scalp','datasets\vit_intraday','datasets\vit_swing','datasets\yolo_scalp','datasets\yolo_intraday','datasets\yolo_swing')
+    foreach ($d in $dirs) {
+      if (Test-Path -LiteralPath $d) {
+        Write-Host "[DATASET] Refreshing: removing $d"
+        Remove-Item -Recurse -Force $d
+      }
+    }
+  }
+
+  Write-Host "[DATASET] Generating YOLO datasets (if missing)..."
+  $yoloPairs = @(
+    @{ profile='scalp'; data='data\raw\EURUSD_M5_latest.csv'; out='datasets\yolo_scalp'; window=30; stride=10 },
+    @{ profile='intraday'; data='data\raw\EURUSD_H1_latest.csv'; out='datasets\yolo_intraday'; window=60; stride=10 },
+    @{ profile='swing'; data='data\raw\EURUSD_H4_latest.csv'; out='datasets\yolo_swing'; window=90; stride=10 }
+  )
+
+  foreach ($cfg in $yoloPairs) {
+    $yaml = Join-Path $cfg.out 'data.yaml'
+    $imgOk = (Test-Path -Path (Join-Path $cfg.out 'images\train\*.jpg')) -and (Test-Path -Path (Join-Path $cfg.out 'images\val\*.jpg'))
+    $lblOk = (Test-Path -Path (Join-Path $cfg.out 'labels\train\*.txt')) -and (Test-Path -Path (Join-Path $cfg.out 'labels\val\*.txt'))
+    $needsGen = (-not (Test-Path -LiteralPath $yaml)) -or (-not $imgOk) -or (-not $lblOk)
+    if ($needsGen) {
+      $code = @"
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path('.').resolve()))
+from utils.yolo_dataset_generator import YOLODatasetGenerator
+
+data_path = r'${($cfg.data)}'
+out_dir = r'${($cfg.out)}'
+gen = YOLODatasetGenerator(output_dir=out_dir, image_size=256, window_size=int(${($cfg.window)}), stride=int(${($cfg.stride)}), val_split=0.2)
+gen.generate_from_csv(data_path, symbol='EURUSD_${($cfg.profile)}', max_samples=None)
+print('OK')
+"@
+      Invoke-PythonCode $code 'logs\dataset_generation.log'
+    }
+  }
+
+  Write-Host "[DATASET] Generating ViT datasets (if missing)..."
+  $vitProfiles = @('SCALP','INTRADAY','SWING')
+  foreach ($p in $vitProfiles) {
+    $dir = "datasets\\vit_{0}" -f $p.ToLower()
+    $trainDir = Join-Path $dir 'train'
+    if (-not (Test-Path -LiteralPath $trainDir)) {
+      $maxSamplesArg = 'None'
+      if ($DATASET_MAX_SAMPLES) { $maxSamplesArg = $DATASET_MAX_SAMPLES }
+
+      $code = @"
+import importlib.util
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path('.').resolve()))
+vit_path = Path('training') / 'finetune_vit.py'
+spec = importlib.util.spec_from_file_location('finetune_vit', vit_path)
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+ok = mod.generate_dataset('${p}', max_samples=${maxSamplesArg})
+sys.exit(0 if ok else 1)
+"@
+      Invoke-PythonCode $code 'logs\dataset_generation.log'
+    }
+  }
+
+  Require-File 'datasets\yolo_scalp\data.yaml'
+  Require-File 'datasets\yolo_intraday\data.yaml'
+  Require-File 'datasets\yolo_swing\data.yaml'
 }
 
 function Ensure-Venv {
@@ -346,8 +533,11 @@ function SeqLen-ForTf([string]$tf) {
   }
 }
 
-Write-Host "--- [1/6] Pre-flight Checks ---"
+Write-Host "--- [1/7] Pre-flight Checks ---"
 & python -c "import torch; print('CUDA:', torch.cuda.is_available()); print('Device:', torch.cuda.get_device_name(0)) if torch.cuda.is_available() else None"
+
+Ensure-RequiredInputs
+Generate-VisionDatasets
 
 Require-File 'data\raw\EURUSD_M5_latest.csv'
 Require-File 'data\raw\EURUSD_M15_latest.csv'
@@ -359,7 +549,7 @@ Require-File 'datasets\yolo_scalp\data.yaml'
 Require-File 'datasets\yolo_intraday\data.yaml'
 Require-File 'datasets\yolo_swing\data.yaml'
 
-Write-Host "--- [2/6] Launching CPU Lane (Background) ---"
+Write-Host "--- [2/7] Launching CPU Lane (Background) ---"
 $env:OMP_NUM_THREADS = $env:OMP_NUM_THREADS; if (-not $env:OMP_NUM_THREADS) { $env:OMP_NUM_THREADS = '32' }
 $env:MKL_NUM_THREADS = $env:MKL_NUM_THREADS; if (-not $env:MKL_NUM_THREADS) { $env:MKL_NUM_THREADS = '32' }
 
@@ -372,7 +562,7 @@ $TrendProc = Start-Process -FilePath python -ArgumentList @('training\train_tren
 Write-Host "CPU lane PIDs: meta=$($MetaProc.Id), trend=$($TrendProc.Id)"
 Write-Host "Tail meta log: Get-Content -Wait $metaLog"
 
-Write-Host "--- [3/6] Training Enhanced TCNs (GPU Queue) ---"
+Write-Host "--- [3/7] Training Enhanced TCNs (GPU Queue) ---"
 function Train-Tcn([string]$profile, [string]$tf, [string]$epochs, [string]$initFrom='') {
   $data = "data\raw\EURUSD_${tf}_latest.csv"
   $name = "{0}_{1}" -f $profile.ToLower(), $tf.ToLower()
@@ -412,14 +602,14 @@ Train-Tcn 'SWING' 'H4' $TCN_EPOCHS_SWING_BASE_H4
 Train-Tcn 'SWING' 'H1' $TCN_EPOCHS_SWING_FINETUNE 'models\weights\swing_h4_best.pt'
 Train-Tcn 'SWING' 'D1' $TCN_EPOCHS_SWING_FINETUNE 'models\weights\swing_h4_best.pt'
 
-Write-Host "--- [4/6] Training Vision Models (ViT & YOLO) ---"
-& python 'training\finetune_vit.py' --profile ALL --device cuda --generate-dataset 2>&1 | Tee-Object -FilePath 'logs\vit_training.log'
+Write-Host "--- [4/7] Training Vision Models (ViT & YOLO) ---"
+& python 'training\finetune_vit.py' --profile ALL --device cuda 2>&1 | Tee-Object -FilePath 'logs\vit_training.log'
 & python 'training\train_yolo_profiles.py' --profile ALL --device 0 2>&1 | Tee-Object -FilePath 'logs\yolo_training.log'
 
-Write-Host "--- [5/6] Training Exit Optimizer (PPO) ---"
+Write-Host "--- [5/7] Training Exit Optimizer (PPO) ---"
 & python 'scripts\train_all_models.py' --models exit --profiles all --data-rows $DATA_ROWS --device auto 2>&1 | Tee-Object -FilePath 'logs\exit_ppo.log'
 
-Write-Host "--- [6/6] Final Decision Fusion Matrix ---"
+Write-Host "--- [6/7] Final Decision Fusion Matrix ---"
 function Train-Fusion([string]$profile, [string]$tf) {
   Write-Host "[FUSION] profile=$profile tf=$tf epochs=$FUSION_EPOCHS batch=$FUSION_BATCH_SIZE"
   & python 'training\train_decision_fusion.py' --profile $profile --timeframe $tf --device cuda --epochs $FUSION_EPOCHS --batch_size $FUSION_BATCH_SIZE --use_cache --cache_dir 'cache\decision_fusion' 2>&1 |
