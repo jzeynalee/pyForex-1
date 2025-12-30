@@ -7,10 +7,11 @@ $ErrorActionPreference = 'Stop'
 # - python is already available (and has required packages installed)
 # - optional: required data files are already present OR can be fetched via env vars
 # ============================================================================== 
-#
+##
 New-Item -ItemType Directory -Force -Path logs, models\weights, models\vit, models\yolo, models\decision_fusion, checkpoints, cache\decision_fusion | Out-Null
 
-$StartTime = Get-Date
+
+$StartTime = Get-Date  ##
 
 $PYTHON_EXE = $env:PYTHON_EXE; if (-not $PYTHON_EXE) { $PYTHON_EXE = 'python' }
 
