@@ -14,6 +14,72 @@ $StartTime = Get-Date
 
 $PYTHON_EXE = $env:PYTHON_EXE; if (-not $PYTHON_EXE) { $PYTHON_EXE = 'python' }
 
+function Fetch-CsvFromMT5([string]$CsvPath) {
+  if ($FETCH_CSV_FROM_MT5 -ne '1') {
+    return
+  }
+
+  $m = [regex]::Match($CsvPath, 'EURUSD_(M5|M15|H1|H4|D1)_latest\\.csv$', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+  if (-not $m.Success) {
+    return
+  }
+
+  $tf = $m.Groups[1].Value.ToUpper()
+  Ensure-DirForFile $CsvPath
+
+  $code = @"
+import sys
+from pathlib import Path
+
+csv_path = r'''$CsvPath'''
+symbol = r'''$MT5_SYMBOL'''
+tf = r'''$tf'''
+bars = int(r'''$MT5_BARS''')
+mt5_path = r'''$MT5_PATH'''
+
+try:
+    import MetaTrader5 as mt5
+    import pandas as pd
+except Exception as e:
+    print(f"MetaTrader5 import failed: {e}", file=sys.stderr)
+    sys.exit(2)
+
+init_kwargs = {}
+if mt5_path:
+    init_kwargs['path'] = mt5_path
+
+if not mt5.initialize(**init_kwargs):
+    print(f"MT5 initialize failed: {mt5.last_error()}", file=sys.stderr)
+    sys.exit(3)
+
+tf_map = {
+    'M5': mt5.TIMEFRAME_M5,
+    'M15': mt5.TIMEFRAME_M15,
+    'H1': mt5.TIMEFRAME_H1,
+    'H4': mt5.TIMEFRAME_H4,
+    'D1': mt5.TIMEFRAME_D1,
+}
+
+rates = mt5.copy_rates_from_pos(symbol, tf_map[tf], 0, bars)
+if rates is None or len(rates) == 0:
+    print(f"No rates returned for {symbol} {tf}. Error: {mt5.last_error()}", file=sys.stderr)
+    mt5.shutdown()
+    sys.exit(4)
+
+df = pd.DataFrame(rates)
+if 'time' in df.columns:
+    df['time'] = pd.to_datetime(df['time'], unit='s')
+df.rename(columns={'volume': 'tick_volume'}, inplace=True, errors='ignore')
+Path(csv_path).parent.mkdir(parents=True, exist_ok=True)
+df.to_csv(csv_path, index=False)
+mt5.shutdown()
+print(f"Saved {len(df)} rows to {csv_path}")
+"@
+
+  $fetchArgs = @('-c', $code)
+  Invoke-PythonLogged $fetchArgs 'logs\fetch_data.log'
+}
+
 $FETCH_REQUIRED = $env:FETCH_REQUIRED; if (-not $FETCH_REQUIRED) { $FETCH_REQUIRED = '1' }
 $DATA_SOURCE_DIR = $env:DATA_SOURCE_DIR; if (-not $DATA_SOURCE_DIR) { $DATA_SOURCE_DIR = '' }
 $DATA_BASE_URL = $env:DATA_BASE_URL; if (-not $DATA_BASE_URL) { $DATA_BASE_URL = '' }
@@ -22,6 +88,11 @@ $REFRESH_DATA = $env:REFRESH_DATA; if (-not $REFRESH_DATA) { $REFRESH_DATA = '0'
 $GENERATE_DATASETS = $env:GENERATE_DATASETS; if (-not $GENERATE_DATASETS) { $GENERATE_DATASETS = '1' }
 $REFRESH_DATASETS = $env:REFRESH_DATASETS; if (-not $REFRESH_DATASETS) { $REFRESH_DATASETS = '0' }
 $DATASET_MAX_SAMPLES = $env:DATASET_MAX_SAMPLES; if (-not $DATASET_MAX_SAMPLES) { $DATASET_MAX_SAMPLES = '' }
+
+$FETCH_CSV_FROM_MT5 = $env:FETCH_CSV_FROM_MT5; if (-not $FETCH_CSV_FROM_MT5) { $FETCH_CSV_FROM_MT5 = '1' }
+$MT5_PATH = $env:MT5_PATH; if (-not $MT5_PATH) { $MT5_PATH = '' }
+$MT5_SYMBOL = $env:MT5_SYMBOL; if (-not $MT5_SYMBOL) { $MT5_SYMBOL = 'EURUSD' }
+$MT5_BARS = $env:MT5_BARS; if (-not $MT5_BARS) { $MT5_BARS = '1000000' }
 
 # -----------------------------
 # Config knobs (tweak if needed)
@@ -114,12 +185,23 @@ function Ensure-RequiredInputs {
     Fetch-File $p
   }
 
+  if ($FETCH_CSV_FROM_MT5 -eq '1') {
+    foreach ($p in $requiredCsv) {
+      if (-not (Test-Path -LiteralPath $p)) {
+        Write-Host "[FETCH] Missing CSV: $p"
+        Write-Host "[FETCH] Attempting MT5 fetch (symbol=$MT5_SYMBOL bars=$MT5_BARS)..."
+        Fetch-CsvFromMT5 $p
+      }
+    }
+  }
+
   foreach ($p in $requiredCsv) {
     if (-not (Test-Path -LiteralPath $p)) {
       $msg = "[FATAL] Missing required file: $p`n" +
              "To enable auto-fetch, set one of:`n" +
              "  - DATA_SOURCE_DIR to a folder containing the same relative paths (e.g. data\\raw\\..., datasets\\yolo_*\\...)`n" +
              "  - DATA_BASE_URL to a URL base where these files are hosted`n" +
+             "  - FETCH_CSV_FROM_MT5=1 and ensure MetaTrader5 is installed/configured (optional MT5_PATH)`n" +
              "Or place the files in the repo at the paths above."
       throw $msg
     }
@@ -271,32 +353,33 @@ function SeqLen-ForTf([string]$tf) {
   }
 }
 
-Write-Host "[ENV] Using python: $PYTHON_EXE"
-Write-Host "[CUDA] Probe (nvidia-smi):"
-if (Get-Command nvidia-smi -ErrorAction SilentlyContinue) {
-  & nvidia-smi
-} else {
-  Write-Host "nvidia-smi not found"
-}
-Write-Host "[CUDA] Detected CUDA version: $(Detect-CudaVersion)"
+try {
+  Write-Host "[ENV] Using python: $PYTHON_EXE"
+  Write-Host "[CUDA] Probe (nvidia-smi):"
+  if (Get-Command nvidia-smi -ErrorAction SilentlyContinue) {
+    & nvidia-smi
+  } else {
+    Write-Host "nvidia-smi not found"
+  }
+  Write-Host "[CUDA] Detected CUDA version: $(Detect-CudaVersion)"
 
-Write-Host "--- [1/7] Pre-flight Checks ---"
-& $PYTHON_EXE -c "import torch; print('CUDA:', torch.cuda.is_available()); print('Device:', torch.cuda.get_device_name(0)) if torch.cuda.is_available() else None"
+  Write-Host "--- [1/7] Pre-flight Checks ---"
+  & $PYTHON_EXE -c "import torch; print('CUDA:', torch.cuda.is_available()); print('Device:', torch.cuda.get_device_name(0)) if torch.cuda.is_available() else None"
 
-Ensure-RequiredInputs
-Generate-VisionDatasets
+  Ensure-RequiredInputs
+  Generate-VisionDatasets
 
-Require-File 'data\raw\EURUSD_M5_latest.csv'
-Require-File 'data\raw\EURUSD_M15_latest.csv'
-Require-File 'data\raw\EURUSD_H1_latest.csv'
-Require-File 'data\raw\EURUSD_H4_latest.csv'
-Require-File 'data\raw\EURUSD_D1_latest.csv'
+  Require-File 'data\raw\EURUSD_M5_latest.csv'
+  Require-File 'data\raw\EURUSD_M15_latest.csv'
+  Require-File 'data\raw\EURUSD_H1_latest.csv'
+  Require-File 'data\raw\EURUSD_H4_latest.csv'
+  Require-File 'data\raw\EURUSD_D1_latest.csv'
 
-Require-File 'datasets\yolo_scalp\data.yaml'
-Require-File 'datasets\yolo_intraday\data.yaml'
-Require-File 'datasets\yolo_swing\data.yaml'
+  Require-File 'datasets\yolo_scalp\data.yaml'
+  Require-File 'datasets\yolo_intraday\data.yaml'
+  Require-File 'datasets\yolo_swing\data.yaml'
 
-Write-Host "--- [2/7] Launching CPU Lane (Background) ---"
+  Write-Host "--- [2/7] Launching CPU Lane (Background) ---"
 $env:OMP_NUM_THREADS = $env:OMP_NUM_THREADS; if (-not $env:OMP_NUM_THREADS) { $env:OMP_NUM_THREADS = '32' }
 $env:MKL_NUM_THREADS = $env:MKL_NUM_THREADS; if (-not $env:MKL_NUM_THREADS) { $env:MKL_NUM_THREADS = '32' }
 
@@ -398,4 +481,12 @@ $toZip = @('models','checkpoints','logs','runs','training_results.json') | Where
 if ($toZip.Count -gt 0) {
   Compress-Archive -Path $toZip -DestinationPath $artifact -Force
 }
-Write-Host "Artifacts saved to $artifact"
+  Write-Host "Artifacts saved to $artifact"
+  exit 0
+} catch {
+  $msg = $_.Exception.Message
+  if (-not $msg) { $msg = $_.ToString() }
+  Write-Host $msg
+  Write-Host "[FATAL] Training script aborted."
+  exit 1
+}
