@@ -19,7 +19,7 @@ function Fetch-CsvFromMT5([string]$CsvPath) {
     return
   }
 
-  $m = [regex]::Match($CsvPath, 'EURUSD_(M5|M15|H1|H4|D1)_latest\\.csv$', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+  $m = [regex]::Match($CsvPath, '_(M5|M15|H1|H4|D1)_latest\.csv$', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
   if (-not $m.Success) {
     return
   }
@@ -27,57 +27,92 @@ function Fetch-CsvFromMT5([string]$CsvPath) {
   $tf = $m.Groups[1].Value.ToUpper()
   Ensure-DirForFile $CsvPath
 
-  $code = @"
+  $scriptContent = @'
+import argparse
 import sys
 from pathlib import Path
 
-csv_path = r'''$CsvPath'''
-symbol = r'''$MT5_SYMBOL'''
-tf = r'''$tf'''
-bars = int(r'''$MT5_BARS''')
-mt5_path = r'''$MT5_PATH'''
 
-try:
-    import MetaTrader5 as mt5
-    import pandas as pd
-except Exception as e:
-    print(f"MetaTrader5 import failed: {e}", file=sys.stderr)
-    sys.exit(2)
+def main():
+    p = argparse.ArgumentParser()
+    p.add_argument('--csv', required=True)
+    p.add_argument('--symbol', required=True)
+    p.add_argument('--tf', required=True)
+    p.add_argument('--bars', type=int, required=True)
+    p.add_argument('--mt5-path', default='')
+    args = p.parse_args()
 
-init_kwargs = {}
-if mt5_path:
-    init_kwargs['path'] = mt5_path
+    try:
+        import MetaTrader5 as mt5
+        import pandas as pd
+    except Exception as e:
+        print('MetaTrader5 import failed: {0}'.format(e), file=sys.stderr)
+        return 2
 
-if not mt5.initialize(**init_kwargs):
-    print(f"MT5 initialize failed: {mt5.last_error()}", file=sys.stderr)
-    sys.exit(3)
+    init_kwargs = {}
+    if args.mt5_path:
+        init_kwargs['path'] = args.mt5_path
 
-tf_map = {
-    'M5': mt5.TIMEFRAME_M5,
-    'M15': mt5.TIMEFRAME_M15,
-    'H1': mt5.TIMEFRAME_H1,
-    'H4': mt5.TIMEFRAME_H4,
-    'D1': mt5.TIMEFRAME_D1,
-}
+    if not mt5.initialize(**init_kwargs):
+        print('MT5 initialize failed: {0}'.format(mt5.last_error()), file=sys.stderr)
+        return 3
 
-rates = mt5.copy_rates_from_pos(symbol, tf_map[tf], 0, bars)
-if rates is None or len(rates) == 0:
-    print(f"No rates returned for {symbol} {tf}. Error: {mt5.last_error()}", file=sys.stderr)
+    tf_map = {
+        'M5': mt5.TIMEFRAME_M5,
+        'M15': mt5.TIMEFRAME_M15,
+        'H1': mt5.TIMEFRAME_H1,
+        'H4': mt5.TIMEFRAME_H4,
+        'D1': mt5.TIMEFRAME_D1,
+    }
+
+    tf = args.tf.upper()
+    if tf not in tf_map:
+        print('Unsupported timeframe: {0}'.format(tf), file=sys.stderr)
+        mt5.shutdown()
+        return 5
+
+    rates = mt5.copy_rates_from_pos(args.symbol, tf_map[tf], 0, args.bars)
+    if rates is None or len(rates) == 0:
+        print('No rates returned for {0} {1}. Error: {2}'.format(args.symbol, tf, mt5.last_error()), file=sys.stderr)
+        mt5.shutdown()
+        return 4
+
+    df = pd.DataFrame(rates)
+    if 'time' in df.columns:
+        df['time'] = pd.to_datetime(df['time'], unit='s')
+    df.rename(columns={'volume': 'tick_volume'}, inplace=True, errors='ignore')
+
+    csv_path = Path(args.csv)
+    csv_path.parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(str(csv_path), index=False)
     mt5.shutdown()
-    sys.exit(4)
+    print('Saved {0} rows to {1}'.format(len(df), csv_path))
+    return 0
 
-df = pd.DataFrame(rates)
-if 'time' in df.columns:
-    df['time'] = pd.to_datetime(df['time'], unit='s')
-df.rename(columns={'volume': 'tick_volume'}, inplace=True, errors='ignore')
-Path(csv_path).parent.mkdir(parents=True, exist_ok=True)
-df.to_csv(csv_path, index=False)
-mt5.shutdown()
-print(f"Saved {len(df)} rows to {csv_path}")
-"@
 
-  $fetchArgs = @('-c', $code)
-  Invoke-PythonLogged $fetchArgs 'logs\fetch_data.log'
+if __name__ == '__main__':
+    raise SystemExit(main())
+'@
+
+  $tmpDir = Join-Path $env:TEMP 'pyforex'
+  if (-not (Test-Path -LiteralPath $tmpDir)) { New-Item -ItemType Directory -Force -Path $tmpDir | Out-Null }
+  $tmpScript = Join-Path $tmpDir ("fetch_mt5_{0}.py" -f ([guid]::NewGuid().ToString('N')))
+  $scriptContent | Out-File -FilePath $tmpScript -Encoding utf8 -Force
+
+  try {
+    $fetchArgs = @($tmpScript,'--csv',$CsvPath,'--symbol',$MT5_SYMBOL,'--tf',$tf,'--bars',$MT5_BARS)
+    if ($MT5_PATH) {
+      $fetchArgs += @('--mt5-path',$MT5_PATH)
+    }
+    Invoke-PythonLogged $fetchArgs 'logs\fetch_data.log'
+  } finally {
+    if (Test-Path -LiteralPath $tmpScript) { Remove-Item -Force -LiteralPath $tmpScript }
+  }
+
+  if (-not (Test-Path -LiteralPath $CsvPath)) {
+    Write-Host "[FETCH] MT5 fetch did not create: $CsvPath"
+    Write-Host "[FETCH] Check logs\\fetch_data.log for details"
+  }
 }
 
 $FETCH_REQUIRED = $env:FETCH_REQUIRED; if (-not $FETCH_REQUIRED) { $FETCH_REQUIRED = '1' }
@@ -220,7 +255,12 @@ function Ensure-RequiredInputs {
 
 function Invoke-PythonCode([string]$Code, [string]$LogPath) {
   if ($LogPath) {
-    & $PYTHON_EXE -c $Code 2>&1 | Tee-Object -FilePath $LogPath -Append
+    & $PYTHON_EXE -c $Code 2>&1 |
+      ForEach-Object {
+        $line = $_.ToString()
+        $line
+        $line | Out-File -FilePath $LogPath -Append -Encoding utf8
+      }
   } else {
     & $PYTHON_EXE -c $Code
   }
@@ -238,7 +278,11 @@ function Invoke-PythonLogged([string[]]$ArgList, [string]$LogPath) {
   try {
     & $PYTHON_EXE @ArgList 2>&1 |
       ForEach-Object { $_.ToString() } |
-      Tee-Object -FilePath $LogPath -Append
+      ForEach-Object {
+        $line = $_
+        $line
+        $line | Out-File -FilePath $LogPath -Append -Encoding utf8
+      }
     $exitCode = $LASTEXITCODE
   } finally {
     $ErrorActionPreference = $prev
