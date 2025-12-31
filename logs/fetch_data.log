@@ -30,3 +30,7 @@ C:\Users\pc\AppData\Local\Temp\pyforex\fetch_mt5_13a81c09698449339c44e9a7bfd1805
 No rates returned for EURUSD M5. Error: (-2, 'Terminal: Invalid params')
 No rates returned for EURUSD M5. Error: (-2, 'Terminal: Invalid params')
 No rates returned for EURUSD M5. Error: (-2, 'Terminal: Invalid params')
+Python 3.12.10 (tags/v3.12.10:0cc8128, Apr  8 2025, 12:21:36) [MSC v.1943 64 bit (AMD64)] on win32
+Type "help", "copyright", "credits" or "license" for more information.
+Ctrl click to launch VS Code Native REPL
+>>> 

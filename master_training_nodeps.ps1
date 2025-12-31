@@ -40,10 +40,17 @@ def main():
     p.add_argument('--symbol', required=True)
     p.add_argument('--tf', required=True)
     p.add_argument('--bars', type=int, required=True)
+<<<<<<< HEAD
     p.add_argument('--mt5-path', default= r'C:\Program Files\MetaTrader 5\terminal64.exe')
     p.add_argument('--login', default='52706755')
     p.add_argument('--password', default='5gPxJr@i')
     p.add_argument('--server', default='Alpari-MT5-Demo')
+=======
+    p.add_argument('--mt5-path', default='')
+    p.add_argument('--login', default='')
+    p.add_argument('--password', default='')
+    p.add_argument('--server', default='')
+>>>>>>> c5780d8240287fa26f2300679d9218bbcf235e64
     p.add_argument('--portable', action='store_true')
     args = p.parse_args()
 
