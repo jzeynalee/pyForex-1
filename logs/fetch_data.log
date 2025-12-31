@@ -1,0 +1,36 @@
+MetaTrader5 import failed: No module named 'MetaTrader5'
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+MT5 initialize failed: (-10005, 'IPC timeout')
+C:\Users\pc\AppData\Local\Temp\pyforex\fetch_mt5_4531b91708ef411d8e2fd6b54b62ac96.py:12: SyntaxWarning: invalid escape sequence '\P'
+  p.add_argument('--mt5-path', default='C:\Program Files\MetaTrader 5\terminal64.exe')
+MT5 initialize failed: (-10003, "IPC initialize failed, Process create failed 'C:\\Program Files\\MetaTrader 5\terminal64.exe'")
+C:\Users\pc\AppData\Local\Temp\pyforex\fetch_mt5_c1f0944243074eef85dce1cae159ce26.py:12: SyntaxWarning: invalid escape sequence '\P'
+  p.add_argument('--mt5-path', default='C:\Program Files\MetaTrader 5\terminal64.exe')
+MT5 initialize failed: (-10003, "IPC initialize failed, Process create failed 'C:\\Program Files\\MetaTrader 5\terminal64.exe'")
+C:\Users\pc\AppData\Local\Temp\pyforex\fetch_mt5_ce5aa9b53a22461386b068a1742c9367.py:12: SyntaxWarning: invalid escape sequence '\P'
+  p.add_argument('--mt5-path', default='C:\Program Files\MetaTrader 5\terminal64.exe')
+MT5 initialize failed: (-10003, "IPC initialize failed, Process create failed 'C:\\Program Files\\MetaTrader 5\terminal64.exe'")
+MT5 initialize failed: (-6, 'Terminal: Authorization failed')
+No rates returned for EURUSD M5. Error: (-2, 'Terminal: Invalid params')
+C:\Users\pc\AppData\Local\Temp\pyforex\fetch_mt5_e5ac725f474445da841052cfa1624c17.py:64: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  utc_from = datetime.utcnow() - timedelta(days=365 * 3)
+No rates returned for EURUSD M5. Error: (-2, 'Terminal: Invalid params')
+C:\Users\pc\AppData\Local\Temp\pyforex\fetch_mt5_6bbb95480bf244f68683bedac9f4dc5e.py:64: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  utc_from = datetime.utcnow() - timedelta(days=365 * 3)
+No rates returned for EURUSD M5. Error: (-2, 'Terminal: Invalid params')
+C:\Users\pc\AppData\Local\Temp\pyforex\fetch_mt5_255762a0760c49429580172ef685c2f0.py:64: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  utc_from = datetime.utcnow() - timedelta(days=365 * 3)
+No rates returned for EURUSD M5. Error: (-2, 'Terminal: Invalid params')
+C:\Users\pc\AppData\Local\Temp\pyforex\fetch_mt5_e5b08c69cfa0480782698e3c7c8c564c.py:64: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  utc_from = datetime.utcnow() - timedelta(days=365 * 3)
+No rates returned for EURUSD M5. Error: (-2, 'Terminal: Invalid params')
+C:\Users\pc\AppData\Local\Temp\pyforex\fetch_mt5_13a81c09698449339c44e9a7bfd18057.py:73: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  utc_from = datetime.utcnow() - timedelta(days=365 * 3)
+No rates returned for EURUSD M5. Error: (-2, 'Terminal: Invalid params')
+No rates returned for EURUSD M5. Error: (-2, 'Terminal: Invalid params')
+No rates returned for EURUSD M5. Error: (-2, 'Terminal: Invalid params')
+Python 3.12.10 (tags/v3.12.10:0cc8128, Apr  8 2025, 12:21:36) [MSC v.1943 64 bit (AMD64)] on win32
+Type "help", "copyright", "credits" or "license" for more information.
+Ctrl click to launch VS Code Native REPL
+>>> 
