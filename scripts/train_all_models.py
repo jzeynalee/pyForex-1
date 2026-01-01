@@ -9,8 +9,7 @@ Trains all models in the system:
 4. Meta-labeling (LightGBM/RandomForest) - Trade filtering
 5. Exit Optimizer (PPO) - RL-based exit timing
 
-Usage:
-    python scripts/train_all_models.py --data-rows 1000000
+Usage Examples:
     python scripts/train_all_models.py --models tcn vit meta --profiles INTRADAY
     python scripts/train_all_models.py --all
 """

@@ -40,17 +40,10 @@ def main():
     p.add_argument('--symbol', required=True)
     p.add_argument('--tf', required=True)
     p.add_argument('--bars', type=int, required=True)
-<<<<<<< HEAD
     p.add_argument('--mt5-path', default= r'C:\Program Files\MetaTrader 5\terminal64.exe')
     p.add_argument('--login', default='52706755')
     p.add_argument('--password', default='5gPxJr@i')
     p.add_argument('--server', default='Alpari-MT5-Demo')
-=======
-    p.add_argument('--mt5-path', default='')
-    p.add_argument('--login', default='')
-    p.add_argument('--password', default='')
-    p.add_argument('--server', default='')
->>>>>>> c5780d8240287fa26f2300679d9218bbcf235e64
     p.add_argument('--portable', action='store_true')
     args = p.parse_args()
 
@@ -205,57 +198,6 @@ def main():
 if __name__ == '__main__':
     raise SystemExit(main())
 '@
-
-  $tmpDir = Join-Path $env:TEMP 'pyforex'
-  if (-not (Test-Path -LiteralPath $tmpDir)) { New-Item -ItemType Directory -Force -Path $tmpDir | Out-Null }
-  $tmpScript = Join-Path $tmpDir ("fetch_mt5_{0}.py" -f ([guid]::NewGuid().ToString('N')))
-  $scriptContent | Out-File -FilePath $tmpScript -Encoding utf8 -Force
-
-  try {
-    $fetchArgs = @($tmpScript,'--csv',$CsvPath,'--symbol',$MT5_SYMBOL,'--tf',$tf,'--bars',$MT5_BARS)
-    if ($MT5_PATH) {
-      $fetchArgs += @('--mt5-path',$MT5_PATH)
-    }
-    if ($MT5_LOGIN) {
-      $fetchArgs += @('--login',$MT5_LOGIN)
-    }
-    if ($MT5_PASSWORD) {
-      $fetchArgs += @('--password',$MT5_PASSWORD)
-    }
-    if ($MT5_SERVER) {
-      $fetchArgs += @('--server',$MT5_SERVER)
-    }
-    if ($MT5_PORTABLE -eq '1') {
-      $fetchArgs += @('--portable')
-    }
-    Invoke-PythonLogged $fetchArgs 'logs\fetch_data.log'
-  } finally {
-    if (Test-Path -LiteralPath $tmpScript) { Remove-Item -Force -LiteralPath $tmpScript }
-  }
-
-  if (-not (Test-Path -LiteralPath $CsvPath)) {
-    Write-Host "[FETCH] MT5 fetch did not create: $CsvPath"
-    Write-Host "[FETCH] Check logs\\fetch_data.log for details"
-  }
-}
-
-$FETCH_REQUIRED = $env:FETCH_REQUIRED; if (-not $FETCH_REQUIRED) { $FETCH_REQUIRED = '1' }
-$DATA_SOURCE_DIR = $env:DATA_SOURCE_DIR; if (-not $DATA_SOURCE_DIR) { $DATA_SOURCE_DIR = '' }
-$DATA_BASE_URL = $env:DATA_BASE_URL; if (-not $DATA_BASE_URL) { $DATA_BASE_URL = '' }
-$REFRESH_DATA = $env:REFRESH_DATA; if (-not $REFRESH_DATA) { $REFRESH_DATA = '0' }
-
-$GENERATE_DATASETS = $env:GENERATE_DATASETS; if (-not $GENERATE_DATASETS) { $GENERATE_DATASETS = '1' }
-$REFRESH_DATASETS = $env:REFRESH_DATASETS; if (-not $REFRESH_DATASETS) { $REFRESH_DATASETS = '0' }
-$DATASET_MAX_SAMPLES = $env:DATASET_MAX_SAMPLES; if (-not $DATASET_MAX_SAMPLES) { $DATASET_MAX_SAMPLES = '' }
-
-$FETCH_CSV_FROM_MT5 = $env:FETCH_CSV_FROM_MT5; if (-not $FETCH_CSV_FROM_MT5) { $FETCH_CSV_FROM_MT5 = '1' }
-$MT5_PATH = $env:MT5_PATH; if (-not $MT5_PATH) { $MT5_PATH = '' }
-$MT5_LOGIN = $env:MT5_LOGIN; if (-not $MT5_LOGIN) { $MT5_LOGIN = '' }
-$MT5_PASSWORD = $env:MT5_PASSWORD; if (-not $MT5_PASSWORD) { $MT5_PASSWORD = '' }
-$MT5_SERVER = $env:MT5_SERVER; if (-not $MT5_SERVER) { $MT5_SERVER = '' }
-$MT5_PORTABLE = $env:MT5_PORTABLE; if (-not $MT5_PORTABLE) { $MT5_PORTABLE = '0' }
-$MT5_SYMBOL = $env:MT5_SYMBOL; if (-not $MT5_SYMBOL) { $MT5_SYMBOL = 'EURUSD' }
-$MT5_BARS = $env:MT5_BARS; if (-not $MT5_BARS) { $MT5_BARS = '200000' }
 
 # -----------------------------
 # Config knobs (tweak if needed)

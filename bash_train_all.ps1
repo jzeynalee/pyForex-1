@@ -1,12 +1,12 @@
 # 1. Activate Environment
 & d:\myBot\.venv312\scripts\activate.ps1; 
 
-# 2. Train Profile-Specific YOLO Models (Patterns)
-python training/train_yolo_profiles.py --profile ALL;
-
-# 3. Train Core Models (MultiHead-TCN, ViT, Meta-Labeling, Exit-RL)
+# 2. Train Core Models (MultiHead-TCN, ViT, Meta-Labeling, Exit-RL)
 # Note: We skip the generic YOLO in favor of the profile-specific ones above
 python scripts/train_all_models.py --models tcn vit meta exit --profiles all --skip-yolo --epochs 50;
+
+# 3. Train Profile-Specific YOLO Models (Patterns)
+#python training/train_yolo_profiles.py --profile ALL;
 
 # 4. Train Decision Fusion Layers (Combining TCN + ViT + YOLO)
 # We execute training for every timeframe in every profile (9 sessions total) to support MTF decision making.

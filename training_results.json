@@ -1,0 +1,65 @@
+{
+  "tcn_SCALP": {
+    "profile": "SCALP",
+    "epochs_trained": 23,
+    "best_val_loss": -1.8941652839764571,
+    "checkpoint_path": "C:\\Users\\pc\\Documents\\pyProject\\pyForex-1\\checkpoints\\multihead_tcn\\multihead_tcn_SCALP.pth"
+  },
+  "vit_SCALP": {
+    "profile": "SCALP",
+    "best_val_acc": 0.979,
+    "weights_path": "C:\\Users\\pc\\Documents\\pyProject\\pyForex-1\\models\\weights\\vit_SCALP.pth"
+  },
+  "meta_SCALP": {
+    "profile": "SCALP",
+    "val_auc": 0.6802330429262703,
+    "val_acc": 0.8871381458409674,
+    "model_path": "C:\\Users\\pc\\Documents\\pyProject\\pyForex-1\\checkpoints\\meta_labeling\\meta_model_SCALP.pkl"
+  },
+  "exit_SCALP": {
+    "status": "failed",
+    "error": "'float' object is not callable"
+  },
+  "tcn_INTRADAY": {
+    "profile": "INTRADAY",
+    "epochs_trained": 22,
+    "best_val_loss": -0.522919151274597,
+    "checkpoint_path": "C:\\Users\\pc\\Documents\\pyProject\\pyForex-1\\checkpoints\\multihead_tcn\\multihead_tcn_INTRADAY.pth"
+  },
+  "vit_INTRADAY": {
+    "profile": "INTRADAY",
+    "best_val_acc": 0.597,
+    "weights_path": "C:\\Users\\pc\\Documents\\pyProject\\pyForex-1\\models\\weights\\vit_INTRADAY.pth"
+  },
+  "meta_INTRADAY": {
+    "profile": "INTRADAY",
+    "val_auc": 0.6687231886735265,
+    "val_acc": 0.8030173497611265,
+    "model_path": "C:\\Users\\pc\\Documents\\pyProject\\pyForex-1\\checkpoints\\meta_labeling\\meta_model_INTRADAY.pkl"
+  },
+  "exit_INTRADAY": {
+    "status": "failed",
+    "error": "'float' object is not callable"
+  },
+  "tcn_SWING": {
+    "profile": "SWING",
+    "epochs_trained": 22,
+    "best_val_loss": -0.38510375391495855,
+    "checkpoint_path": "C:\\Users\\pc\\Documents\\pyProject\\pyForex-1\\checkpoints\\multihead_tcn\\multihead_tcn_SWING.pth"
+  },
+  "vit_SWING": {
+    "profile": "SWING",
+    "best_val_acc": 0.4439918533604888,
+    "weights_path": "C:\\Users\\pc\\Documents\\pyProject\\pyForex-1\\models\\weights\\vit_SWING.pth"
+  },
+  "meta_SWING": {
+    "profile": "SWING",
+    "val_auc": 0.5144823906393123,
+    "val_acc": 0.7607530233138012,
+    "model_path": "C:\\Users\\pc\\Documents\\pyProject\\pyForex-1\\checkpoints\\meta_labeling\\meta_model_SWING.pkl"
+  },
+  "exit_SWING": {
+    "status": "failed",
+    "error": "'float' object is not callable"
+  }
+}
