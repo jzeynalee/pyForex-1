@@ -28,7 +28,7 @@ def check_gpu():
 # Profile configurations
 PROFILES = {
     'SCALP': {
-        'data_yaml': 'datasets/yolo_scalp/data.yaml',
+        'data_yaml': r'datasets\EURUSD_M5\yolo\data.yaml',
         'epochs': 50,
         'imgsz': 256,
         'batch': 16,
@@ -36,7 +36,7 @@ PROFILES = {
         'description': 'Short-term scalping patterns (M5 timeframe)',
     },
     'INTRADAY': {
-        'data_yaml': 'datasets/yolo_intraday/data.yaml',
+        'data_yaml': r'datasets\EURUSD_H1\yolo\data.yaml',
         'epochs': 60,
         'imgsz': 256,
         'batch': 16,
@@ -44,7 +44,7 @@ PROFILES = {
         'description': 'Intraday trading patterns (H1 timeframe)',
     },
     'SWING': {
-        'data_yaml': 'datasets/yolo_swing/data.yaml',
+        'data_yaml': r'datasets\EURUSD_H4\yolo\data.yaml',
         'epochs': 80,
         'imgsz': 256,
         'batch': 16,

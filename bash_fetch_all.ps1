@@ -5,11 +5,11 @@ from datetime import datetime
 import MetaTrader5 as mt5
 
 account  = int(os.environ.get("MT5_ACCOUNT", "0"))
-password = os.environ.get("MT5_PASSWORD", "")
-server   = os.environ.get("MT5_SERVER", "")
-path     = os.environ.get("MT5_PATH", "")
+password = os.environ.get("MT5_PASSWORD", "5gPxJr@i")
+server   = os.environ.get("MT5_SERVER", "Alpari-MT5-Demo")
+path     = os.environ.get("MT5_PATH", r"C:\Program Files\MetaTrader 5\terminal64.exe")
 symbol   = os.environ.get("SYMBOL", "EURUSD")
-n_bars   = int(os.environ.get("N_BARS", "200000"))
+n_bars   = int(os.environ.get("N_BARS", "1000000"))
 out_dir  = os.environ.get("OUT_DIR", r"data\raw\mt5")
 
 tfs = {
