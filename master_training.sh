@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ "${OS:-}" == "Windows_NT" ]]; then
+  echo "[WARN] Detected Windows OS. This script expects a POSIX bash environment (Git Bash / MSYS2 / WSL)." >&2
+  echo "[WARN] For Windows-native setup, run: powershell -ExecutionPolicy Bypass -File .\\master_training.ps1" >&2
+fi
+
 # ==============================================================================
 # MASTER TRAINING SCRIPT: Forex Multi-Model Suite
 # Optimized for: RTX 4090 (24GB VRAM) + 32-Core CPU + 90GB RAM
@@ -11,6 +16,346 @@ set -euo pipefail
 mkdir -p logs models/weights models/vit models/yolo models/decision_fusion checkpoints cache/decision_fusion
 
 START_TIME=$(date +%s)
+
+# -----------------------------
+# Bootstrap dependencies (fast rental setup)
+# -----------------------------
+# Environment isolation (recommended on rentals)
+USE_VENV="${USE_VENV:-1}"
+VENV_DIR="${VENV_DIR:-.venv}"
+PYTHON_BIN="${PYTHON_BIN:-}"
+
+# 0 = skip installs entirely
+BOOTSTRAP_DEPS="${BOOTSTRAP_DEPS:-1}"
+# min = fastest (recommended for rentals); full = try to install everything in requirements.txt
+RENTAL_REQS_PROFILE="${RENTAL_REQS_PROFILE:-min}"
+# Optional heavy / platform-specific toggles
+ENABLE_TENSORFLOW="${ENABLE_TENSORFLOW:-0}"
+ENABLE_TORCH_GEOMETRIC="${ENABLE_TORCH_GEOMETRIC:-0}"
+FORCE_REINSTALL_DEPS="${FORCE_REINSTALL_DEPS:-0}"
+
+# If your rental image has a GPU, you usually want CUDA-enabled torch wheels.
+# Set this to the matching CUDA index URL for your image/driver.
+TORCH_CUDA_INDEX_URL="${TORCH_CUDA_INDEX_URL:-}"
+
+select_python () {
+  if [[ -n "${PYTHON_BIN}" ]] && command -v "${PYTHON_BIN}" >/dev/null 2>&1; then
+    echo "${PYTHON_BIN}"
+    return 0
+  fi
+  if command -v python >/dev/null 2>&1; then
+    echo python
+    return 0
+  fi
+  if command -v python3 >/dev/null 2>&1; then
+    echo python3
+    return 0
+  fi
+  echo "[FATAL] python/python3 not found on PATH" >&2
+  exit 1
+}
+
+ensure_venv () {
+  if [[ "${USE_VENV}" != "1" ]]; then
+    return 0
+  fi
+
+  local py
+  py="$(select_python)"
+
+  if [[ ! -d "${VENV_DIR}" ]]; then
+    echo "[ENV] Creating venv at: ${VENV_DIR} (using ${py})"
+    "${py}" -m venv "${VENV_DIR}"
+  fi
+
+  # shellcheck disable=SC1090
+  source "${VENV_DIR}/bin/activate"
+
+  python - << 'PY' >/dev/null 2>&1
+import sys
+print(sys.executable)
+PY
+
+  echo "[ENV] Using python: $(python -c 'import sys; print(sys.executable)')"
+}
+
+detect_cuda_version () {
+  local v
+  v=""
+
+  if command -v nvidia-smi >/dev/null 2>&1; then
+    # Example: "CUDA Version: 12.4"
+    v="$(nvidia-smi 2>/dev/null | sed -n 's/.*CUDA Version: \([0-9]\+\.[0-9]\+\).*/\1/p' | head -n1)"
+  fi
+
+  if [[ -z "${v}" ]] && command -v nvcc >/dev/null 2>&1; then
+    # Example: "release 12.4, V12.4.131"
+    v="$(nvcc --version 2>/dev/null | sed -n 's/.*release \([0-9]\+\.[0-9]\+\).*/\1/p' | tail -n1)"
+  fi
+
+  echo "${v}"
+}
+
+auto_set_torch_cuda_index_url () {
+  if [[ -n "${TORCH_CUDA_INDEX_URL}" ]]; then
+    echo "[CUDA] TORCH_CUDA_INDEX_URL already set: ${TORCH_CUDA_INDEX_URL}"
+    return 0
+  fi
+
+  local cuda_ver
+  cuda_ver="$(detect_cuda_version)"
+  if [[ -z "${cuda_ver}" ]]; then
+    echo "[CUDA] CUDA version not detected (nvidia-smi/nvcc unavailable). Using default cu121 index URL."
+    TORCH_CUDA_INDEX_URL="https://download.pytorch.org/whl/cu121"
+    return 0
+  fi
+
+  echo "[CUDA] Detected CUDA version: ${cuda_ver}"
+
+  local major minor
+  major="${cuda_ver%%.*}"
+  minor="${cuda_ver#*.}"
+
+  # Choose the closest commonly available PyTorch wheel index.
+  # - CUDA >= 12.4  -> cu124
+  # - CUDA >= 12.1  -> cu121
+  # - CUDA >= 11.8  -> cu118
+  if [[ "${major}" -ge 13 ]]; then
+    TORCH_CUDA_INDEX_URL="https://download.pytorch.org/whl/cu124"
+  elif [[ "${major}" -eq 12 && "${minor}" -ge 4 ]]; then
+    TORCH_CUDA_INDEX_URL="https://download.pytorch.org/whl/cu124"
+  elif [[ "${major}" -ge 12 ]]; then
+    TORCH_CUDA_INDEX_URL="https://download.pytorch.org/whl/cu121"
+  elif [[ "${major}" -eq 11 && "${minor}" -ge 8 ]]; then
+    TORCH_CUDA_INDEX_URL="https://download.pytorch.org/whl/cu118"
+  else
+    TORCH_CUDA_INDEX_URL="https://download.pytorch.org/whl/cu118"
+  fi
+
+  echo "[CUDA] Using TORCH_CUDA_INDEX_URL=${TORCH_CUDA_INDEX_URL}"
+}
+
+write_requirements_files () {
+  # Full copy of repo requirements.txt (embedded for convenience)
+  cat > requirements.rental.full.txt << 'REQ'
+# --- Core Utilities & Config ---
+numpy      #>=2.1.0          # 2.3.x is current stable in late 2025
+pandas      #>=2.3.0         # Released Sep 2025
+scipy      #>=1.16.0         # Released Oct 2025
+joblib      #>=1.4.0
+tqdm      #>=4.67.0
+python-dotenv      #>=1.0.1
+pyyaml     #>=6.0.2
+pydantic     #>=2.41.0      # Released Nov 2025
+pydantic-settings     #>=2.4.0
+
+# --- Data Ingestion, Storage & Web ---
+requests     #>=2.32.0
+beautifulsoup4     #>=4.13.0
+tweepy     #>=4.15.0
+yfinance     #>=0.2.66      # Released Sep 2025
+influxdb-client     #>=1.45.0
+psycopg2-binary     #>=2.9.9
+sqlalchemy     #>=2.0.35
+redis     #>=5.1.0
+# MetaTrader5 is Windows-only; build 5430 released Nov 2025
+MetaTrader5     #>=5.0.5430; sys_platform == 'win32'
+
+# --- Feature Engineering & Math ---
+numba     #>=0.62.1         # Released Sep 2025
+pandas_ta     #>=0.3.34     # Stable release
+vaderSentiment     #>=3.3.2
+nltk     #>=3.9.1
+pyarrow #>22.0.0
+polars
+bottleneck
+
+# --- Machine Learning (Tabular) ---
+scikit-learn     #>=1.7.2   # Released Sep 2025
+xgboost     #>=3.1.0        # Released Sep 2025
+lightgbm     #>=4.6.0
+catboost     #>=1.2.7
+hf_xet    #>=1.2.0
+
+# --- Deep Learning (Core Frameworks) ---
+# Torch 2.9 is current as of Nov 2025
+torch     #>=2.9.0,<3.0.0
+torchvision     #>=0.24.0   # Released Nov 2025
+pytorch-tabnet     #>=4.4.0 # Using maintained fork versioning
+accelerate     #>=1.0.0
+tensorflow>=2.18.0    # Optional
+
+# --- Graph Neural Networks (GNN) ---
+# Compatible with Torch 2.x series
+torch_geometric     #>=2.7.0
+
+# --- Computer Vision (YOLO & Processing) ---
+opencv-python     #>=4.10.0
+ultralytics     #>=8.3.0    # YOLO11 released Dec 2025
+timm     #>=1.0.9
+
+# --- NLP & Transformers ---
+transformers     #>=4.57.0  # Released Nov 2025
+sentence-transformers     #>=3.2.0
+
+# --- Reinforcement Learning & Optimization ---
+gymnasium     #>=1.2.2      # Released Nov 2025
+stable-baselines3[extra]     #>=2.7.0 #
+shimmy     #>=2.0.0
+deap     #>=1.4.3           # Released May 2025
+pyswarms     #>=1.3.0       # Stable
+optuna     #>=4.6.0         # Released Nov 2025
+
+# --- API, Execution & Monitoring ---
+fastapi     #>=0.123.0      # Released Nov 2025
+uvicorn     #>=0.32.0
+python-telegram-bot     #>=22.5 # Released Sep 2025
+prometheus-client     #>=0.21.0
+
+# --- Visualization ---
+matplotlib     #>=3.10.0
+seaborn     #>=0.14.0
+plotly     #>=5.24.0
+mplfinance     #>=0.13.0
+
+# --- Testing & Quality Assurance ---
+pytest     #>=8.3.0
+pytest-cov     #>=5.0.0
+pytest-mock>=3.10.0
+pytest-xdist>=3.0.0
+pytest-html>=3.2.0
+coverage>=7.0.0
+REQ
+
+  # Minimal install set for quickest bring-up on a fresh rental.
+  # Includes only what is needed by the training pipeline used in this script.
+  cat > requirements.rental.min.txt << 'REQMIN'
+numpy
+pandas
+scipy
+joblib
+tqdm
+python-dotenv
+PyYAML
+pydantic
+pydantic-settings
+
+requests
+
+scikit-learn
+
+torch
+torchvision
+accelerate
+
+opencv-python
+ultralytics
+timm
+
+transformers
+
+gymnasium
+stable-baselines3[extra]
+shimmy
+optuna
+
+matplotlib
+mplfinance
+REQMIN
+
+  if [[ "${RENTAL_REQS_PROFILE}" == "full" ]]; then
+    cp -f requirements.rental.full.txt requirements.rental.install.txt
+  else
+    cp -f requirements.rental.min.txt requirements.rental.install.txt
+  fi
+
+  # MetaTrader5 is Windows-only; skip by default for Linux rentals.
+  sed -i '/^MetaTrader5\b/d' requirements.rental.install.txt || true
+
+  if [[ "${ENABLE_TENSORFLOW}" != "1" ]]; then
+    sed -i '/^tensorflow\b/d' requirements.rental.install.txt || true
+  fi
+
+  if [[ "${ENABLE_TORCH_GEOMETRIC}" != "1" ]]; then
+    sed -i '/^torch_geometric\b/d' requirements.rental.install.txt || true
+  fi
+}
+
+deps_ok () {
+  python - << 'PY' >/dev/null 2>&1
+import importlib
+mods = [
+  'numpy','pandas','scipy','joblib','tqdm','yaml',
+  'sklearn',
+  'torch','torchvision',
+  'timm',
+  'cv2',
+  'ultralytics',
+  'gymnasium','stable_baselines3',
+  'mplfinance',
+]
+for m in mods:
+  importlib.import_module(m)
+PY
+}
+
+bootstrap_deps () {
+  if [[ "${BOOTSTRAP_DEPS}" != "1" ]]; then
+    echo "[BOOTSTRAP] BOOTSTRAP_DEPS=0 (skipping dependency install)"
+    return 0
+  fi
+
+  ensure_venv
+  auto_set_torch_cuda_index_url
+
+  if deps_ok; then
+    echo "[BOOTSTRAP] Dependencies already satisfied (skipping pip install)"
+    return 0
+  fi
+
+  echo "[BOOTSTRAP] Installing Python dependencies..."
+  write_requirements_files
+
+  python -m pip install -U pip setuptools wheel
+
+  # If torch is missing or CPU-only, attempt to install CUDA-enabled wheels.
+  if python - << 'PY' >/dev/null 2>&1
+import torch
+ok = torch.cuda.is_available() and (torch.version.cuda is not None)
+raise SystemExit(0 if ok else 1)
+PY
+  then
+    TORCH_OK=0
+  else
+    TORCH_OK=1
+  fi
+
+  if [[ "${TORCH_OK}" != "0" ]]; then
+    echo "[BOOTSTRAP] Installing CUDA torch/torchvision from: ${TORCH_CUDA_INDEX_URL}"
+    python -m pip install -U --index-url "${TORCH_CUDA_INDEX_URL}" torch torchvision
+  fi
+
+  if [[ "${FORCE_REINSTALL_DEPS}" == "1" ]]; then
+    python -m pip install -U --no-cache-dir --force-reinstall -r requirements.rental.install.txt
+  else
+    python -m pip install -U -r requirements.rental.install.txt
+  fi
+}
+
+ensure_venv
+auto_set_torch_cuda_index_url
+
+echo "[CUDA] Probe (nvidia-smi):"
+if command -v nvidia-smi >/dev/null 2>&1; then
+  nvidia-smi || true
+else
+  echo "nvidia-smi not found"
+fi
+
+echo "[CUDA] Detected CUDA version: $(detect_cuda_version || true)"
+echo "[CUDA] TORCH_CUDA_INDEX_URL=${TORCH_CUDA_INDEX_URL}"
+
+bootstrap_deps
 
 # -----------------------------
 # Config knobs (tweak if needed)

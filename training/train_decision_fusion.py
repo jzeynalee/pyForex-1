@@ -2,7 +2,7 @@
 Training script for the Decision Fusion Layer
 
 Trains the production-grade multi-modal fusion network that combines
-YOLO + ViT + TCN features with sophisticated gating and multi-task outputs.
+Price Action + ViT + TCN features with sophisticated gating and multi-task outputs.
 
 Usage:
     python train_decision_fusion.py --profile INTRADAY --epochs 100
@@ -31,7 +31,7 @@ from models.decision_fusion import DecisionFusionLayer, DecisionOutput
 from models.vit_extractor import ViTExtractor
 from training.train_tcn_enhanced import EnhancedTCN
 from utils.candle_to_image import CandlestickRenderer
-from models.yolo_detector import YOLOPatternDetector
+from models.price_action_pattern import PriceActionPatternExtractor
 from utils.checkpoint_loader import ModelLoader
 from utils.mtf_config import Timeframe, get_profile
 from utils.feature_schema import get_feature_schema_version
@@ -111,14 +111,12 @@ def _load_tcn_checkpoint_for_profile(
     return fallback, (features or ['open', 'high', 'low', 'close'])
 
 
-def _load_yolo_detector(yolo_checkpoint: Optional[str], include_confidence: bool = False) -> YOLOPatternDetector:
-    if yolo_checkpoint:
-        p = Path(yolo_checkpoint)
-        if p.exists():
-            return YOLOPatternDetector(model_path=str(p), include_confidence=include_confidence)
-        logger.warning(f"YOLO checkpoint not found: {p}")
-
-    return YOLOPatternDetector(include_confidence=include_confidence)
+def _load_price_action_extractor(include_extended: bool = True, include_confidence: bool = False) -> PriceActionPatternExtractor:
+    """Load the Price Action pattern extractor."""
+    return PriceActionPatternExtractor(
+        include_extended_patterns=include_extended,
+        include_confidence=include_confidence
+    )
 
 
 def _extract_feature_matrix(df: pd.DataFrame, feature_cols: List[str]) -> np.ndarray:
@@ -149,11 +147,9 @@ def _resolve_tcn_checkpoint(profile: str, timeframe: str) -> str:
     return f"models/weights/{profile.lower()}_{timeframe.lower()}_best.pt"
 
 
-def _resolve_yolo_checkpoint(profile: str) -> str:
-    run_path = Path(f"runs/yolo/{profile.lower()}_train/weights/best.pt")
-    if run_path.exists():
-        return str(run_path)
-    return f"models/yolo/yolo_{profile.lower()}.pt"
+def _resolve_price_action_checkpoint(profile: str) -> str:
+    """Price Action doesn't need checkpoints - return empty string."""
+    return ""
 
 
 def _resolve_vit_checkpoint(profile: str) -> str:
@@ -177,44 +173,42 @@ def _default_hparams_for_timeframe(timeframe: str) -> Dict[str, Union[int, float
 
 class MultiModalDataset(Dataset):
     """
-    Dataset for multi-modal training with YOLO, ViT, and TCN features.
+    Dataset for multi-modal training with Price Action, ViT, and TCN features.
     """
     
     def __init__(
         self,
-        data_csv: str,
         profile: str,
         timeframe: str,
-        device: str = 'cpu',
-        image_size: int = 224,
+        csv_path: str,
         sequence_length: int = 60,
-        window_bars: int = 60,
-        stride: int = 10,
-        forward_bars: int = 10,
-        threshold_pct: float = 0.3,
-        mode: str = 'train',
+        window_bars: int = 30,
+        stride: int = 5,
+        forward_bars: int = 6,
+        threshold_pct: float = 0.15,
         max_samples: Optional[int] = None,
         vit_checkpoint: Optional[str] = None,
         tcn_checkpoint: Optional[str] = None,
-        yolo_checkpoint: Optional[str] = None,
-        yolo_include_confidence: bool = False,
+        price_action_include_extended: bool = True,
+        price_action_include_confidence: bool = False,
         cache_dir: Optional[str] = None,
         use_cache: bool = False,
         refresh_cache: bool = False,
+        image_size: int = 224,
+        device: str = 'auto',
+        seed: int = 42,
+        label_noise_std: float = 0.0,
+        feature_noise_std: float = 0.0,
+        temporal_augmentation: bool = False,
+        price_augmentation: bool = False,
+        enable_debug: bool = False
     ):
-        self.data_csv = data_csv
-        self.data = pd.read_csv(data_csv)
-        self.profile = profile.upper()
-        self.timeframe = timeframe.upper()
-        self.device = device
-
-        self.image_size = image_size
         self.sequence_length = sequence_length
         self.window_bars = window_bars
         self.stride = stride
         self.forward_bars = forward_bars
         self.threshold_pct = threshold_pct
-        self.mode = mode
+        self.mode = 'train'
         self.max_samples = max_samples
         self.cache_dir = cache_dir
         self.use_cache = bool(use_cache)
@@ -234,7 +228,10 @@ class MultiModalDataset(Dataset):
             device=self.device,
         )
 
-        self.yolo_detector = _load_yolo_detector(yolo_checkpoint, include_confidence=yolo_include_confidence)
+        self.price_action_extractor = _load_price_action_extractor(
+            include_extended=price_action_include_extended,
+            include_confidence=price_action_include_confidence
+        )
         self.renderer = CandlestickRenderer(image_size=(image_size, image_size))
 
         # Generate samples (optionally cached)
@@ -350,16 +347,16 @@ class MultiModalDataset(Dataset):
             chart_image = self._render_chart(window)
             vit_features, vit_entropy = self._extract_vit_features(chart_image)
             
-            # YOLO patterns and confidences
-            yolo_features, yolo_confidence = self._extract_yolo_features(chart_image)
+            # Price Action patterns and confidences
+            price_action_features, price_action_confidence = self._extract_price_action_features(window)
             
             sample = {
                 'tcn_features': tcn_features,
                 'tcn_stability': tcn_stability,
                 'vit_features': vit_features,
                 'vit_entropy': vit_entropy,
-                'yolo_features': yolo_features,
-                'yolo_confidence': yolo_confidence,
+                'price_action_features': price_action_features,
+                'price_action_confidence': price_action_confidence,
                 'direction': torch.tensor(direction, dtype=torch.long),
                 'confidence': torch.tensor(confidence, dtype=torch.float32),
                 'price_change': torch.tensor(pct_change, dtype=torch.float32)
@@ -415,22 +412,19 @@ class MultiModalDataset(Dataset):
         
         return vit_features.squeeze(0).detach().cpu(), entropy.detach().cpu()
     
-    def _extract_yolo_features(self, chart_image: np.ndarray) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Extract YOLO pattern features and confidences."""
-        vec = self.yolo_detector.detect(chart_image)
+    def _extract_price_action_features(self, window: pd.DataFrame) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Extract Price Action pattern features and confidences."""
+        vec = self.price_action_extractor.extract(window)
         vec_t = torch.tensor(vec, dtype=torch.float32)
 
-        if self.yolo_detector.include_confidence:
-            num = self.yolo_detector.num_classes
+        if self.price_action_extractor.include_confidence:
+            num = self.price_action_extractor.num_classes
             conf_part = vec_t[num:]
             conf = conf_part[conf_part > 0].mean() if (conf_part > 0).any() else torch.tensor(0.0)
         else:
-            conf = vec_t.mean() if vec_t.numel() else torch.tensor(0.0)
+            conf = torch.tensor(vec_t.mean().item(), dtype=torch.float32)
 
         return vec_t, conf
-    
-    def __len__(self):
-        return len(self.samples)
     
     def __getitem__(self, idx):
         return self.samples[idx]
@@ -502,8 +496,8 @@ class DecisionFusionTrainer:
             
             # Forward pass
             output: DecisionOutput = self.model(
-                yolo_features=batch['yolo_features'],
-                yolo_confidence=batch['yolo_confidence'],
+                price_action_features=batch['price_action_features'],
+                price_action_confidence=batch['price_action_confidence'],
                 vit_features=batch['vit_features'],
                 vit_entropy=batch['vit_entropy'],
                 tcn_features=batch['tcn_features'],
@@ -561,8 +555,8 @@ class DecisionFusionTrainer:
                 
                 # Forward pass
                 output: DecisionOutput = self.model(
-                    yolo_features=batch['yolo_features'],
-                    yolo_confidence=batch['yolo_confidence'],
+                    price_action_features=batch['price_action_features'],
+                    price_action_confidence=batch['price_action_confidence'],
                     vit_features=batch['vit_features'],
                     vit_entropy=batch['vit_entropy'],
                     tcn_features=batch['tcn_features'],
@@ -698,8 +692,8 @@ def main():
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--vit_checkpoint', type=str, default=None)
     parser.add_argument('--tcn_checkpoint', type=str, default=None)
-    parser.add_argument('--yolo_checkpoint', type=str, default=None)
-    parser.add_argument('--yolo_include_confidence', action='store_true')
+    parser.add_argument('--price_action_include_extended', action='store_true', help='Include extended price action patterns')
+    parser.add_argument('--price_action_include_confidence', action='store_true', help='Include confidence scores')
     parser.add_argument('--use_cache', action='store_true', help='Cache extracted fusion samples to disk')
     parser.add_argument('--refresh_cache', action='store_true', help='Rebuild cache even if present')
     parser.add_argument('--cache_dir', type=str, default='cache/decision_fusion', help='Cache directory for fusion samples')
@@ -735,40 +729,46 @@ def main():
         if fallback.exists():
             tcn_checkpoint = str(fallback)
 
-    yolo_checkpoint = args.yolo_checkpoint or _resolve_yolo_checkpoint(args.profile)
+    price_action_checkpoint = _resolve_price_action_checkpoint(args.profile)
 
     config = _default_hparams_for_timeframe(timeframe)
 
     # Create model
-    yolo_dim = 40 if args.yolo_include_confidence else 20
+    price_action_dim = 44 if args.price_action_include_extended else 25  # 25 primary + 19 extended
+    if args.price_action_include_confidence:
+        price_action_dim *= 2  # Double for confidence scores
+    
     model = DecisionFusionLayer(
-        yolo_dim=yolo_dim,
+        price_action_dim=price_action_dim,
         vit_dim=768,
         tcn_dim=64,
         hidden_dim=256,
         num_classes=3,
         use_regime_conditioning=True
-    )
+    ).to(args.device)
 
     logger.info(f"Created Decision Fusion model for {args.profile} ({timeframe})")
     
     # Create dataset
     train_dataset = MultiModalDataset(
-        data_csv=data_csv,
         profile=args.profile,
         timeframe=timeframe,
+        csv_path=data_csv,
+        sequence_length=config['sequence_length'],
+        window_bars=config['window_bars'],
+        stride=config['stride'],
+        forward_bars=config['forward_bars'],
+        threshold_pct=config['threshold_pct'],
         device=args.device,
         image_size=224,
-        mode='train',
         max_samples=args.max_samples,
         vit_checkpoint=vit_checkpoint,
         tcn_checkpoint=tcn_checkpoint,
-        yolo_checkpoint=yolo_checkpoint,
-        yolo_include_confidence=args.yolo_include_confidence,
+        price_action_include_extended=args.price_action_include_extended,
+        price_action_include_confidence=args.price_action_include_confidence,
         cache_dir=args.cache_dir,
         use_cache=args.use_cache,
         refresh_cache=args.refresh_cache,
-        **config,
     )
 
     # Chronological split with purge gap to reduce leakage from overlapping windows

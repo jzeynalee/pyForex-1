@@ -123,7 +123,7 @@ class StrategyConfig:
     # Model paths
     tcn_weights: str = 'models/weights/tcn_best.pt'
     vit_weights: Optional[str] = 'models/weights/vit_best.pt'
-    yolo_weights: Optional[str] = 'models/weights/yolo_patterns.pt'
+    yolo_weights: Optional[str] = None  # Disabled - replaced by price action
     fusion_weights: Optional[str] = 'models/weights/fusion_best.pt'
     meta_model_path: Optional[str] = 'models/weights/meta_model.joblib'
     exit_model_path: Optional[str] = None  # NEW: Phase 4
@@ -131,7 +131,7 @@ class StrategyConfig:
     # Feature settings
     sequence_length: int = 60
     use_vision: bool = True
-    use_yolo: bool = True
+    use_price_action: bool = True
     
     # Risk settings
     base_risk_percent: float = 1.0
@@ -453,11 +453,24 @@ class NeuralHybridStrategy:
                 return None
 
             chart_image = None
+            price_action_data = None
+            
             if self.config.use_vision:
                 chart_image = self._generate_chart_image(market_data)
+            
+            if self.config.use_price_action:
+                # Pass OHLCV data directly for price action analysis
+                price_action_data = market_data
 
             if isinstance(self.predictor, HybridPredictor):
-                prediction = self.predictor.predict(features, chart_image)
+                # For hybrid predictor, we need to handle both vision and price action
+                if self.config.use_price_action and price_action_data is not None:
+                    # Create a hybrid input - price action data takes priority
+                    prediction = self.predictor.predict(features, price_action_data)
+                elif chart_image is not None:
+                    prediction = self.predictor.predict(features, chart_image)
+                else:
+                    prediction = self.predictor.predict(features)
             else:
                 prediction = self.predictor.predict(features)
 
@@ -519,7 +532,7 @@ class NeuralHybridStrategy:
                 profile=self.config.profile,
                 weights_path=self.config.tcn_weights,
                 use_vision=self.config.use_vision,
-                use_yolo=self.config.use_yolo
+                use_price_action=self.config.use_price_action
             )
             
             # Load meta-model if available
@@ -641,12 +654,25 @@ class NeuralHybridStrategy:
             
             # Get chart image if using vision
             chart_image = None
+            price_action_data = None
+            
             if self.config.use_vision:
                 chart_image = self._generate_chart_image(market_data)
             
+            if self.config.use_price_action:
+                # Pass OHLCV data directly for price action analysis
+                price_action_data = market_data
+            
             # Get predictions
             if isinstance(self.predictor, HybridPredictor):
-                prediction = self.predictor.predict(features, chart_image)
+                # For hybrid predictor, we need to handle both vision and price action
+                if self.config.use_price_action and price_action_data is not None:
+                    # Create a hybrid input - price action data takes priority
+                    prediction = self.predictor.predict(features, price_action_data)
+                elif chart_image is not None:
+                    prediction = self.predictor.predict(features, chart_image)
+                else:
+                    prediction = self.predictor.predict(features)
             else:
                 prediction = self.predictor.predict(features)
             

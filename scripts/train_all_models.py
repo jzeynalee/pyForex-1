@@ -662,7 +662,7 @@ def train_meta_labeling(
 # 4. Exit Optimizer Training (PPO)
 # =============================================================================
 
-def train_exit_optimizer(
+def train_exit_optimizer_script(
     profile: str,
     data_path: str,
     max_rows: int = 1_000_000,
@@ -713,7 +713,8 @@ def train_exit_optimizer(
         total_timesteps=total_timesteps,
         eval_freq=10000,
         save_freq=25000,
-        checkpoint_dir=str(CHECKPOINTS_DIR / "exit_optimizer")
+        checkpoint_dir=str(CHECKPOINTS_DIR / "exit_optimizer"),
+        device=device
     )
     
     # Train using ExitOptimizerTrainer with correct API
@@ -869,28 +870,68 @@ def main():
     
     # Train each model for each profile
     for profile in profiles_to_train:
-        data_path = PROJECT_ROOT / PROFILE_DATA_MAP[profile]['primary']
+        # Get all timeframes for this profile from MTF config or fallback map
+        timeframes = PROFILE_DATA_MAP[profile]['timeframes']
+        if profile == 'SCALP':
+            timeframes = ['M5', 'M15', 'H1']
+        elif profile == 'INTRADAY':
+            timeframes = ['M15', 'H1', 'H4']
+        elif profile == 'SWING':
+            timeframes = ['H1', 'H4', 'D1']
+
+        for timeframe in timeframes:
+            # Construct data path dynamically
+            data_path = PROJECT_ROOT / f"data/raw/EURUSD_{timeframe}_latest.csv"
+            
+            if not data_path.exists():
+                logger.warning(f"Skipping {profile} {timeframe} - Data not found: {data_path}")
+                continue
+
+            if 'tcn' in models_to_train:
+                try:
+                    # We save with timeframe in filename to support MTF
+                    result = train_multihead_tcn(
+                        profile=profile,
+                        data_path=str(data_path),
+                        max_rows=args.data_rows,
+                        epochs=args.epochs,
+                        batch_size=args.batch_size,
+                        device=args.device
+                    )
+                    
+                    # Rename/Move output to match train_decision_fusion expectation: {profile}_{timeframe}_best.pt
+                    # train_multihead_tcn saves to: checkpoints/multihead_tcn/multihead_tcn_{profile}.pth
+                    # and: models/weights/multihead_tcn_{profile}.pth
+                    # We need to distinguish them by timeframe now.
+                    
+                    # NOTE: We need to modify train_multihead_tcn to accept timeframe or handle the renaming here.
+                    # Since train_multihead_tcn is defined above, let's adjust the call signature in a subsequent edit or 
+                    # use a specific kwarg if available. For now, we'll patch the save path manually.
+                    
+                    src = WEIGHTS_DIR / f"multihead_tcn_{profile}.pth"
+                    dst = WEIGHTS_DIR / f"{profile.lower()}_{timeframe.lower()}_best.pt"
+                    if src.exists():
+                        shutil.copy(src, dst)
+                        logger.info(f"Saved MTF weights: {dst}")
+
+                    results[f'tcn_{profile}_{timeframe}'] = result
+                except Exception as e:
+                    logger.error(f"TCN training failed for {profile} {timeframe}: {e}")
+                    results[f'tcn_{profile}_{timeframe}'] = {'status': 'failed', 'error': str(e)}
         
-        if 'tcn' in models_to_train:
-            try:
-                result = train_multihead_tcn(
-                    profile=profile,
-                    data_path=str(data_path),
-                    max_rows=args.data_rows,
-                    epochs=args.epochs,
-                    batch_size=args.batch_size,
-                    device=args.device
-                )
-                results[f'tcn_{profile}'] = result
-            except Exception as e:
-                logger.error(f"TCN training failed for {profile}: {e}")
-                results[f'tcn_{profile}'] = {'status': 'failed', 'error': str(e)}
+        # ViT, Meta, Exit, YOLO are usually trained once per profile (dataset aggregation) or on primary TF
+        # We keep them running once per profile to avoid redundancy, as they are often less sensitive to exact timeframe dynamics 
+        # or use aggregated datasets.
         
+        # Use primary TF for these
+        primary_tf = PROFILE_DATA_MAP[profile]['primary'].split('_')[1].split('_')[0] # e.g. M5 from data/raw/EURUSD_M5_latest.csv
+        primary_data_path = PROJECT_ROOT / PROFILE_DATA_MAP[profile]['primary']
+
         if 'vit' in models_to_train:
             try:
                 result = train_vit(
                     profile=profile,
-                    data_path=str(data_path),
+                    data_path=str(primary_data_path),
                     max_rows=args.data_rows,
                     epochs=min(args.epochs, 30),  # ViT typically needs fewer epochs
                     batch_size=args.batch_size,
@@ -905,7 +946,7 @@ def main():
             try:
                 result = train_meta_labeling(
                     profile=profile,
-                    data_path=str(data_path),
+                    data_path=str(primary_data_path),
                     max_rows=args.data_rows,
                     device=args.device
                 )
@@ -916,9 +957,9 @@ def main():
         
         if 'exit' in models_to_train:
             try:
-                result = train_exit_optimizer(
+                result = train_exit_optimizer_script(
                     profile=profile,
-                    data_path=str(data_path),
+                    data_path=str(primary_data_path),
                     max_rows=args.data_rows,
                     total_timesteps=100_000,
                     device=args.device

@@ -4,7 +4,7 @@ Multi-modal Fusion Networks for pyForex Trading System.
 Combines features from multiple modalities:
 - Sequential model (TCN/LSTM) for time-series patterns
 - Vision Transformer (ViT) for visual chart patterns  
-- YOLO for candlestick pattern detection
+- Price Action for rule-based candlestick pattern detection
 
 Note: Variable names use 'seq' (sequence) instead of 'lstm' to be
 model-agnostic - works with TCN, LSTM, or any sequential encoder.
@@ -27,7 +27,7 @@ class FusionNet(nn.Module):
         self,
         seq_dim: int = 64,       # Sequential model (TCN/LSTM) feature dim
         vit_dim: int = 768,      # ViT feature dimension
-        yolo_dim: int = 25,      # YOLO pattern vector dimension
+        yolo_dim: int = 25,      # Price Action pattern vector dimension (replaces YOLO)
         hidden_dim: int = 256,   # Projection dimension
         num_classes: int = 3,    # BUY, SELL, HOLD
         dropout: float = 0.3,
@@ -86,7 +86,7 @@ class FusionNet(nn.Module):
         Args:
             seq_feat: (batch, seq_dim) - Features from TCN/LSTM
             vit_feat: (batch, vit_dim) - Features from ViT
-            yolo_feat: (batch, yolo_dim) - Features from YOLO
+            yolo_feat: (batch, yolo_dim) - Features from Price Action patterns (replaces YOLO)
         
         Returns:
             logits: (batch, num_classes)

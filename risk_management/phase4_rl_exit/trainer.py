@@ -33,6 +33,7 @@ class TrainingConfig:
     # Training parameters
     total_timesteps: int = 500_000
     n_envs: int = 4                     # Parallel environments
+    device: str = 'auto'                 # Device for training
     
     # Curriculum learning
     use_curriculum: bool = True
@@ -285,7 +286,8 @@ class ExitOptimizerTrainer:
         self.agent = PPOAgent(
             obs_dim=self.envs[0].observation_dim,
             action_dim=self.envs[0].action_dim,
-            config=self.agent_config
+            config=self.agent_config,
+            device=self.config.device
         )
         
         # Curriculum

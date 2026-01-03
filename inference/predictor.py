@@ -5,7 +5,7 @@ Enhanced Hybrid Predictor with Risk Management Integration
 Combines:
 - TCN for time-series predictions (direction, volatility, quantiles, outcomes)
 - ViT for visual chart patterns
-- YOLO for candlestick pattern detection
+- Price Action for rule-based pattern detection
 - Fusion network for combining modalities
 - Risk management predictions (Phase 1 multi-head outputs)
 
@@ -16,10 +16,10 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 import pandas as pd
-import logging
 from pathlib import Path
-from typing import Dict, Optional, Tuple, NamedTuple, List, Union
-from dataclasses import dataclass
+from typing import Optional, Dict, Any, Tuple, List, NamedTuple, Union
+from dataclasses import dataclass, field
+import logging
 from enum import IntEnum
 
 logger = logging.getLogger(__name__)
@@ -55,7 +55,7 @@ class PredictionResult(NamedTuple):
     p_short: Optional[float] = None
     
     # Modality info
-    gate_weights: Optional[np.ndarray] = None  # [seq, vit, yolo]
+    gate_weights: Optional[np.ndarray] = None  # [seq, vit, price_action]
     features: Optional[np.ndarray] = None      # Hidden features
 
 
@@ -75,8 +75,8 @@ class PredictorConfig:
     use_vision: bool = True
     image_size: int = 224
     
-    # YOLO
-    use_yolo: bool = True
+    # Price Action
+    use_price_action: bool = True
     
     # Fusion
     fusion_type: str = "gated"      # 'gated', 'simple', 'attention'
@@ -531,7 +531,7 @@ class RiskAwareTCNPredictor:
 
 class HybridPredictor:
     """
-    Full hybrid predictor combining TCN + ViT + YOLO + Fusion.
+    Full hybrid predictor combining TCN + ViT + Price Action + Fusion.
     
     This is the production predictor that combines all modalities
     with risk management outputs.
@@ -542,7 +542,7 @@ class HybridPredictor:
         config: Optional[PredictorConfig] = None,
         tcn_weights: Optional[str] = None,
         vit_weights: Optional[str] = None,
-        yolo_weights: Optional[str] = None,
+        price_action_weights: Optional[str] = None,
         fusion_weights: Optional[str] = None
     ):
         self.config = config or PredictorConfig()
@@ -555,16 +555,16 @@ class HybridPredictor:
         
         # Vision components (optional)
         self.vit_model = None
-        self.yolo_model = None
+        self.price_action_model = None
         self.fusion_model = None
         
         if self.config.use_vision:
             self._init_vision(vit_weights)
         
-        if self.config.use_yolo:
-            self._init_yolo(yolo_weights)
+        if self.config.use_price_action:
+            self._init_price_action(price_action_weights)
         
-        if self.vit_model or self.yolo_model:
+        if self.vit_model or self.price_action_model:
             self._init_fusion(fusion_weights)
         
         logger.info("HybridPredictor initialized")
@@ -574,25 +574,65 @@ class HybridPredictor:
         try:
             from models.vit import ViTChartClassifier
             self.vit_model = ViTChartClassifier().to(self.device)
-            if weights_path:
-                self.vit_model.load_state_dict(
-                    torch.load(weights_path, map_location=self.device)
-                )
+            
+            if weights_path and Path(weights_path).exists():
+                checkpoint = torch.load(weights_path, map_location=self.device)
+                
+                # Handle different checkpoint structures
+                if isinstance(checkpoint, dict) and 'state_dict' in checkpoint:
+                    # Checkpoint from simplified training - contains raw timm state dict
+                    state_dict = checkpoint['state_dict']
+                    
+                    # Load raw timm weights into the vit sub-module
+                    try:
+                        self.vit_model.vit.load_state_dict(state_dict, strict=False)
+                        logger.info("Loaded raw timm weights into ViT model")
+                    except Exception as e:
+                        logger.warning(f"Failed to load raw timm weights: {e}")
+                        # Try loading as full model state dict
+                        try:
+                            self.vit_model.load_state_dict(state_dict, strict=False)
+                            logger.info("Loaded weights as full model state dict")
+                        except Exception as e2:
+                            logger.warning(f"Failed to load full model state dict: {e2}")
+                            logger.warning("ViT model will use random weights")
+                
+                elif isinstance(checkpoint, dict):
+                    # Direct state dict
+                    try:
+                        # Try loading into vit sub-module first (raw timm weights)
+                        self.vit_model.vit.load_state_dict(checkpoint, strict=False)
+                        logger.info("Loaded direct weights into ViT sub-module")
+                    except Exception as e:
+                        # Try loading as full model
+                        try:
+                            self.vit_model.load_state_dict(checkpoint, strict=False)
+                            logger.info("Loaded direct weights as full model")
+                        except Exception as e2:
+                            logger.warning(f"Failed to load direct weights: {e2}")
+                            logger.warning("ViT model will use random weights")
+                else:
+                    logger.warning("Unknown checkpoint structure for ViT")
+                    
             self.vit_model.eval()
-            logger.info("ViT model loaded")
+            logger.info("ViT model initialized")
         except (ImportError, Exception) as e:
             logger.warning(f"Could not load ViT: {e}")
             self.vit_model = None
     
-    def _init_yolo(self, weights_path: Optional[str]):
-        """Initialize YOLO pattern detector."""
+    def _init_price_action(self, weights_path: Optional[str]):
+        """Initialize Price Action pattern detector."""
         try:
-            from models.yolo_pattern import YOLOPatternExtractor
-            self.yolo_model = YOLOPatternExtractor(weights_path)
-            logger.info("YOLO model loaded")
+            from models.price_action_pattern import PriceActionPatternExtractor
+            # Price action doesn't need weights, but we pass the parameter for compatibility
+            self.price_action_model = PriceActionPatternExtractor(
+                include_extended_patterns=True,
+                include_confidence=False
+            )
+            logger.info("Price Action model loaded")
         except (ImportError, Exception) as e:
-            logger.warning(f"Could not load YOLO: {e}")
-            self.yolo_model = None
+            logger.warning(f"Could not load Price Action: {e}")
+            self.price_action_model = None
     
     def _init_fusion(self, weights_path: Optional[str]):
         """Initialize fusion network."""
@@ -614,22 +654,22 @@ class HybridPredictor:
                         vit_dim = 0
                 if vit_dim <= 0:
                     vit_dim = 768
-            yolo_dim = 0
-            if self.yolo_model:
+            price_action_dim = 0
+            if self.price_action_model:
                 try:
-                    if hasattr(self.yolo_model, 'get_feature_dim'):
-                        yolo_dim = int(self.yolo_model.get_feature_dim() or 0)
+                    if hasattr(self.price_action_model, 'get_feature_dim'):
+                        price_action_dim = int(self.price_action_model.get_feature_dim() or 0)
                     else:
-                        yolo_dim = int(getattr(self.yolo_model, 'feature_dim', 0) or 0)
+                        price_action_dim = int(getattr(self.price_action_model, 'feature_dim', 0) or 0)
                 except Exception:
-                    yolo_dim = 0
-                if yolo_dim <= 0:
-                    yolo_dim = 25
+                    price_action_dim = 0
+                if price_action_dim <= 0:
+                    price_action_dim = 50  # Default for extended patterns
             
             self.fusion_model = FusionNet(
                 seq_dim=seq_dim,
                 vit_dim=vit_dim,
-                yolo_dim=yolo_dim
+                yolo_dim=price_action_dim  # Reuse yolo_dim parameter for price action
             ).to(self.device)
             
             if weights_path:
@@ -668,20 +708,20 @@ class HybridPredictor:
         
         # Get vision features
         vit_features = None
-        yolo_features = None
+        price_action_features = None
         
         if self.vit_model and chart_image is not None:
             vit_features = self._get_vit_features(chart_image)
         
-        if self.yolo_model and chart_image is not None:
-            yolo_features = self._get_yolo_features(chart_image)
+        if self.price_action_model and chart_image is not None:
+            price_action_features = self._get_price_action_features(chart_image)
         
         # Fuse if fusion model available
         if self.fusion_model and tcn_result.features is not None:
             fused_probs, gate_weights = self._fuse_predictions(
                 tcn_result.features,
                 vit_features,
-                yolo_features
+                price_action_features
             )
             
             predicted_class = int(np.argmax(fused_probs))
@@ -743,30 +783,30 @@ class HybridPredictor:
 
         return feats.cpu().numpy()[0]
     
-    def _get_yolo_features(self, image: np.ndarray) -> np.ndarray:
-        """Extract pattern features from YOLO."""
+    def _get_price_action_features(self, image: np.ndarray) -> np.ndarray:
+        """Extract pattern features from Price Action analysis."""
         try:
-            if self.yolo_model is None:
+            if self.price_action_model is None:
                 return None
 
-            # Prefer the extractor API used by models.yolo_pattern.YOLOPatternExtractor
-            if hasattr(self.yolo_model, 'extract'):
-                vec = self.yolo_model.extract(image)
-                return vec
-
-            # Fallbacks for older APIs
-            if hasattr(self.yolo_model, 'detect'):
-                return self.yolo_model.detect(image)
+            # Price action extractor expects OHLCV DataFrame, but we receive image
+            # For compatibility, we'll need to pass the OHLCV data instead
+            # This method will be called with OHLCV data in the updated interface
+            if hasattr(self.price_action_model, 'extract'):
+                # If it's a DataFrame (OHLCV data), extract directly
+                if hasattr(image, 'columns'):  # It's a DataFrame
+                    return self.price_action_model.extract(image)
+                else:  # It's an image, return zero vector for now
+                    logger.warning("Price action needs OHLCV data, not image. Returning zero vector.")
+                    return np.zeros(self.price_action_model.get_feature_dim(), dtype=np.float32)
         except Exception:
             return None
-
-        return None
     
     def _fuse_predictions(
         self,
         seq_features: np.ndarray,
         vit_features: Optional[np.ndarray],
-        yolo_features: Optional[np.ndarray]
+        price_action_features: Optional[np.ndarray]
     ) -> Tuple[np.ndarray, np.ndarray]:
         """Fuse features from all modalities."""
         # Prepare inputs
@@ -776,17 +816,17 @@ class HybridPredictor:
         if vit_features is not None:
             vit_tensor = torch.tensor(vit_features, dtype=torch.float32).unsqueeze(0).to(self.device)
         
-        yolo_tensor = None
-        if yolo_features is not None:
-            yolo_tensor = torch.tensor(yolo_features, dtype=torch.float32).unsqueeze(0).to(self.device)
+        price_action_tensor = None
+        if price_action_features is not None:
+            price_action_tensor = torch.tensor(price_action_features, dtype=torch.float32).unsqueeze(0).to(self.device)
         
         with torch.no_grad():
             logits, gate_weights = self.fusion_model(
-                seq_tensor, vit_tensor, yolo_tensor,
+                seq_tensor, vit_tensor, price_action_tensor,
                 return_gate_weights=True
             )
             probs = F.softmax(logits, dim=-1)
-        
+            
         return probs.cpu().numpy()[0], gate_weights.cpu().numpy()[0]
 
 
@@ -798,7 +838,7 @@ def create_predictor(
     profile: str = 'INTRADAY',
     weights_path: Optional[str] = None,
     use_vision: bool = False,
-    use_yolo: bool = False
+    use_price_action: bool = False
 ) -> Union[RiskAwareTCNPredictor, HybridPredictor]:
     """
     Factory function to create appropriate predictor.
@@ -807,7 +847,7 @@ def create_predictor(
         profile: Trading profile ('SCALP', 'INTRADAY', 'SWING')
         weights_path: Path to model weights
         use_vision: Enable ViT
-        use_yolo: Enable YOLO
+        use_price_action: Enable Price Action patterns
     
     Returns:
         Configured predictor instance
@@ -815,10 +855,10 @@ def create_predictor(
     config = PredictorConfig(
         profile=profile,
         use_vision=use_vision,
-        use_yolo=use_yolo
+        use_price_action=use_price_action
     )
     
-    if use_vision or use_yolo:
+    if use_vision or use_price_action:
         return HybridPredictor(config, tcn_weights=weights_path)
     else:
         return RiskAwareTCNPredictor(config, weights_path=weights_path)
