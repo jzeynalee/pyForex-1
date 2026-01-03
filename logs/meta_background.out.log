@@ -1,0 +1,41 @@
+2025-12-30 20:53:10,458 | INFO     | __main__                  | ======================================================================
+2025-12-30 20:53:10,458 | INFO     | __main__                  |   pyForex COMPREHENSIVE MODEL TRAINING
+2025-12-30 20:53:10,460 | INFO     | __main__                  | ======================================================================
+2025-12-30 20:53:10,460 | INFO     | __main__                  |   Models: ['meta']
+2025-12-30 20:53:10,460 | INFO     | __main__                  |   Profiles: ['SCALP', 'INTRADAY', 'SWING']
+2025-12-30 20:53:10,461 | INFO     | __main__                  |   Max Data Rows: 1,000,000
+2025-12-30 20:53:10,461 | INFO     | __main__                  |   Epochs: 100
+2025-12-30 20:53:10,461 | INFO     | __main__                  |   Batch Size: 64
+2025-12-30 20:53:10,462 | INFO     | __main__                  |   Device: auto
+2025-12-30 20:53:10,462 | INFO     | __main__                  | ======================================================================
+2025-12-30 20:53:10,464 | INFO     | __main__                  | ============================================================
+2025-12-30 20:53:10,465 | INFO     | __main__                  |   TRAINING Meta-Labeling - SCALP
+2025-12-30 20:53:10,465 | INFO     | __main__                  | ============================================================
+2025-12-30 20:53:14,877 | INFO     | __main__                  | Data shape: (1000000, 8)
+2025-12-30 20:53:16,955 | ERROR    | __main__                  | Meta-labeling training failed for SCALP: 'charmap' codec can't encode character '\u26a1' in position 0: character maps to <undefined>
+2025-12-30 20:53:16,980 | INFO     | __main__                  | ============================================================
+2025-12-30 20:53:16,981 | INFO     | __main__                  |   TRAINING Meta-Labeling - INTRADAY
+2025-12-30 20:53:16,981 | INFO     | __main__                  | ============================================================
+2025-12-30 20:53:17,375 | INFO     | __main__                  | Data shape: (174734, 8)
+2025-12-30 20:53:17,413 | ERROR    | __main__                  | Meta-labeling training failed for INTRADAY: 'charmap' codec can't encode character '\u26a1' in position 0: character maps to <undefined>
+2025-12-30 20:53:17,419 | INFO     | __main__                  | ============================================================
+2025-12-30 20:53:17,419 | INFO     | __main__                  |   TRAINING Meta-Labeling - SWING
+2025-12-30 20:53:17,419 | INFO     | __main__                  | ============================================================
+2025-12-30 20:53:17,537 | INFO     | __main__                  | Data shape: (49197, 8)
+2025-12-30 20:53:40,739 | INFO     | __main__                  | Meta-labeling samples: 40,099
+2025-12-30 20:53:40,739 | INFO     | __main__                  | Positive rate: 32.18%
+2025-12-30 20:53:42,249 | INFO     | risk_management.phase3_filtering.meta_labeling | Meta-model trained: {'accuracy': 0.7605985037406484, 'precision': 0.0, 'recall': 0.0, 'f1': 0.0, 'roc_auc': 0.5283987991273182}
+2025-12-30 20:53:42,249 | INFO     | __main__                  | Validation AUC: 0.5284
+2025-12-30 20:53:42,250 | INFO     | __main__                  | Validation Accuracy: 0.7606
+2025-12-30 20:53:42,259 | INFO     | risk_management.phase3_filtering.meta_labeling | Meta-labeling model saved to E:\pyProject\pyForex-1\checkpoints\meta_labeling\meta_model_SWING.pkl
+2025-12-30 20:53:42,259 | INFO     | __main__                  | Saved meta-model: E:\pyProject\pyForex-1\checkpoints\meta_labeling\meta_model_SWING.pkl
+2025-12-30 20:53:42,272 | INFO     | __main__                  | 
+======================================================================
+2025-12-30 20:53:42,273 | INFO     | __main__                  |   TRAINING SUMMARY
+2025-12-30 20:53:42,273 | INFO     | __main__                  | ======================================================================
+2025-12-30 20:53:42,273 | INFO     | __main__                  |   [FAILED] meta_SCALP: 'charmap' codec can't encode character '\u26a1' in position 0: character maps to <undefined>
+2025-12-30 20:53:42,274 | INFO     | __main__                  |   [FAILED] meta_INTRADAY: 'charmap' codec can't encode character '\u26a1' in position 0: character maps to <undefined>
+2025-12-30 20:53:42,275 | INFO     | __main__                  |   [SUCCESS] meta_SWING
+2025-12-30 20:53:42,277 | INFO     | __main__                  | 
+Results saved to: E:\pyProject\pyForex-1\training_results.json
+2025-12-30 20:53:42,277 | INFO     | __main__                  | ======================================================================

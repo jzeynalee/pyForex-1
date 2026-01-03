@@ -1,0 +1,3688 @@
+{
+  "timestamp": "2026-01-03T22:12:28.851449",
+  "decision": {
+    "decision": "HOLD",
+    "confidence": 0.336,
+    "regime": "neutral",
+    "risk_score": 0.3,
+    "expected_return": 0.0,
+    "stop_loss": "1.1272075",
+    "take_profit": "1.1272075",
+    "reasoning": [
+      "Found 162 strong swing points",
+      "Weak trend (ADX: 9.2)",
+      "No clear technical signals",
+      "Strong causal feature: timestamp (score: 17.554)",
+      "Strong causal feature: high (score: 11.022)",
+      "Strong causal feature: low (score: 10.835)",
+      "Strong causal feature: tema (score: 8.951)",
+      "Strong causal feature: ema_9 (score: 8.910)",
+      "Average causal signal: 7.855"
+    ],
+    "key_features": [
+      "macd",
+      "high",
+      "bb_position",
+      "low",
+      "adx",
+      "timestamp",
+      "rsi"
+    ],
+    "recommendation": "HOLD - No clear trading opportunity detected"
+  },
+  "market_structure": {
+    "swing_points_count": 192,
+    "structure_analysis": {
+      "structure": "range",
+      "trend": "sideways",
+      "key_levels": [
+        {
+          "price": 1.136216396071936,
+          "type": "high",
+          "strength": 0.8477493793470798,
+          "time": "2015-01-24T16:26:06.525908000"
+        },
+        {
+          "price": 1.1323595660034445,
+          "type": "high",
+          "strength": 0.7878707932110144,
+          "time": "2015-01-24T12:56:06.525908000"
+        },
+        {
+          "price": 1.1266224539720817,
+          "type": "low",
+          "strength": 0.7213270411403303,
+          "time": "2015-01-24T14:26:06.525908000"
+        },
+        {
+          "price": 1.1358490418044243,
+          "type": "high",
+          "strength": 0.7037645903063062,
+          "time": "2015-01-24T15:46:06.525908000"
+        },
+        {
+          "price": 1.1238596873006146,
+          "type": "low",
+          "strength": 0.6988437322219135,
+          "time": "2015-01-24T12:36:06.525908000"
+        },
+        {
+          "price": 1.1307437718820403,
+          "type": "high",
+          "strength": 0.6497446577416909,
+          "time": "2015-01-24T13:56:06.525908000"
+        },
+        {
+          "price": 1.1250061564830562,
+          "type": "low",
+          "strength": 0.646767733268459,
+          "time": "2015-01-24T15:16:06.525908000"
+        },
+        {
+          "price": 1.130553622339524,
+          "type": "high",
+          "strength": 0.6010697873974116,
+          "time": "2015-01-24T13:26:06.525908000"
+        },
+        {
+          "price": 1.1265946883567202,
+          "type": "low",
+          "strength": 0.5536554324040207,
+          "time": "2015-01-24T13:41:06.525908000"
+        },
+        {
+          "price": 1.1314086618009833,
+          "type": "high",
+          "strength": 0.527331944331834,
+          "time": "2015-01-24T15:11:06.525908000"
+        }
+      ],
+      "last_high": "SwingPoint(index=795, time=np.datetime64('2015-01-24T16:26:06.525908000'), price=np.float64(1.136216396071936), point_type='high', strength=np.float64(0.8477493793470798))",
+      "last_low": "SwingPoint(index=781, time=np.datetime64('2015-01-24T15:16:06.525908000'), price=np.float64(1.1250061564830562), point_type='low', strength=np.float64(0.646767733268459))",
+      "higher_highs": 1,
+      "lower_highs": 0,
+      "higher_lows": 0,
+      "lower_lows": 1
+    }
+  },
+  "top_features": [
+    {
+      "feature": "timestamp",
+      "rank": 1,
+      "combined_score": 17.554209825540546,
+      "num_methods": 1,
+      "mutual_information": {
+        "mi_score": 1.7554209825540545,
+        "normalized_mi": 2.532537146203166,
+        "rank": null
+      }
+    },
+    {
+      "feature": "high",
+      "rank": 2,
+      "combined_score": 11.021637246996177,
+      "num_methods": 3,
+      "mutual_information": {
+        "mi_score": 2.514108498345773,
+        "normalized_mi": 3.6270918628202455,
+        "rank": null
+      },
+      "correlation_analysis": {
+        "pearson_corr": "0.9892302",
+        "pearson_p_value": 0.0,
+        "pearson_abs": "0.9892302",
+        "spearman_corr": 0.9912175799245496,
+        "spearman_p_value": 0.0,
+        "spearman_abs": 0.9912175799245496,
+        "kendall_corr": 0.932080513393346,
+        "kendall_p_value": 0.0,
+        "kendall_abs": 0.932080513393346,
+        "significant_pearson": "True",
+        "significant_spearman": "True",
+        "significant_kendall": "True"
+      },
+      "lead_lag_analysis": {
+        "best_lag": "0",
+        "best_correlation": 0.9892302674931113,
+        "best_abs_correlation": 0.9892302674931113,
+        "all_correlations": [
+          0.970445715610816,
+          0.9722244016794126,
+          0.9717879142890714,
+          0.9707285813274107,
+          0.9684447796473342,
+          0.968681390381225,
+          0.9670372851921973,
+          0.9685042802172759,
+          0.97037583690863,
+          0.9858017161323915,
+          0.9892302674931113,
+          0.9709606078525296,
+          0.9686654554117615,
+          0.9673984383764741,
+          0.9673736590870589,
+          0.969615697944318,
+          0.9703763891725727,
+          0.9729942252230087,
+          0.9703630181410465,
+          0.9696227156478878,
+          0.9707612611075337
+        ],
+        "leads_target": "False",
+        "lags_target": "False",
+        "lead_strength": 0,
+        "lag_strength": 0
+      }
+    },
+    {
+      "feature": "low",
+      "rank": 3,
+      "combined_score": 10.834624928839755,
+      "num_methods": 3,
+      "mutual_information": {
+        "mi_score": 2.4575021183534433,
+        "normalized_mi": 3.5454261191226353,
+        "rank": null
+      },
+      "correlation_analysis": {
+        "pearson_corr": "0.99013126",
+        "pearson_p_value": 0.0,
+        "pearson_abs": "0.99013126",
+        "spearman_corr": 0.9914496643243759,
+        "spearman_p_value": 0.0,
+        "spearman_abs": 0.9914496643243759,
+        "kendall_corr": 0.9321760515907084,
+        "kendall_p_value": 0.0,
+        "kendall_abs": 0.9321760515907084,
+        "significant_pearson": "True",
+        "significant_spearman": "True",
+        "significant_kendall": "True"
+      },
+      "lead_lag_analysis": {
+        "best_lag": "0",
+        "best_correlation": 0.9901312248538788,
+        "best_abs_correlation": 0.9901312248538788,
+        "all_correlations": [
+          0.9684955425381226,
+          0.9687273537335277,
+          0.9716205937061518,
+          0.9687944831497497,
+          0.9689481218201608,
+          0.967414318373886,
+          0.9671463941481488,
+          0.9695606739000903,
+          0.9693068977129887,
+          0.9850979724520325,
+          0.9901312248538788,
+          0.9688362366462103,
+          0.96860331701483,
+          0.9674594625069555,
+          0.9671613605932153,
+          0.9686438052643098,
+          0.9688078499233355,
+          0.9701661490145891,
+          0.9713408541361253,
+          0.9686359952239613,
+          0.9697725353952691
+        ],
+        "leads_target": "False",
+        "lags_target": "False",
+        "lead_strength": 0,
+        "lag_strength": 0
+      }
+    },
+    {
+      "feature": "tema",
+      "rank": 4,
+      "combined_score": 8.951073097831577,
+      "num_methods": 3,
+      "mutual_information": {
+        "mi_score": 1.8938470750513332,
+        "normalized_mi": 2.732243783378627,
+        "rank": null
+      },
+      "correlation_analysis": {
+        "pearson_corr": "0.9881853",
+        "pearson_p_value": 0.0,
+        "pearson_abs": "0.9881853",
+        "spearman_corr": 0.9894059560137511,
+        "spearman_p_value": 0.0,
+        "spearman_abs": 0.9894059560137511,
+        "kendall_corr": 0.9136814529042894,
+        "kendall_p_value": 0.0,
+        "kendall_abs": 0.9136814529042894,
+        "significant_pearson": "True",
+        "significant_spearman": "True",
+        "significant_kendall": "True"
+      },
+      "lead_lag_analysis": {
+        "best_lag": "0",
+        "best_correlation": 0.9881853348042373,
+        "best_abs_correlation": 0.9881853348042373,
+        "all_correlations": [
+          0.9806650853104522,
+          0.9809706452934732,
+          0.9814668095149397,
+          0.9810818784892887,
+          0.9809881107713374,
+          0.9818024146314113,
+          0.9822586802568344,
+          0.984101700812905,
+          0.985432799366363,
+          0.9870287638521321,
+          0.9881853348042373,
+          0.9794100424598814,
+          0.9788577960648044,
+          0.979026694227016,
+          0.979149875531277,
+          0.9800910684756867,
+          0.9801371094088582,
+          0.9805845684570175,
+          0.9803210510033156,
+          0.9795750001686155,
+          0.9795892613404599
+        ],
+        "leads_target": "False",
+        "lags_target": "False",
+        "lead_strength": 0,
+        "lag_strength": 0
+      }
+    },
+    {
+      "feature": "ema_9",
+      "rank": 5,
+      "combined_score": 8.910251309494472,
+      "num_methods": 3,
+      "mutual_information": {
+        "mi_score": 1.8819305022113118,
+        "normalized_mi": 2.715051802837936,
+        "rank": null
+      },
+      "correlation_analysis": {
+        "pearson_corr": "0.9877459",
+        "pearson_p_value": 0.0,
+        "pearson_abs": "0.9877459",
+        "spearman_corr": 0.9889417112096351,
+        "spearman_p_value": 0.0,
+        "spearman_abs": 0.9889417112096351,
+        "kendall_corr": 0.9114326093240875,
+        "kendall_p_value": 0.0,
+        "kendall_abs": 0.9114326093240875,
+        "significant_pearson": "True",
+        "significant_spearman": "True",
+        "significant_kendall": "True"
+      },
+      "lead_lag_analysis": {
+        "best_lag": "0",
+        "best_correlation": 0.9877458577673784,
+        "best_abs_correlation": 0.9877458577673784,
+        "all_correlations": [
+          0.9818828110841009,
+          0.9821237114630476,
+          0.9824940147100566,
+          0.9821952710533643,
+          0.9821154371129308,
+          0.9826818520501281,
+          0.9829282664271256,
+          0.9843764584908501,
+          0.9854301455822093,
+          0.9867118177442561,
+          0.9877458577673784,
+          0.9807729987025153,
+          0.9803155394251045,
+          0.9803871223257751,
+          0.9804220817162063,
+          0.9811853563372003,
+          0.9812829096500022,
+          0.981629204130056,
+          0.9814003801305085,
+          0.9808430093138067,
+          0.9808710692700778
+        ],
+        "leads_target": "False",
+        "lags_target": "False",
+        "lead_strength": 0,
+        "lag_strength": 0
+      }
+    },
+    {
+      "feature": "ema_12",
+      "rank": 6,
+      "combined_score": 8.811267309470438,
+      "num_methods": 3,
+      "mutual_information": {
+        "mi_score": 1.8529919659439655,
+        "normalized_mi": 2.67330232007445,
+        "rank": null
+      },
+      "correlation_analysis": {
+        "pearson_corr": "0.9866671",
+        "pearson_p_value": 0.0,
+        "pearson_abs": "0.9866671",
+        "spearman_corr": 0.9879183571496417,
+        "spearman_p_value": 0.0,
+        "spearman_abs": 0.9879183571496417,
+        "kendall_corr": 0.9072162094875097,
+        "kendall_p_value": 0.0,
+        "kendall_abs": 0.9072162094875097,
+        "significant_pearson": "True",
+        "significant_spearman": "True",
+        "significant_kendall": "True"
+      },
+      "lead_lag_analysis": {
+        "best_lag": "0",
+        "best_correlation": 0.9866670229996303,
+        "best_abs_correlation": 0.9866670229996303,
+        "all_correlations": [
+          0.9825213567562384,
+          0.9827312955217136,
+          0.9830409162439552,
+          0.982864344570541,
+          0.9828428425656669,
+          0.9833191784348779,
+          0.9835005672826288,
+          0.9845851956628794,
+          0.9853167793534885,
+          0.9861218851491773,
+          0.9866670229996303,
+          0.9813019794016907,
+          0.9809682746618815,
+          0.9810454494052593,
+          0.9810945782396452,
+          0.9816693331597999,
+          0.9817358533922864,
+          0.9819750728268927,
+          0.981771384275302,
+          0.9813479365090381,
+          0.9813617257310069
+        ],
+        "leads_target": "False",
+        "lags_target": "False",
+        "lead_strength": 0,
+        "lag_strength": 0
+      }
+    },
+    {
+      "feature": "dema",
+      "rank": 7,
+      "combined_score": 8.763073912630938,
+      "num_methods": 3,
+      "mutual_information": {
+        "mi_score": 1.838393088014274,
+        "normalized_mi": 2.652240591282741,
+        "rank": null
+      },
+      "correlation_analysis": {
+        "pearson_corr": "0.9868555",
+        "pearson_p_value": 0.0,
+        "pearson_abs": "0.9868555",
+        "spearman_corr": 0.9882309404140012,
+        "spearman_p_value": 0.0,
+        "spearman_abs": 0.9882309404140012,
+        "kendall_corr": 0.9087053638858372,
+        "kendall_p_value": 0.0,
+        "kendall_abs": 0.9087053638858372,
+        "significant_pearson": "True",
+        "significant_spearman": "True",
+        "significant_kendall": "True"
+      },
+      "lead_lag_analysis": {
+        "best_lag": "0",
+        "best_correlation": 0.9868554674876856,
+        "best_abs_correlation": 0.9868554674876856,
+        "all_correlations": [
+          0.9821309932399233,
+          0.9823717934851699,
+          0.9827342319674494,
+          0.9825406903626683,
+          0.9825103863246042,
+          0.9830706865946546,
+          0.9833331342369606,
+          0.9845773297481651,
+          0.985402875995926,
+          0.986307502156389,
+          0.9868554674876856,
+          0.9805985911293416,
+          0.9802278411768315,
+          0.9803442733847969,
+          0.9804326045239544,
+          0.9811143418301562,
+          0.981188966319587,
+          0.9814623004623707,
+          0.9812071002114404,
+          0.9806875809080104,
+          0.9807188704011339
+        ],
+        "leads_target": "False",
+        "lags_target": "False",
+        "lead_strength": 0,
+        "lag_strength": 0
+      }
+    },
+    {
+      "feature": "kc_middle",
+      "rank": 8,
+      "combined_score": 8.689503213885757,
+      "num_methods": 3,
+      "mutual_information": {
+        "mi_score": 1.8173539653359025,
+        "normalized_mi": 2.6218875533299997,
+        "rank": null
+      },
+      "correlation_analysis": {
+        "pearson_corr": "0.98530173",
+        "pearson_p_value": 0.0,
+        "pearson_abs": "0.98530173",
+        "spearman_corr": 0.9867294343158354,
+        "spearman_p_value": 0.0,
+        "spearman_abs": 0.9867294343158354,
+        "kendall_corr": 0.9026366266098298,
+        "kendall_p_value": 0.0,
+        "kendall_abs": 0.9026366266098298,
+        "significant_pearson": "True",
+        "significant_spearman": "True",
+        "significant_kendall": "True"
+      },
+      "lead_lag_analysis": {
+        "best_lag": "0",
+        "best_correlation": 0.98530168916716,
+        "best_abs_correlation": 0.98530168916716,
+        "all_correlations": [
+          0.9831784601202347,
+          0.983318436394223,
+          0.9835281347262584,
+          0.9834557176330574,
+          0.983459580226147,
+          0.9837707109064318,
+          0.9838189916546466,
+          0.9844472073144921,
+          0.9848240929751012,
+          0.9851481554756577,
+          0.98530168916716,
+          0.9819834724547923,
+          0.981805151240087,
+          0.9818653792795283,
+          0.9819053416112056,
+          0.9822412583127124,
+          0.9822677027314639,
+          0.9823799651309885,
+          0.9822193897148311,
+          0.9819559178269863,
+          0.98194739138031
+        ],
+        "leads_target": "False",
+        "lags_target": "False",
+        "lead_strength": 0,
+        "lag_strength": 0
+      }
+    }
+  ],
+  "causal_network": {
+    "nodes": [
+      {
+        "id": "timestamp",
+        "score": 17.554209825540546,
+        "rank": 1,
+        "methods": 1
+      },
+      {
+        "id": "high",
+        "score": 11.021637246996177,
+        "rank": 2,
+        "methods": 3
+      },
+      {
+        "id": "low",
+        "score": 10.834624928839755,
+        "rank": 3,
+        "methods": 3
+      },
+      {
+        "id": "tema",
+        "score": 8.951073097831577,
+        "rank": 4,
+        "methods": 3
+      },
+      {
+        "id": "ema_9",
+        "score": 8.910251309494472,
+        "rank": 5,
+        "methods": 3
+      },
+      {
+        "id": "ema_12",
+        "score": 8.811267309470438,
+        "rank": 6,
+        "methods": 3
+      },
+      {
+        "id": "dema",
+        "score": 8.763073912630938,
+        "rank": 7,
+        "methods": 3
+      },
+      {
+        "id": "kc_middle",
+        "score": 8.689503213885757,
+        "rank": 8,
+        "methods": 3
+      },
+      {
+        "id": "ema_26",
+        "score": 8.653274502683225,
+        "rank": 9,
+        "methods": 3
+      },
+      {
+        "id": "smma",
+        "score": 8.644117280915772,
+        "rank": 10,
+        "methods": 3
+      },
+      {
+        "id": "lsma",
+        "score": 8.611807539014952,
+        "rank": 11,
+        "methods": 3
+      },
+      {
+        "id": "kama",
+        "score": 8.599414045451406,
+        "rank": 12,
+        "methods": 3
+      },
+      {
+        "id": "wma_20",
+        "score": 8.589150117882422,
+        "rank": 13,
+        "methods": 3
+      },
+      {
+        "id": "mcginley",
+        "score": 8.588463676556886,
+        "rank": 14,
+        "methods": 3
+      },
+      {
+        "id": "sma_7",
+        "score": 8.551782651944299,
+        "rank": 15,
+        "methods": 3
+      },
+      {
+        "id": "ema_50",
+        "score": 8.543922247635173,
+        "rank": 16,
+        "methods": 3
+      },
+      {
+        "id": "sma_50",
+        "score": 8.511702633907628,
+        "rank": 17,
+        "methods": 3
+      },
+      {
+        "id": "vwap",
+        "score": 8.496943198019668,
+        "rank": 18,
+        "methods": 3
+      },
+      {
+        "id": "vwma",
+        "score": 8.490539843965529,
+        "rank": 19,
+        "methods": 3
+      },
+      {
+        "id": "sma_20",
+        "score": 8.471197049750652,
+        "rank": 20,
+        "methods": 3
+      },
+      {
+        "id": "bb_middle",
+        "score": 8.470591374788357,
+        "rank": 21,
+        "methods": 3
+      },
+      {
+        "id": "low_mean",
+        "score": 8.454390359419506,
+        "rank": 22,
+        "methods": 3
+      },
+      {
+        "id": "bb_mean",
+        "score": 8.439306713453282,
+        "rank": 23,
+        "methods": 3
+      },
+      {
+        "id": "hma",
+        "score": 8.407828142215129,
+        "rank": 24,
+        "methods": 3
+      },
+      {
+        "id": "sma_100",
+        "score": 8.393283141848906,
+        "rank": 25,
+        "methods": 3
+      },
+      {
+        "id": "fib_61_8",
+        "score": 8.344974819252156,
+        "rank": 26,
+        "methods": 3
+      },
+      {
+        "id": "ichimoku_base",
+        "score": 8.34467206466387,
+        "rank": 27,
+        "methods": 3
+      },
+      {
+        "id": "ichimoku_conversion",
+        "score": 8.33436161470369,
+        "rank": 28,
+        "methods": 3
+      },
+      {
+        "id": "dc_middle",
+        "score": 8.307753543815224,
+        "rank": 29,
+        "methods": 3
+      },
+      {
+        "id": "ichimoku_a",
+        "score": 8.287294973427194,
+        "rank": 30,
+        "methods": 3
+      },
+      {
+        "id": "dc_upper",
+        "score": 8.261353352426626,
+        "rank": 31,
+        "methods": 3
+      },
+      {
+        "id": "fib_78_6",
+        "score": 8.25319072692699,
+        "rank": 32,
+        "methods": 3
+      },
+      {
+        "id": "fib_38_2",
+        "score": 8.252209921198018,
+        "rank": 33,
+        "methods": 3
+      },
+      {
+        "id": "fib_50_0",
+        "score": 8.244918433518006,
+        "rank": 34,
+        "methods": 3
+      },
+      {
+        "id": "fib_23_6",
+        "score": 8.21501820026113,
+        "rank": 35,
+        "methods": 3
+      },
+      {
+        "id": "ichimoku_b",
+        "score": 8.15957178321468,
+        "rank": 36,
+        "methods": 3
+      },
+      {
+        "id": "last_swing_low",
+        "score": 8.141273720021262,
+        "rank": 37,
+        "methods": 3
+      },
+      {
+        "id": "bb_upper",
+        "score": 8.133643803786573,
+        "rank": 38,
+        "methods": 3
+      },
+      {
+        "id": "last_swing_high",
+        "score": 8.113333671155004,
+        "rank": 39,
+        "methods": 3
+      },
+      {
+        "id": "ema_200",
+        "score": 8.017729176074598,
+        "rank": 40,
+        "methods": 3
+      },
+      {
+        "id": "sma_200",
+        "score": 8.016032557313554,
+        "rank": 41,
+        "methods": 3
+      },
+      {
+        "id": "kc_upper",
+        "score": 8.002165046527102,
+        "rank": 42,
+        "methods": 3
+      },
+      {
+        "id": "kc_lower",
+        "score": 7.974884130971591,
+        "rank": 43,
+        "methods": 3
+      },
+      {
+        "id": "bb_lower",
+        "score": 7.692194705915109,
+        "rank": 44,
+        "methods": 3
+      },
+      {
+        "id": "pa_asia_range_pos",
+        "score": 7.667068994490233,
+        "rank": 45,
+        "methods": 3
+      },
+      {
+        "id": "dc_lower",
+        "score": 7.654266553379076,
+        "rank": 46,
+        "methods": 3
+      },
+      {
+        "id": "open",
+        "score": 7.415994004491143,
+        "rank": 47,
+        "methods": 3
+      },
+      {
+        "id": "measured_move_bull_target",
+        "score": 7.268405422648952,
+        "rank": 48,
+        "methods": 3
+      },
+      {
+        "id": "measured_move_bear_target",
+        "score": 7.207514124336914,
+        "rank": 49,
+        "methods": 3
+      },
+      {
+        "id": "ichimoku_lagging",
+        "score": 7.033060166354323,
+        "rank": 50,
+        "methods": 3
+      },
+      {
+        "id": "vpt",
+        "score": 6.505147515804759,
+        "rank": 51,
+        "methods": 3
+      },
+      {
+        "id": "nvi",
+        "score": 6.419226237746983,
+        "rank": 52,
+        "methods": 3
+      },
+      {
+        "id": "psar",
+        "score": 5.917698440091955,
+        "rank": 53,
+        "methods": 3
+      },
+      {
+        "id": "day_of_month_cos",
+        "score": 5.666251331100129,
+        "rank": 55,
+        "methods": 3
+      },
+      {
+        "id": "day_of_week_sin",
+        "score": 5.6724957004159,
+        "rank": 54,
+        "methods": 3
+      },
+      {
+        "id": "obv_mean",
+        "score": 5.221231453803671,
+        "rank": 56,
+        "methods": 3
+      },
+      {
+        "id": "pa_london_low",
+        "score": 5.041755785845655,
+        "rank": 57,
+        "methods": 3
+      },
+      {
+        "id": "pa_london_high",
+        "score": 5.0405147043030505,
+        "rank": 58,
+        "methods": 3
+      },
+      {
+        "id": "pa_ny_high",
+        "score": 5.04031856431831,
+        "rank": 59,
+        "methods": 3
+      },
+      {
+        "id": "pa_ny_low",
+        "score": 5.036261888514072,
+        "rank": 60,
+        "methods": 3
+      },
+      {
+        "id": "pa_asia_low",
+        "score": 5.036004902336383,
+        "rank": 61,
+        "methods": 3
+      },
+      {
+        "id": "pa_asia_high",
+        "score": 5.0270451678477555,
+        "rank": 62,
+        "methods": 3
+      },
+      {
+        "id": "day_of_month_sin",
+        "score": 4.885969575821957,
+        "rank": 63,
+        "methods": 3
+      },
+      {
+        "id": "atr_mean",
+        "score": 4.754369299645643,
+        "rank": 64,
+        "methods": 2
+      },
+      {
+        "id": "pa_asia_range",
+        "score": 4.344919164602161,
+        "rank": 65,
+        "methods": 3
+      },
+      {
+        "id": "obv",
+        "score": 4.164327908666665,
+        "rank": 66,
+        "methods": 3
+      },
+      {
+        "id": "dc_width",
+        "score": 3.4239536055547566,
+        "rank": 67,
+        "methods": 2
+      },
+      {
+        "id": "trend_long",
+        "score": 3.416404796527782,
+        "rank": 68,
+        "methods": 3
+      },
+      {
+        "id": "ad",
+        "score": 3.2897270417245696,
+        "rank": 69,
+        "methods": 3
+      },
+      {
+        "id": "day_of_week_cos",
+        "score": 3.2709355100175177,
+        "rank": 70,
+        "methods": 3
+      },
+      {
+        "id": "aroon_osc",
+        "score": 2.9408228268138235,
+        "rank": 71,
+        "methods": 3
+      },
+      {
+        "id": "adx",
+        "score": 2.911729278755738,
+        "rank": 72,
+        "methods": 3
+      },
+      {
+        "id": "macd_mean",
+        "score": 2.5670430390589316,
+        "rank": 73,
+        "methods": 3
+      },
+      {
+        "id": "ppo_mean",
+        "score": 2.4610947374652112,
+        "rank": 74,
+        "methods": 3
+      },
+      {
+        "id": "hour_sin",
+        "score": 2.2627145570324636,
+        "rank": 75,
+        "methods": 2
+      },
+      {
+        "id": "tsi",
+        "score": 2.240597807237481,
+        "rank": 76,
+        "methods": 3
+      },
+      {
+        "id": "normalized_variance",
+        "score": 2.204627146160522,
+        "rank": 77,
+        "methods": 2
+      },
+      {
+        "id": "is_friday",
+        "score": 2.08647597894896,
+        "rank": 78,
+        "methods": 3
+      },
+      {
+        "id": "hour_cos",
+        "score": 2.038408304684393,
+        "rank": 79,
+        "methods": 3
+      },
+      {
+        "id": "choppiness",
+        "score": 1.8982344559659707,
+        "rank": 80,
+        "methods": 2
+      },
+      {
+        "id": "bb_width",
+        "score": 1.852573655949193,
+        "rank": 81,
+        "methods": 2
+      },
+      {
+        "id": "bb_bandwidth",
+        "score": 1.8520972493528494,
+        "rank": 82,
+        "methods": 2
+      },
+      {
+        "id": "ulcer_index",
+        "score": 1.7210274283087081,
+        "rank": 83,
+        "methods": 2
+      },
+      {
+        "id": "kc_width",
+        "score": 1.7154783678227559,
+        "rank": 84,
+        "methods": 2
+      },
+      {
+        "id": "atr",
+        "score": 1.6709848346796565,
+        "rank": 85,
+        "methods": 2
+      },
+      {
+        "id": "mfi",
+        "score": 1.6490521256265802,
+        "rank": 86,
+        "methods": 3
+      },
+      {
+        "id": "pullback_to_sma50",
+        "score": 1.6446500244532036,
+        "rank": 87,
+        "methods": 3
+      },
+      {
+        "id": "atr_percent",
+        "score": 1.6398229320032467,
+        "rank": 88,
+        "methods": 2
+      },
+      {
+        "id": "atr_ratio",
+        "score": 1.6389647204394513,
+        "rank": 89,
+        "methods": 2
+      },
+      {
+        "id": "trix_signal",
+        "score": 1.5673647061832412,
+        "rank": 90,
+        "methods": 2
+      },
+      {
+        "id": "mass_index",
+        "score": 1.5610456199748135,
+        "rank": 91,
+        "methods": 3
+      },
+      {
+        "id": "kst_signal",
+        "score": 1.5564466262250531,
+        "rank": 92,
+        "methods": 2
+      },
+      {
+        "id": "di_minus",
+        "score": 1.544938474805265,
+        "rank": 93,
+        "methods": 3
+      },
+      {
+        "id": "session_sydney",
+        "score": 1.5039452654200713,
+        "rank": 94,
+        "methods": 3
+      },
+      {
+        "id": "sr_confluence_score",
+        "score": 1.4047855119544614,
+        "rank": 95,
+        "methods": 3
+      },
+      {
+        "id": "rsi_30",
+        "score": 1.3960044689087971,
+        "rank": 96,
+        "methods": 3
+      },
+      {
+        "id": "force_index_ema",
+        "score": 1.3585416953460876,
+        "rank": 98,
+        "methods": 3
+      },
+      {
+        "id": "session_london",
+        "score": 1.3665800557529566,
+        "rank": 97,
+        "methods": 3
+      },
+      {
+        "id": "distance_to_bull_target_pct",
+        "score": 1.271076629403816,
+        "rank": 99,
+        "methods": 3
+      },
+      {
+        "id": "cmf",
+        "score": 1.2623241637779314,
+        "rank": 100,
+        "methods": 3
+      },
+      {
+        "id": "dc_pct",
+        "score": 1.2023575669958046,
+        "rank": 101,
+        "methods": 3
+      },
+      {
+        "id": "bb_pct",
+        "score": 1.1908000484872536,
+        "rank": 102,
+        "methods": 3
+      },
+      {
+        "id": "trend_medium",
+        "score": 1.1878988531904846,
+        "rank": 103,
+        "methods": 3
+      },
+      {
+        "id": "session_tokyo",
+        "score": 1.1753285705948044,
+        "rank": 104,
+        "methods": 3
+      },
+      {
+        "id": "kst",
+        "score": 1.1412705508332308,
+        "rank": 105,
+        "methods": 2
+      },
+      {
+        "id": "session_newyork",
+        "score": 1.1352960427743592,
+        "rank": 106,
+        "methods": 3
+      },
+      {
+        "id": "smi_ergodic_signal",
+        "score": 1.111940497507688,
+        "rank": 107,
+        "methods": 3
+      },
+      {
+        "id": "cci",
+        "score": 1.0642285071361615,
+        "rank": 108,
+        "methods": 3
+      },
+      {
+        "id": "woodies_cci",
+        "score": 1.0636591171193073,
+        "rank": 109,
+        "methods": 3
+      },
+      {
+        "id": "rsi",
+        "score": 1.0635114404406645,
+        "rank": 110,
+        "methods": 3
+      },
+      {
+        "id": "pullback_to_ema20",
+        "score": 1.0591269914853187,
+        "rank": 111,
+        "methods": 3
+      },
+      {
+        "id": "kc_pct",
+        "score": 1.0535394248685805,
+        "rank": 112,
+        "methods": 3
+      },
+      {
+        "id": "chaikin_osc",
+        "score": 1.0423675098782867,
+        "rank": 113,
+        "methods": 3
+      },
+      {
+        "id": "eom_sma",
+        "score": 0.9913460814661816,
+        "rank": 114,
+        "methods": 3
+      },
+      {
+        "id": "di_plus",
+        "score": 0.9763430929768363,
+        "rank": 116,
+        "methods": 3
+      },
+      {
+        "id": "pullback_quality_score",
+        "score": 0.9824284850688928,
+        "rank": 115,
+        "methods": 3
+      },
+      {
+        "id": "trix",
+        "score": 0.965459392881176,
+        "rank": 117,
+        "methods": 3
+      },
+      {
+        "id": "macd",
+        "score": 0.9613305044179623,
+        "rank": 118,
+        "methods": 3
+      },
+      {
+        "id": "macd_signal",
+        "score": 0.9559902605715502,
+        "rank": 119,
+        "methods": 3
+      },
+      {
+        "id": "ppo",
+        "score": 0.9360260073651997,
+        "rank": 120,
+        "methods": 3
+      },
+      {
+        "id": "pattern_rectangle",
+        "score": 0.9060491604791895,
+        "rank": 121,
+        "methods": 3
+      },
+      {
+        "id": "pullback_from_high_pct",
+        "score": 0.9033278789180225,
+        "rank": 122,
+        "methods": 3
+      },
+      {
+        "id": "ppo_signal",
+        "score": 0.90140322329065,
+        "rank": 123,
+        "methods": 3
+      },
+      {
+        "id": "distance_to_bear_target_pct",
+        "score": 0.8896217680316734,
+        "rank": 124,
+        "methods": 3
+      },
+      {
+        "id": "stoch_rsi_d",
+        "score": 0.8668542331666763,
+        "rank": 127,
+        "methods": 2
+      },
+      {
+        "id": "smi_signal",
+        "score": 0.8626429154196131,
+        "rank": 128,
+        "methods": 3
+      },
+      {
+        "id": "session_london_ny_overlap",
+        "score": 0.8736279896631491,
+        "rank": 125,
+        "methods": 3
+      },
+      {
+        "id": "higher_lows_pattern",
+        "score": 0.8673307185181213,
+        "rank": 126,
+        "methods": 3
+      },
+      {
+        "id": "ao",
+        "score": 0.8503101116063215,
+        "rank": 129,
+        "methods": 2
+      },
+      {
+        "id": "williams_r",
+        "score": 0.8398424488025144,
+        "rank": 131,
+        "methods": 3
+      },
+      {
+        "id": "stoch_k",
+        "score": 0.8398424189282335,
+        "rank": 132,
+        "methods": 3
+      },
+      {
+        "id": "directional_persistence",
+        "score": 0.8420970884466842,
+        "rank": 130,
+        "methods": 3
+      },
+      {
+        "id": "macd_hist",
+        "score": 0.7857420231908602,
+        "rank": 133,
+        "methods": 3
+      },
+      {
+        "id": "smi_ergodic",
+        "score": 0.7833004846969465,
+        "rank": 134,
+        "methods": 3
+      },
+      {
+        "id": "smi",
+        "score": 0.7831566418721174,
+        "rank": 135,
+        "methods": 3
+      },
+      {
+        "id": "ppo_hist",
+        "score": 0.7793732548634855,
+        "rank": 136,
+        "methods": 3
+      },
+      {
+        "id": "stoch_rsi_k",
+        "score": 0.7088869353974906,
+        "rank": 137,
+        "methods": 2
+      },
+      {
+        "id": "ultimate_osc",
+        "score": 0.6981879812182569,
+        "rank": 139,
+        "methods": 3
+      },
+      {
+        "id": "recent_bearish_patterns",
+        "score": 0.7078498449358164,
+        "rank": 138,
+        "methods": 3
+      },
+      {
+        "id": "stoch_rsi",
+        "score": 0.6946549823637408,
+        "rank": 141,
+        "methods": 3
+      },
+      {
+        "id": "healthy_bear_pullback",
+        "score": 0.6961884515171342,
+        "rank": 140,
+        "methods": 3
+      },
+      {
+        "id": "woodies_cci_signal",
+        "score": 0.6650029299527612,
+        "rank": 144,
+        "methods": 3
+      },
+      {
+        "id": "trend_short",
+        "score": 0.6662603297637786,
+        "rank": 142,
+        "methods": 3
+      },
+      {
+        "id": "roc_20",
+        "score": 0.6550879410156578,
+        "rank": 145,
+        "methods": 3
+      },
+      {
+        "id": "bars_since_swing_low",
+        "score": 0.6652080606339462,
+        "rank": 143,
+        "methods": 3
+      },
+      {
+        "id": "stoch_d",
+        "score": 0.6372566563137475,
+        "rank": 147,
+        "methods": 3
+      },
+      {
+        "id": "bull_power",
+        "score": 0.6382574954706481,
+        "rank": 146,
+        "methods": 3
+      },
+      {
+        "id": "obv_change",
+        "score": 0.634637636160303,
+        "rank": 148,
+        "methods": 3
+      },
+      {
+        "id": "momentum",
+        "score": 0.5939230347064062,
+        "rank": 149,
+        "methods": 3
+      },
+      {
+        "id": "momentum_pct",
+        "score": 0.5855088123267449,
+        "rank": 150,
+        "methods": 3
+      },
+      {
+        "id": "roc",
+        "score": 0.5846046012270997,
+        "rank": 151,
+        "methods": 3
+      },
+      {
+        "id": "bear_power",
+        "score": 0.558365552150955,
+        "rank": 152,
+        "methods": 3
+      },
+      {
+        "id": "bop",
+        "score": 0.5555828053400239,
+        "rank": 153,
+        "methods": 3
+      },
+      {
+        "id": "pullback_to_ema9",
+        "score": 0.5298931590140585,
+        "rank": 155,
+        "methods": 3
+      },
+      {
+        "id": "pullback_from_low_pct",
+        "score": 0.5316138314396194,
+        "rank": 154,
+        "methods": 3
+      },
+      {
+        "id": "connors_rsi",
+        "score": 0.4995979167197268,
+        "rank": 156,
+        "methods": 3
+      },
+      {
+        "id": "near_fib_786",
+        "score": 0.49821859460221335,
+        "rank": 157,
+        "methods": 3
+      },
+      {
+        "id": "near_fib_236",
+        "score": 0.47399673029479783,
+        "rank": 158,
+        "methods": 3
+      },
+      {
+        "id": "near_fib_618",
+        "score": 0.4622909532820585,
+        "rank": 160,
+        "methods": 3
+      },
+      {
+        "id": "failed_pullback_bear",
+        "score": 0.4729331420420538,
+        "rank": 159,
+        "methods": 3
+      },
+      {
+        "id": "dpo",
+        "score": 0.45500625843378417,
+        "rank": 161,
+        "methods": 2
+      },
+      {
+        "id": "near_fib_382",
+        "score": 0.44566183084827227,
+        "rank": 162,
+        "methods": 3
+      },
+      {
+        "id": "near_fib_500",
+        "score": 0.44566183084827227,
+        "rank": 163,
+        "methods": 3
+      },
+      {
+        "id": "force_index",
+        "score": 0.4411147481321999,
+        "rank": 166,
+        "methods": 3
+      },
+      {
+        "id": "pa_london_open_breakout_up",
+        "score": 0.4424491244845775,
+        "rank": 164,
+        "methods": 3
+      },
+      {
+        "id": "pa_choch_up",
+        "score": 0.44129226238209945,
+        "rank": 165,
+        "methods": 2
+      },
+      {
+        "id": "vortex_diff",
+        "score": 0.40103020741080275,
+        "rank": 167,
+        "methods": 3
+      },
+      {
+        "id": "pa_bos_up",
+        "score": 0.3944455618109303,
+        "rank": 168,
+        "methods": 3
+      },
+      {
+        "id": "bars_since_swing_high",
+        "score": 0.38383850987989776,
+        "rank": 169,
+        "methods": 3
+      },
+      {
+        "id": "eom",
+        "score": 0.37610610326837096,
+        "rank": 170,
+        "methods": 3
+      },
+      {
+        "id": "pattern_double_top",
+        "score": 0.37262328938516254,
+        "rank": 171,
+        "methods": 3
+      },
+      {
+        "id": "local_slope",
+        "score": 0.3542298626554884,
+        "rank": 174,
+        "methods": 2
+      },
+      {
+        "id": "pattern_triple_top",
+        "score": 0.3652377806224637,
+        "rank": 172,
+        "methods": 3
+      },
+      {
+        "id": "failed_pullback_bull",
+        "score": 0.365156430707713,
+        "rank": 173,
+        "methods": 3
+      },
+      {
+        "id": "vortex_neg",
+        "score": 0.33811462057842234,
+        "rank": 175,
+        "methods": 3
+      },
+      {
+        "id": "pa_upper_wick_pct",
+        "score": 0.33116939472897367,
+        "rank": 177,
+        "methods": 3
+      },
+      {
+        "id": "vortex_pos",
+        "score": 0.327416644050894,
+        "rank": 178,
+        "methods": 3
+      },
+      {
+        "id": "pa_lower_wick_pct",
+        "score": 0.3240534561020719,
+        "rank": 179,
+        "methods": 3
+      },
+      {
+        "id": "pa_bos_down",
+        "score": 0.3331266623757081,
+        "rank": 176,
+        "methods": 2
+      },
+      {
+        "id": "volume_ma5",
+        "score": 0.3197763869385977,
+        "rank": 180,
+        "methods": 2
+      },
+      {
+        "id": "recent_doji",
+        "score": 0.31733235521379427,
+        "rank": 181,
+        "methods": 3
+      },
+      {
+        "id": "pattern_three_black_crows",
+        "score": 0.31475437434330894,
+        "rank": 182,
+        "methods": 3
+      },
+      {
+        "id": "pattern_double_bottom",
+        "score": 0.29885976090628275,
+        "rank": 183,
+        "methods": 3
+      },
+      {
+        "id": "pullback_complete_bear",
+        "score": 0.2927906522568388,
+        "rank": 184,
+        "methods": 3
+      },
+      {
+        "id": "aroon_up",
+        "score": 0.2767517423541276,
+        "rank": 185,
+        "methods": 3
+      },
+      {
+        "id": "pa_body_pct",
+        "score": 0.27579276875927794,
+        "rank": 186,
+        "methods": 2
+      },
+      {
+        "id": "pattern_triple_bottom",
+        "score": 0.2755653183239407,
+        "rank": 187,
+        "methods": 3
+      },
+      {
+        "id": "pattern_bearish_engulfing",
+        "score": 0.273558305447118,
+        "rank": 188,
+        "methods": 2
+      },
+      {
+        "id": "volume",
+        "score": 0.2656679785772172,
+        "rank": 189,
+        "methods": 2
+      },
+      {
+        "id": "recent_bullish_patterns",
+        "score": 0.2591663651477979,
+        "rank": 190,
+        "methods": 3
+      },
+      {
+        "id": "pa_choch_down",
+        "score": 0.2559290794769133,
+        "rank": 191,
+        "methods": 2
+      },
+      {
+        "id": "return_gradient",
+        "score": 0.23740801652693078,
+        "rank": 193,
+        "methods": 3
+      },
+      {
+        "id": "volume_decreasing",
+        "score": 0.23908860577553392,
+        "rank": 192,
+        "methods": 2
+      },
+      {
+        "id": "pattern_triangle",
+        "score": 0.1972334666374551,
+        "rank": 194,
+        "methods": 2
+      },
+      {
+        "id": "pa_inside_bar",
+        "score": 0.1931665864192715,
+        "rank": 195,
+        "methods": 2
+      },
+      {
+        "id": "healthy_bull_pullback",
+        "score": 0.184795433131914,
+        "rank": 196,
+        "methods": 2
+      },
+      {
+        "id": "pattern_inverted_hammer",
+        "score": 0.17570379093630922,
+        "rank": 197,
+        "methods": 2
+      },
+      {
+        "id": "pattern_marubozu_bull",
+        "score": 0.17336929360125072,
+        "rank": 198,
+        "methods": 2
+      },
+      {
+        "id": "session_tokyo_london_overlap",
+        "score": 0.17218193361402698,
+        "rank": 199,
+        "methods": 2
+      },
+      {
+        "id": "volume_roc",
+        "score": 0.1492509728142903,
+        "rank": 201,
+        "methods": 2
+      },
+      {
+        "id": "swing_low",
+        "score": 0.15331088964820727,
+        "rank": 200,
+        "methods": 2
+      },
+      {
+        "id": "swing_high",
+        "score": 0.14620964368860848,
+        "rank": 202,
+        "methods": 2
+      },
+      {
+        "id": "pattern_three_white_soldiers",
+        "score": 0.12598668595112145,
+        "rank": 203,
+        "methods": 2
+      },
+      {
+        "id": "pa_equal_lows",
+        "score": 0.12541983484514993,
+        "rank": 204,
+        "methods": 2
+      },
+      {
+        "id": "pattern_doji",
+        "score": 0.12269103941516561,
+        "rank": 205,
+        "methods": 2
+      },
+      {
+        "id": "pullback_stage",
+        "score": 0.11694183030634477,
+        "rank": 209,
+        "methods": 2
+      },
+      {
+        "id": "pattern_evening_star",
+        "score": 0.12174902878663907,
+        "rank": 206,
+        "methods": 2
+      },
+      {
+        "id": "pattern_bullish_engulfing",
+        "score": 0.12018622247891922,
+        "rank": 208,
+        "methods": 2
+      },
+      {
+        "id": "pattern_shooting_star",
+        "score": 0.12083681356277867,
+        "rank": 207,
+        "methods": 2
+      },
+      {
+        "id": "extended_bar_ratio",
+        "score": 0.10449960799418687,
+        "rank": 213,
+        "methods": 2
+      },
+      {
+        "id": "volume_zscore",
+        "score": 0.09680303977527155,
+        "rank": 215,
+        "methods": 2
+      },
+      {
+        "id": "pattern_marubozu_bear",
+        "score": 0.11297042253040984,
+        "rank": 210,
+        "methods": 2
+      },
+      {
+        "id": "pa_two_bar_reversal",
+        "score": 0.11073937456072219,
+        "rank": 211,
+        "methods": 2
+      },
+      {
+        "id": "lower_highs_pattern",
+        "score": 0.11052040299929863,
+        "rank": 212,
+        "methods": 2
+      },
+      {
+        "id": "pa_pin_bar_up",
+        "score": 0.099331475970987,
+        "rank": 214,
+        "methods": 2
+      },
+      {
+        "id": "pattern_head_and_shoulders",
+        "score": 0.09246221465487492,
+        "rank": 216,
+        "methods": 2
+      },
+      {
+        "id": "pattern_dragonfly_doji",
+        "score": 0.0912510006314454,
+        "rank": 217,
+        "methods": 2
+      },
+      {
+        "id": "pa_equal_highs",
+        "score": 0.09046865459490622,
+        "rank": 218,
+        "methods": 2
+      },
+      {
+        "id": "pattern_inverse_head_and_shoulders",
+        "score": 0.08405681010817975,
+        "rank": 219,
+        "methods": 2
+      },
+      {
+        "id": "pattern_hammer",
+        "score": 0.08020898448073768,
+        "rank": 220,
+        "methods": 2
+      },
+      {
+        "id": "pa_three_bar_play",
+        "score": 0.08012900125436921,
+        "rank": 221,
+        "methods": 2
+      },
+      {
+        "id": "pattern_gravestone_doji",
+        "score": 0.07909720094111859,
+        "rank": 222,
+        "methods": 2
+      },
+      {
+        "id": "pattern_morning_star",
+        "score": 0.0674050956507538,
+        "rank": 223,
+        "methods": 2
+      },
+      {
+        "id": "aroon_down",
+        "score": 0.04979554918785141,
+        "rank": 229,
+        "methods": 2
+      },
+      {
+        "id": "volume_spike",
+        "score": 0.06283948145713138,
+        "rank": 224,
+        "methods": 2
+      },
+      {
+        "id": "pa_outside_bar",
+        "score": 0.059854516891629336,
+        "rank": 225,
+        "methods": 2
+      },
+      {
+        "id": "pattern_long_legged_doji",
+        "score": 0.05907711394962259,
+        "rank": 226,
+        "methods": 2
+      },
+      {
+        "id": "pa_pin_bar_down",
+        "score": 0.05762644884026301,
+        "rank": 227,
+        "methods": 2
+      },
+      {
+        "id": "pa_london_open_breakout_down",
+        "score": 0.0567495879994606,
+        "rank": 228,
+        "methods": 2
+      },
+      {
+        "id": "minute_cos",
+        "score": 0.0330082308418783,
+        "rank": 231,
+        "methods": 2
+      },
+      {
+        "id": "minute_sin",
+        "score": 0.03202959484149295,
+        "rank": 232,
+        "methods": 2
+      },
+      {
+        "id": "pattern_hanging_man",
+        "score": 0.043509268400273346,
+        "rank": 230,
+        "methods": 2
+      },
+      {
+        "id": "pattern_downside_tasuki_gap",
+        "score": 0.007262253274576103,
+        "rank": 233,
+        "methods": 2
+      },
+      {
+        "id": "pattern_kicking_by_length_bear",
+        "score": 0.007262253274576103,
+        "rank": 234,
+        "methods": 2
+      },
+      {
+        "id": "pattern_belt_hold_bear",
+        "score": 0.007262253274576103,
+        "rank": 235,
+        "methods": 2
+      },
+      {
+        "id": "pattern_bearish_harami",
+        "score": 0.007262253274576103,
+        "rank": 236,
+        "methods": 2
+      },
+      {
+        "id": "pattern_abandoned_baby_bull",
+        "score": 0.007262253274576103,
+        "rank": 237,
+        "methods": 2
+      },
+      {
+        "id": "pattern_matching_low",
+        "score": 0.007262253274576103,
+        "rank": 238,
+        "methods": 2
+      },
+      {
+        "id": "pattern_breakaway_bear",
+        "score": 0.007262253274576103,
+        "rank": 239,
+        "methods": 2
+      },
+      {
+        "id": "abc_pullback_bull",
+        "score": 0.007262253274576103,
+        "rank": 240,
+        "methods": 2
+      },
+      {
+        "id": "pattern_bearish_pennant",
+        "score": 0.007262253274576103,
+        "rank": 241,
+        "methods": 2
+      },
+      {
+        "id": "pattern_falling_wedge",
+        "score": 0.007262253274576103,
+        "rank": 242,
+        "methods": 2
+      },
+      {
+        "id": "pattern_dark_cloud_cover",
+        "score": 0.007262253274576103,
+        "rank": 243,
+        "methods": 2
+      },
+      {
+        "id": "pattern_cup_and_handle",
+        "score": 0.007262253274576103,
+        "rank": 244,
+        "methods": 2
+      },
+      {
+        "id": "pattern_matching_high",
+        "score": 0.007262253274576103,
+        "rank": 245,
+        "methods": 2
+      },
+      {
+        "id": "month_cos",
+        "score": 0.007262253274576103,
+        "rank": 246,
+        "methods": 2
+      },
+      {
+        "id": "pattern_side_by_side_white_lines",
+        "score": 0.007262253274576103,
+        "rank": 247,
+        "methods": 2
+      },
+      {
+        "id": "pattern_morning_doji_star",
+        "score": 0.007262253274576103,
+        "rank": 248,
+        "methods": 2
+      },
+      {
+        "id": "pattern_three_inside_up",
+        "score": 0.007262253274576103,
+        "rank": 249,
+        "methods": 2
+      },
+      {
+        "id": "pattern_kicking_bull",
+        "score": 0.007262253274576103,
+        "rank": 250,
+        "methods": 2
+      },
+      {
+        "id": "pattern_rickshaw_man",
+        "score": 0.007262253274576103,
+        "rank": 251,
+        "methods": 2
+      },
+      {
+        "id": "pattern_upside_tasuki_gap",
+        "score": 0.007262253274576103,
+        "rank": 252,
+        "methods": 2
+      },
+      {
+        "id": "pullback_depth",
+        "score": 0.007262253274576103,
+        "rank": 253,
+        "methods": 2
+      },
+      {
+        "id": "pattern_counterattack_bull",
+        "score": 0.007262253274576103,
+        "rank": 254,
+        "methods": 2
+      },
+      {
+        "id": "pattern_doji_star_bear",
+        "score": 0.007262253274576103,
+        "rank": 255,
+        "methods": 2
+      },
+      {
+        "id": "pullback_complete_bull",
+        "score": 0.007262253274576103,
+        "rank": 256,
+        "methods": 2
+      },
+      {
+        "id": "pattern_rising_three_methods",
+        "score": 0.007262253274576103,
+        "rank": 257,
+        "methods": 2
+      },
+      {
+        "id": "pattern_bullish_flag",
+        "score": 0.007262253274576103,
+        "rank": 258,
+        "methods": 2
+      },
+      {
+        "id": "pattern_separating_lines_bull",
+        "score": 0.007262253274576103,
+        "rank": 259,
+        "methods": 2
+      },
+      {
+        "id": "pattern_tweezer_bottom",
+        "score": 0.007262253274576103,
+        "rank": 260,
+        "methods": 2
+      },
+      {
+        "id": "pattern_piercing_line",
+        "score": 0.007262253274576103,
+        "rank": 261,
+        "methods": 2
+      },
+      {
+        "id": "pattern_rising_wedge",
+        "score": 0.007262253274576103,
+        "rank": 262,
+        "methods": 2
+      },
+      {
+        "id": "pattern_three_inside_down",
+        "score": 0.007262253274576103,
+        "rank": 263,
+        "methods": 2
+      },
+      {
+        "id": "pattern_three_outside_up",
+        "score": 0.007262253274576103,
+        "rank": 264,
+        "methods": 2
+      },
+      {
+        "id": "pattern_ladder_bottom",
+        "score": 0.007262253274576103,
+        "rank": 265,
+        "methods": 2
+      },
+      {
+        "id": "week_of_year_cos",
+        "score": 0.007262253274576103,
+        "rank": 266,
+        "methods": 2
+      },
+      {
+        "id": "pattern_kicking_by_length_bull",
+        "score": 0.007262253274576103,
+        "rank": 267,
+        "methods": 2
+      },
+      {
+        "id": "month_sin",
+        "score": 0.007262253274576103,
+        "rank": 268,
+        "methods": 2
+      },
+      {
+        "id": "pattern_homing_pigeon",
+        "score": 0.007262253274576103,
+        "rank": 269,
+        "methods": 2
+      },
+      {
+        "id": "pattern_kicking_bear",
+        "score": 0.007262253274576103,
+        "rank": 270,
+        "methods": 2
+      },
+      {
+        "id": "pattern_bearish_flag",
+        "score": 0.007262253274576103,
+        "rank": 271,
+        "methods": 2
+      },
+      {
+        "id": "pattern_thrusting",
+        "score": 0.007262253274576103,
+        "rank": 272,
+        "methods": 2
+      },
+      {
+        "id": "abc_pullback_bear",
+        "score": 0.007262253274576103,
+        "rank": 273,
+        "methods": 2
+      },
+      {
+        "id": "gap_intensity",
+        "score": 0.007262253274576103,
+        "rank": 274,
+        "methods": 2
+      },
+      {
+        "id": "pattern_evening_doji_star",
+        "score": 0.007262253274576103,
+        "rank": 275,
+        "methods": 2
+      },
+      {
+        "id": "pattern_counterattack_bear",
+        "score": 0.007262253274576103,
+        "rank": 276,
+        "methods": 2
+      },
+      {
+        "id": "quarter",
+        "score": 0.007262253274576103,
+        "rank": 277,
+        "methods": 2
+      },
+      {
+        "id": "pattern_three_outside_down",
+        "score": 0.007262253274576103,
+        "rank": 278,
+        "methods": 2
+      },
+      {
+        "id": "pattern_inverted_cup_and_handle",
+        "score": 0.007262253274576103,
+        "rank": 279,
+        "methods": 2
+      },
+      {
+        "id": "pattern_doji_star_bull",
+        "score": 0.007262253274576103,
+        "rank": 280,
+        "methods": 2
+      },
+      {
+        "id": "pattern_stick_sandwich",
+        "score": 0.007262253274576103,
+        "rank": 281,
+        "methods": 2
+      },
+      {
+        "id": "week_of_year_sin",
+        "score": 0.007262253274576103,
+        "rank": 282,
+        "methods": 2
+      },
+      {
+        "id": "pattern_bullish_pennant",
+        "score": 0.007262253274576103,
+        "rank": 283,
+        "methods": 2
+      },
+      {
+        "id": "pattern_belt_hold_bull",
+        "score": 0.007262253274576103,
+        "rank": 284,
+        "methods": 2
+      },
+      {
+        "id": "pattern_separating_lines_bear",
+        "score": 0.007262253274576103,
+        "rank": 285,
+        "methods": 2
+      },
+      {
+        "id": "is_monday",
+        "score": 0.007262253274576103,
+        "rank": 286,
+        "methods": 2
+      },
+      {
+        "id": "pattern_tweezer_top",
+        "score": 0.007262253274576103,
+        "rank": 287,
+        "methods": 2
+      },
+      {
+        "id": "pattern_bullish_harami",
+        "score": 0.007262253274576103,
+        "rank": 288,
+        "methods": 2
+      },
+      {
+        "id": "pattern_breakaway_bull",
+        "score": 0.007262253274576103,
+        "rank": 289,
+        "methods": 2
+      },
+      {
+        "id": "pattern_on_neck",
+        "score": 0.007262253274576103,
+        "rank": 290,
+        "methods": 2
+      },
+      {
+        "id": "pattern_abandoned_baby_bear",
+        "score": 0.007262253274576103,
+        "rank": 291,
+        "methods": 2
+      },
+      {
+        "id": "pattern_falling_three_methods",
+        "score": 0.007262253274576103,
+        "rank": 292,
+        "methods": 2
+      },
+      {
+        "id": "pattern_in_neck",
+        "score": 0.007262253274576103,
+        "rank": 293,
+        "methods": 2
+      }
+    ],
+    "edges": [
+      {
+        "source": "open",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.9999999999999998,
+        "lag": "-1"
+      },
+      {
+        "source": "high",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.9892302674931113,
+        "lag": "0"
+      },
+      {
+        "source": "low",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.9901312248538788,
+        "lag": "0"
+      },
+      {
+        "source": "sma_7",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.985526457483868,
+        "lag": "-3"
+      },
+      {
+        "source": "sma_20",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.9839097399537969,
+        "lag": "-1"
+      },
+      {
+        "source": "sma_50",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.9833312225637255,
+        "lag": "-5"
+      },
+      {
+        "source": "sma_100",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.9810574374371477,
+        "lag": "-10"
+      },
+      {
+        "source": "sma_200",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.9675300814580579,
+        "lag": "-10"
+      },
+      {
+        "source": "ema_9",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.9877458577673784,
+        "lag": "0"
+      },
+      {
+        "source": "ema_12",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.9866670229996303,
+        "lag": "0"
+      },
+      {
+        "source": "ema_26",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.9848081442243621,
+        "lag": "0"
+      },
+      {
+        "source": "ema_50",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.9836320894291337,
+        "lag": "-1"
+      },
+      {
+        "source": "ema_200",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.9665000363719993,
+        "lag": "-10"
+      },
+      {
+        "source": "wma_20",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.9850250937586671,
+        "lag": "0"
+      },
+      {
+        "source": "smma",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.9847482480503476,
+        "lag": "0"
+      },
+      {
+        "source": "dema",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.9868554674876856,
+        "lag": "0"
+      },
+      {
+        "source": "tema",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.9881853348042373,
+        "lag": "0"
+      },
+      {
+        "source": "hma",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.9865301983434817,
+        "lag": "-2"
+      },
+      {
+        "source": "lsma",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.9855214074816739,
+        "lag": "0"
+      },
+      {
+        "source": "mcginley",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.9842782185511507,
+        "lag": "0"
+      },
+      {
+        "source": "vwma",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.9839202291054465,
+        "lag": "0"
+      },
+      {
+        "source": "macd",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.2009075313359822,
+        "lag": "0"
+      },
+      {
+        "source": "macd_signal",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.15271198521080728,
+        "lag": "-3"
+      },
+      {
+        "source": "macd_hist",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.08326378437176922,
+        "lag": "-6"
+      },
+      {
+        "source": "macd_mean",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.31912267721958093,
+        "lag": "-1"
+      },
+      {
+        "source": "di_plus",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.12150752866371577,
+        "lag": "0"
+      },
+      {
+        "source": "di_minus",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.26747222017602384,
+        "lag": "9"
+      },
+      {
+        "source": "adx",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.4171731002117974,
+        "lag": "4"
+      },
+      {
+        "source": "aroon_up",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.09970156641025929,
+        "lag": "-9"
+      },
+      {
+        "source": "aroon_osc",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.10380171714254109,
+        "lag": "0"
+      },
+      {
+        "source": "ichimoku_conversion",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.9839311268386428,
+        "lag": "-1"
+      },
+      {
+        "source": "ichimoku_base",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.982071362409228,
+        "lag": "-1"
+      },
+      {
+        "source": "ichimoku_a",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.9818064582231556,
+        "lag": "-5"
+      },
+      {
+        "source": "ichimoku_b",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.9785723633214771,
+        "lag": "-5"
+      },
+      {
+        "source": "ichimoku_lagging",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.9697512570150897,
+        "lag": "4"
+      },
+      {
+        "source": "psar",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.9315240332408511,
+        "lag": "-6"
+      },
+      {
+        "source": "trix",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.1254028398773972,
+        "lag": "-3"
+      },
+      {
+        "source": "trix_signal",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.05604451950310466,
+        "lag": "-9"
+      },
+      {
+        "source": "mass_index",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.07068677930631818,
+        "lag": "0"
+      },
+      {
+        "source": "dpo",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.06242468034672294,
+        "lag": "-7"
+      },
+      {
+        "source": "kst",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.057158821376094064,
+        "lag": "-1"
+      },
+      {
+        "source": "rsi",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.1397754134677125,
+        "lag": "0"
+      },
+      {
+        "source": "rsi_30",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.22801429021849112,
+        "lag": "0"
+      },
+      {
+        "source": "connors_rsi",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.1078211350664494,
+        "lag": "0"
+      },
+      {
+        "source": "stoch_k",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.13774615344886895,
+        "lag": "0"
+      },
+      {
+        "source": "stoch_d",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.09750935456321912,
+        "lag": "0"
+      },
+      {
+        "source": "stoch_rsi",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.09218064296174236,
+        "lag": "0"
+      },
+      {
+        "source": "stoch_rsi_k",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.06911925364509582,
+        "lag": "-4"
+      },
+      {
+        "source": "stoch_rsi_d",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.0598454351049631,
+        "lag": "-2"
+      },
+      {
+        "source": "smi",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.1325838872088431,
+        "lag": "0"
+      },
+      {
+        "source": "smi_signal",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.16110537966478644,
+        "lag": "-1"
+      },
+      {
+        "source": "smi_ergodic",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.1325838872088431,
+        "lag": "0"
+      },
+      {
+        "source": "smi_ergodic_signal",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.1690464978857868,
+        "lag": "-1"
+      },
+      {
+        "source": "williams_r",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.13774616345493476,
+        "lag": "0"
+      },
+      {
+        "source": "roc",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.12659397379431592,
+        "lag": "-10"
+      },
+      {
+        "source": "roc_20",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.17390991260121416,
+        "lag": "0"
+      },
+      {
+        "source": "ao",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.09680774766678736,
+        "lag": "-3"
+      },
+      {
+        "source": "kama",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.9833236978095585,
+        "lag": "-2"
+      },
+      {
+        "source": "ppo",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.19148351009057762,
+        "lag": "0"
+      },
+      {
+        "source": "ppo_signal",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.1358411136319943,
+        "lag": "-3"
+      },
+      {
+        "source": "ppo_hist",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.0840931025918983,
+        "lag": "-6"
+      },
+      {
+        "source": "ppo_mean",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.2903127713841817,
+        "lag": "-1"
+      },
+      {
+        "source": "ultimate_osc",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.12253528937564251,
+        "lag": "0"
+      },
+      {
+        "source": "tsi",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.4521543212498977,
+        "lag": "0"
+      },
+      {
+        "source": "bb_middle",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.9839097399537969,
+        "lag": "-1"
+      },
+      {
+        "source": "bb_upper",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.9731312419662217,
+        "lag": "-1"
+      },
+      {
+        "source": "bb_lower",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.9721170787380232,
+        "lag": "-8"
+      },
+      {
+        "source": "bb_pct",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.22491446986661362,
+        "lag": "0"
+      },
+      {
+        "source": "bb_mean",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.9830559219035766,
+        "lag": "-5"
+      },
+      {
+        "source": "atr_mean",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.05044302701487383,
+        "lag": "-10"
+      },
+      {
+        "source": "low_mean",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.9830894633826049,
+        "lag": "-5"
+      },
+      {
+        "source": "kc_middle",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.98530168916716,
+        "lag": "0"
+      },
+      {
+        "source": "kc_upper",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.9752716672301598,
+        "lag": "0"
+      },
+      {
+        "source": "kc_lower",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.9747555511330227,
+        "lag": "0"
+      },
+      {
+        "source": "kc_pct",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.23362340461497366,
+        "lag": "0"
+      },
+      {
+        "source": "dc_upper",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.9714808019343912,
+        "lag": "-1"
+      },
+      {
+        "source": "dc_lower",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.9695470070188827,
+        "lag": "-9"
+      },
+      {
+        "source": "dc_middle",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.9824434418495063,
+        "lag": "-1"
+      },
+      {
+        "source": "dc_width",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.06314223645889963,
+        "lag": "0"
+      },
+      {
+        "source": "dc_pct",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.22181202072730585,
+        "lag": "0"
+      },
+      {
+        "source": "ulcer_index",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.07904617735908194,
+        "lag": "1"
+      },
+      {
+        "source": "obv",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.3754186467817084,
+        "lag": "10"
+      },
+      {
+        "source": "obv_mean",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.529463151549285,
+        "lag": "10"
+      },
+      {
+        "source": "cmf",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.20135045716704994,
+        "lag": "0"
+      },
+      {
+        "source": "force_index",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.11436533306313601,
+        "lag": "-1"
+      },
+      {
+        "source": "force_index_ema",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.17699311868781553,
+        "lag": "0"
+      },
+      {
+        "source": "eom",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.11020018018599567,
+        "lag": "-2"
+      },
+      {
+        "source": "eom_sma",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.19551815781506765,
+        "lag": "-4"
+      },
+      {
+        "source": "vpt",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.7576978217724614,
+        "lag": "10"
+      },
+      {
+        "source": "nvi",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.7933767269933287,
+        "lag": "10"
+      },
+      {
+        "source": "ad",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.3621385157884911,
+        "lag": "0"
+      },
+      {
+        "source": "mfi",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.33883043733168783,
+        "lag": "0"
+      },
+      {
+        "source": "vwap",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.9834158627620894,
+        "lag": "-2"
+      },
+      {
+        "source": "cci",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.22577929247577497,
+        "lag": "0"
+      },
+      {
+        "source": "woodies_cci",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.22577929247577497,
+        "lag": "0"
+      },
+      {
+        "source": "woodies_cci_signal",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.17752404621685233,
+        "lag": "-1"
+      },
+      {
+        "source": "momentum",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.125390939083132,
+        "lag": "-10"
+      },
+      {
+        "source": "momentum_pct",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.12659397379431592,
+        "lag": "-10"
+      },
+      {
+        "source": "chaikin_osc",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.22348702625147288,
+        "lag": "0"
+      },
+      {
+        "source": "vortex_pos",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.07096461239417584,
+        "lag": "0"
+      },
+      {
+        "source": "vortex_neg",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.08998036217114434,
+        "lag": "0"
+      },
+      {
+        "source": "vortex_diff",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.09273422750912609,
+        "lag": "0"
+      },
+      {
+        "source": "bop",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.11958555158353301,
+        "lag": "0"
+      },
+      {
+        "source": "bull_power",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.14943433238511789,
+        "lag": "0"
+      },
+      {
+        "source": "bear_power",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.11023665684725399,
+        "lag": "0"
+      },
+      {
+        "source": "choppiness",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.06469309402204473,
+        "lag": "-10"
+      },
+      {
+        "source": "pa_inside_bar",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.06242975274752942,
+        "lag": "10"
+      },
+      {
+        "source": "pa_upper_wick_pct",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.06943121133607218,
+        "lag": "0"
+      },
+      {
+        "source": "pa_two_bar_reversal",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.06258556647402277,
+        "lag": "10"
+      },
+      {
+        "source": "pattern_inverted_hammer",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.07187107650927466,
+        "lag": "8"
+      },
+      {
+        "source": "pattern_doji",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.06142932069642616,
+        "lag": "9"
+      },
+      {
+        "source": "pattern_marubozu_bull",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.05226569399685132,
+        "lag": "0"
+      },
+      {
+        "source": "pattern_marubozu_bear",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.06317051215359303,
+        "lag": "-1"
+      },
+      {
+        "source": "pattern_bullish_engulfing",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.06871091800644102,
+        "lag": "-1"
+      },
+      {
+        "source": "pattern_bearish_engulfing",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.12642121785886498,
+        "lag": "-1"
+      },
+      {
+        "source": "pattern_three_white_soldiers",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.06396204667599105,
+        "lag": "0"
+      },
+      {
+        "source": "pattern_three_black_crows",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.09456188909362213,
+        "lag": "0"
+      },
+      {
+        "source": "pattern_double_top",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.09077203329245237,
+        "lag": "0"
+      },
+      {
+        "source": "pattern_double_bottom",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.08089287495980667,
+        "lag": "0"
+      },
+      {
+        "source": "pattern_triple_top",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.09619705199064721,
+        "lag": "0"
+      },
+      {
+        "source": "pattern_triple_bottom",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.07502922096956303,
+        "lag": "0"
+      },
+      {
+        "source": "pattern_rectangle",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.26197141543602875,
+        "lag": "10"
+      },
+      {
+        "source": "trend_short",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.17986046131547823,
+        "lag": "0"
+      },
+      {
+        "source": "trend_medium",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.29675285653822614,
+        "lag": "0"
+      },
+      {
+        "source": "trend_long",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.7121768999499272,
+        "lag": "0"
+      },
+      {
+        "source": "swing_high",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.08618387156630658,
+        "lag": "-2"
+      },
+      {
+        "source": "swing_low",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.09077523810182088,
+        "lag": "-2"
+      },
+      {
+        "source": "last_swing_high",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.9818846632710874,
+        "lag": "-2"
+      },
+      {
+        "source": "last_swing_low",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.9804367691721659,
+        "lag": "-4"
+      },
+      {
+        "source": "pa_bos_up",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.10978972707270664,
+        "lag": "0"
+      },
+      {
+        "source": "pa_bos_down",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.06741340976144437,
+        "lag": "-4"
+      },
+      {
+        "source": "pa_choch_up",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.1821775076568829,
+        "lag": "-1"
+      },
+      {
+        "source": "pa_choch_down",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.11563914882148274,
+        "lag": "-1"
+      },
+      {
+        "source": "pa_equal_lows",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.07168967528208564,
+        "lag": "-1"
+      },
+      {
+        "source": "pullback_from_high_pct",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.19478852268419042,
+        "lag": "0"
+      },
+      {
+        "source": "pullback_from_low_pct",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.11353226704703734,
+        "lag": "-4"
+      },
+      {
+        "source": "fib_23_6",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.9831688968632428,
+        "lag": "-2"
+      },
+      {
+        "source": "fib_38_2",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.9833877887452155,
+        "lag": "-2"
+      },
+      {
+        "source": "fib_50_0",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.9832368655881613,
+        "lag": "-2"
+      },
+      {
+        "source": "fib_61_8",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.9828160545165417,
+        "lag": "-4"
+      },
+      {
+        "source": "fib_78_6",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.982123902694024,
+        "lag": "-4"
+      },
+      {
+        "source": "near_fib_236",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.1541207904652461,
+        "lag": "9"
+      },
+      {
+        "source": "near_fib_382",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.15340475662862807,
+        "lag": "9"
+      },
+      {
+        "source": "near_fib_500",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.15340475662862807,
+        "lag": "9"
+      },
+      {
+        "source": "near_fib_618",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.15340475662862807,
+        "lag": "9"
+      },
+      {
+        "source": "near_fib_786",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.1689475475176996,
+        "lag": "10"
+      },
+      {
+        "source": "higher_lows_pattern",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.26415505114445986,
+        "lag": "0"
+      },
+      {
+        "source": "lower_highs_pattern",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.05871836415371729,
+        "lag": "2"
+      },
+      {
+        "source": "pullback_to_ema9",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.1674618275928532,
+        "lag": "0"
+      },
+      {
+        "source": "pullback_to_ema20",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.2989372236112264,
+        "lag": "9"
+      },
+      {
+        "source": "pullback_to_sma50",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.41489100200742834,
+        "lag": "10"
+      },
+      {
+        "source": "healthy_bull_pullback",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.10005705940342195,
+        "lag": "-1"
+      },
+      {
+        "source": "healthy_bear_pullback",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.22370659226989595,
+        "lag": "-1"
+      },
+      {
+        "source": "bars_since_swing_high",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.12171660985374078,
+        "lag": "1"
+      },
+      {
+        "source": "bars_since_swing_low",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.2004369849301857,
+        "lag": "10"
+      },
+      {
+        "source": "pullback_quality_score",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.2133850918907015,
+        "lag": "0"
+      },
+      {
+        "source": "sr_confluence_score",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.2954127707416766,
+        "lag": "9"
+      },
+      {
+        "source": "pullback_complete_bear",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.106300608352835,
+        "lag": "5"
+      },
+      {
+        "source": "failed_pullback_bull",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.12082298870471375,
+        "lag": "-2"
+      },
+      {
+        "source": "failed_pullback_bear",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.15404670199305598,
+        "lag": "-5"
+      },
+      {
+        "source": "measured_move_bull_target",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.9625815279094447,
+        "lag": "-2"
+      },
+      {
+        "source": "measured_move_bear_target",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.9623311821640232,
+        "lag": "6"
+      },
+      {
+        "source": "distance_to_bull_target_pct",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.2421802320161045,
+        "lag": "0"
+      },
+      {
+        "source": "distance_to_bear_target_pct",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.16976246866590555,
+        "lag": "-4"
+      },
+      {
+        "source": "pullback_stage",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.051460664170842975,
+        "lag": "-1"
+      },
+      {
+        "source": "local_slope",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.09638019942445175,
+        "lag": "-1"
+      },
+      {
+        "source": "return_gradient",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.08831618924298763,
+        "lag": "-1"
+      },
+      {
+        "source": "directional_persistence",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.20911024341550682,
+        "lag": "0"
+      },
+      {
+        "source": "obv_change",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.1399981856921318,
+        "lag": "0"
+      },
+      {
+        "source": "recent_bullish_patterns",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.087170961904231,
+        "lag": "0"
+      },
+      {
+        "source": "recent_bearish_patterns",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.18332323339238252,
+        "lag": "-5"
+      },
+      {
+        "source": "recent_doji",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.0674024784955954,
+        "lag": "-6"
+      },
+      {
+        "source": "hour_sin",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.08510289028890132,
+        "lag": "-10"
+      },
+      {
+        "source": "hour_cos",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.20976279703359718,
+        "lag": "0"
+      },
+      {
+        "source": "day_of_week_sin",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.9224189588813406,
+        "lag": "2"
+      },
+      {
+        "source": "day_of_week_cos",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.6732584865215103,
+        "lag": "-10"
+      },
+      {
+        "source": "day_of_month_sin",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.638359281495847,
+        "lag": "10"
+      },
+      {
+        "source": "day_of_month_cos",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.9235643609303359,
+        "lag": "2"
+      },
+      {
+        "source": "session_sydney",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.1978342230346195,
+        "lag": "0"
+      },
+      {
+        "source": "session_tokyo",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.14614667708037984,
+        "lag": "-10"
+      },
+      {
+        "source": "session_london",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.19650658454874959,
+        "lag": "0"
+      },
+      {
+        "source": "session_newyork",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.143146508287025,
+        "lag": "0"
+      },
+      {
+        "source": "session_london_ny_overlap",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.17330954863819592,
+        "lag": "-2"
+      },
+      {
+        "source": "is_friday",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.18902288770813347,
+        "lag": "10"
+      },
+      {
+        "source": "pa_asia_high",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.3160729667710309,
+        "lag": "10"
+      },
+      {
+        "source": "pa_asia_low",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.3219900872603605,
+        "lag": "10"
+      },
+      {
+        "source": "pa_london_high",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.3221960302465803,
+        "lag": "10"
+      },
+      {
+        "source": "pa_london_low",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.32488075048784604,
+        "lag": "10"
+      },
+      {
+        "source": "pa_ny_high",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.3227730435802246,
+        "lag": "10"
+      },
+      {
+        "source": "pa_ny_low",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.3210252101266374,
+        "lag": "10"
+      },
+      {
+        "source": "pa_asia_range",
+        "target": "close",
+        "type": "leads",
+        "strength": 0.4612265924921941,
+        "lag": "-10"
+      },
+      {
+        "source": "pa_asia_range_pos",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.462614898278306,
+        "lag": "0"
+      },
+      {
+        "source": "pa_london_open_breakout_up",
+        "target": "close",
+        "type": "lags",
+        "strength": 0.12038418332740138,
+        "lag": "0"
+      }
+    ],
+    "metadata": {
+      "threshold": 0.05,
+      "total_nodes": 293,
+      "total_edges": 193
+    }
+  },
+  "performance_metrics": {
+    "processing_times": {
+      "data_loading": 0.003086,
+      "structure_extraction": 0.013703,
+      "feature_generation": 0.860096,
+      "causality_analysis": 80.523964,
+      "decision_making": 0.003665
+    },
+    "total_processing_time": 81.404514
+  },
+  "configuration": {
+    "market_data": {
+      "swing_lookback": 3,
+      "strength_threshold": 0.4,
+      "enhanced_structure_analysis": true,
+      "structure_lookback_window": 7
+    },
+    "features": {
+      "batch_processing": true,
+      "max_lookback": 1050,
+      "memory_optimization": true,
+      "target_dtype": "float32",
+      "stationarity_check": true
+    },
+    "causality": {
+      "target_col": "close",
+      "max_lag": 3,
+      "top_n_features": 8,
+      "enhanced_analysis": true,
+      "transfer_entropy": true,
+      "lookahead_bias_check": true
+    },
+    "decision": {
+      "min_confidence": 0.65,
+      "min_causal_score": 0.4,
+      "trend_weight": 0.35,
+      "support_resistance_weight": 0.2,
+      "momentum_weight": 0.3,
+      "causal_weight": 0.35,
+      "liquidity_adjustment": true
+    },
+    "output": {
+      "save_features": true,
+      "save_causality": true,
+      "save_decisions": true,
+      "output_dir": "alpha_output_enhanced"
+    }
+  }
+}

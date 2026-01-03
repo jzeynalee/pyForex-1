@@ -1,0 +1,25 @@
+names:
+  0: doji
+  1: hammer
+  2: inverted_hammer
+  3: bullish_engulfing
+  4: bearish_engulfing
+  5: morning_star
+  6: evening_star
+  7: three_white_soldiers
+  8: three_black_crows
+  9: bullish_harami
+  10: bearish_harami
+  11: shooting_star
+  12: hanging_man
+  13: piercing_line
+  14: dark_cloud_cover
+  15: tweezer_top
+  16: tweezer_bottom
+  17: spinning_top
+  18: marubozu_bull
+  19: marubozu_bear
+nc: 20
+path: E:\pyProject\pyForex-1\dataset_yolo
+train: images/train
+val: images/val

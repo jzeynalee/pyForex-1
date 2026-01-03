@@ -1,0 +1,74 @@
+{
+  "analysis_timestamp": "2026-01-03T23:44:30.622984",
+  "summary": {
+    "total_trades": 0,
+    "total_decisions": 0,
+    "analysis_period": {
+      "start": null,
+      "end": null,
+      "duration_days": 0
+    }
+  },
+  "trading_performance": {
+    "error": "No trades to analyze"
+  },
+  "risk_metrics": {
+    "error": "Insufficient equity curve data"
+  },
+  "decision_quality": {
+    "error": "No decisions to analyze"
+  },
+  "system_performance": {
+    "total_processing_time": NaN,
+    "time_distribution": {
+      "data_loading": {
+        "time": NaN,
+        "percentage": NaN
+      },
+      "feature_generation": {
+        "time": NaN,
+        "percentage": NaN
+      },
+      "causality_analysis": {
+        "time": NaN,
+        "percentage": NaN
+      },
+      "decision_making": {
+        "time": NaN,
+        "percentage": NaN
+      },
+      "total_processing_time": {
+        "time": NaN,
+        "percentage": NaN
+      }
+    },
+    "bottlenecks": [
+      {
+        "component": "data_loading",
+        "time": NaN,
+        "percentage": NaN
+      },
+      {
+        "component": "feature_generation",
+        "time": NaN,
+        "percentage": NaN
+      },
+      {
+        "component": "causality_analysis",
+        "time": NaN,
+        "percentage": NaN
+      }
+    ],
+    "avg_time_per_bar": NaN,
+    "slowest_component": "data_loading",
+    "fastest_component": "total_processing_time"
+  },
+  "regime_performance": {
+    "error": "Insufficient data for regime analysis"
+  },
+  "feature_analysis": {
+    "error": "No causality results to analyze"
+  },
+  "overall_score": 0,
+  "recommendations": []
+}

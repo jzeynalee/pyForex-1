@@ -1,0 +1,647 @@
+{
+  "analysis_timestamp": "2026-01-03T23:23:56.100734",
+  "summary": {
+    "total_trades": 100,
+    "total_decisions": 100,
+    "analysis_period": {
+      "start": "2025-12-04T23:23:56.090681",
+      "end": "2025-12-29T17:23:56.090681",
+      "duration_days": 24
+    }
+  },
+  "trading_performance": {
+    "total_trades": 100,
+    "winning_trades": 46,
+    "losing_trades": 54,
+    "win_rate": 0.46,
+    "profit_factor": 1.0957575001476125,
+    "total_pnl": 290.9592638532773,
+    "gross_profit": 3329.4603045524964,
+    "gross_loss": 3038.50104069922,
+    "avg_trade_pnl": 2.9095926385327733,
+    "avg_win_pnl": 72.37957183809775,
+    "avg_loss_pnl": -56.2685377907263,
+    "largest_win": 216.9021525289393,
+    "largest_loss": -163.88003148093154,
+    "avg_duration": 48.91,
+    "avg_win_duration": 47.21739130434783,
+    "avg_loss_duration": 50.351851851851855,
+    "pnl_std": 79.40695684851627,
+    "pnl_skew": 0.2905329782305695,
+    "pnl_kurtosis": -0.21861437118121385,
+    "max_consecutive_wins": 4,
+    "max_consecutive_losses": 6,
+    "avg_consecutive_wins": 1.6428571428571428,
+    "avg_consecutive_losses": 1.8620689655172413
+  },
+  "risk_metrics": {
+    "total_return": 0.03543152602908867,
+    "annualized_return": 0.6981304399664872,
+    "volatility": 0.12474124724011966,
+    "sharpe_ratio": 5.436296774082477,
+    "sortino_ratio": 10.35474264524639,
+    "calmar_ratio": 11.92832239324465,
+    "max_drawdown": 0.05852712703018979,
+    "max_drawdown_duration": 56,
+    "var_5": -0.011432831292003749,
+    "cvar_5": -0.014342576298699486,
+    "win_loss_ratio": 1.3006745843461438,
+    "avg_win_return": 0.0072117506768133634,
+    "avg_loss_return": -0.005544623354379412,
+    "positive_days": 46,
+    "negative_days": 53,
+    "up_capture_ratio": 1.3006745843461438,
+    "down_capture_ratio": -0.7688318139180873
+  },
+  "decision_quality": {
+    "total_decisions": 100,
+    "decision_distribution": {
+      "SELL": 39,
+      "HOLD": 32,
+      "BUY": 29
+    },
+    "avg_confidence": 0.6952194818006825,
+    "confidence_std": 0.16177827387521823,
+    "confidence_by_decision": {
+      "SELL": {
+        "avg": 0.6625411408463301,
+        "std": 0.15824143423725603,
+        "count": 39
+      },
+      "HOLD": {
+        "avg": 0.7326000865178212,
+        "std": 0.1579815221344354,
+        "count": 32
+      },
+      "BUY": {
+        "avg": 0.697918652361762,
+        "std": 0.16960167185407554,
+        "count": 29
+      }
+    },
+    "regime_distribution": {
+      "bullish": 28,
+      "bearish": 26,
+      "volatile": 24,
+      "neutral": 22
+    },
+    "avg_risk_score": 0.4523578152949374,
+    "expected_vs_actual_correlation": 0.21543341587701872,
+    "expected_return_mse": 8678.829329069968
+  },
+  "system_performance": {
+    "total_processing_time": 32.14,
+    "time_distribution": {
+      "data_loading": {
+        "time": 0.05,
+        "percentage": 0.1555693839452396
+      },
+      "feature_generation": {
+        "time": 0.8,
+        "percentage": 2.4891101431238334
+      },
+      "causality_analysis": {
+        "time": 15.2,
+        "percentage": 47.29309271935283
+      },
+      "decision_making": {
+        "time": 0.02,
+        "percentage": 0.06222775357809583
+      },
+      "total_processing_time": {
+        "time": 16.07,
+        "percentage": 50.0
+      }
+    },
+    "bottlenecks": [
+      {
+        "component": "total_processing_time",
+        "time": 16.07,
+        "percentage": 50.0
+      },
+      {
+        "component": "causality_analysis",
+        "time": 15.2,
+        "percentage": 47.29309271935283
+      },
+      {
+        "component": "feature_generation",
+        "time": 0.8,
+        "percentage": 2.4891101431238334
+      }
+    ],
+    "avg_time_per_bar": 32.14,
+    "slowest_component": "total_processing_time",
+    "fastest_component": "decision_making"
+  },
+  "regime_performance": {
+    "error": "No regime information available"
+  },
+  "feature_analysis": {
+    "total_analyses": 5,
+    "total_features": 20,
+    "top_features": {
+      "feature_19": {
+        "avg_rank": 19.0,
+        "std_rank": 0.0,
+        "avg_score": 8.668901793064432,
+        "std_score": 0.6220826654431888,
+        "appearances": 5,
+        "rank_consistency": 1.0,
+        "score_consistency": 0.9282397378245896
+      },
+      "feature_2": {
+        "avg_rank": 2.0,
+        "std_rank": 0.0,
+        "avg_score": 8.161366030691514,
+        "std_score": 1.2196465629719764,
+        "appearances": 5,
+        "rank_consistency": 1.0,
+        "score_consistency": 0.8505585267974269
+      },
+      "feature_1": {
+        "avg_rank": 1.0,
+        "std_rank": 0.0,
+        "avg_score": 7.105006723925854,
+        "std_score": 1.7813494484774326,
+        "appearances": 5,
+        "rank_consistency": 1.0,
+        "score_consistency": 0.7492825105317913
+      },
+      "feature_4": {
+        "avg_rank": 4.0,
+        "std_rank": 0.0,
+        "avg_score": 7.045440611570737,
+        "std_score": 2.5364419118128687,
+        "appearances": 5,
+        "rank_consistency": 1.0,
+        "score_consistency": 0.6399881779363428
+      },
+      "feature_16": {
+        "avg_rank": 16.0,
+        "std_rank": 0.0,
+        "avg_score": 6.992805957320679,
+        "std_score": 2.914426248089848,
+        "appearances": 5,
+        "rank_consistency": 1.0,
+        "score_consistency": 0.583225065034334
+      },
+      "feature_17": {
+        "avg_rank": 17.0,
+        "std_rank": 0.0,
+        "avg_score": 6.63167778742997,
+        "std_score": 1.9922113848539478,
+        "appearances": 5,
+        "rank_consistency": 1.0,
+        "score_consistency": 0.6995916495475565
+      },
+      "feature_10": {
+        "avg_rank": 10.0,
+        "std_rank": 0.0,
+        "avg_score": 6.617235292269041,
+        "std_score": 2.383793436477437,
+        "appearances": 5,
+        "rank_consistency": 1.0,
+        "score_consistency": 0.6397599101149631
+      },
+      "feature_9": {
+        "avg_rank": 9.0,
+        "std_rank": 0.0,
+        "avg_score": 6.277408723429753,
+        "std_score": 2.40363432085239,
+        "appearances": 5,
+        "rank_consistency": 1.0,
+        "score_consistency": 0.6170976868399403
+      },
+      "feature_15": {
+        "avg_rank": 15.0,
+        "std_rank": 0.0,
+        "avg_score": 6.138339797922648,
+        "std_score": 3.3291049378305035,
+        "appearances": 5,
+        "rank_consistency": 1.0,
+        "score_consistency": 0.4576538530895361
+      },
+      "feature_14": {
+        "avg_rank": 14.0,
+        "std_rank": 0.0,
+        "avg_score": 6.076820606957172,
+        "std_score": 2.445101680414008,
+        "appearances": 5,
+        "rank_consistency": 1.0,
+        "score_consistency": 0.5976347108857083
+      },
+      "feature_5": {
+        "avg_rank": 5.0,
+        "std_rank": 0.0,
+        "avg_score": 6.041214461223194,
+        "std_score": 2.537109402716492,
+        "appearances": 5,
+        "rank_consistency": 1.0,
+        "score_consistency": 0.5800332169961085
+      },
+      "feature_13": {
+        "avg_rank": 13.0,
+        "std_rank": 0.0,
+        "avg_score": 5.6342040645314935,
+        "std_score": 2.127834199477773,
+        "appearances": 5,
+        "rank_consistency": 1.0,
+        "score_consistency": 0.622336327348713
+      },
+      "feature_6": {
+        "avg_rank": 6.0,
+        "std_rank": 0.0,
+        "avg_score": 5.320806969338603,
+        "std_score": 2.1487709700768454,
+        "appearances": 5,
+        "rank_consistency": 1.0,
+        "score_consistency": 0.5961569396410662
+      },
+      "feature_12": {
+        "avg_rank": 12.0,
+        "std_rank": 0.0,
+        "avg_score": 5.172431491783292,
+        "std_score": 1.697193845405212,
+        "appearances": 5,
+        "rank_consistency": 1.0,
+        "score_consistency": 0.6718769793082222
+      },
+      "feature_8": {
+        "avg_rank": 8.0,
+        "std_rank": 0.0,
+        "avg_score": 5.09707740318432,
+        "std_score": 2.517035640001072,
+        "appearances": 5,
+        "rank_consistency": 1.0,
+        "score_consistency": 0.5061806127510261
+      },
+      "feature_7": {
+        "avg_rank": 7.0,
+        "std_rank": 0.0,
+        "avg_score": 5.007952545083197,
+        "std_score": 2.687566822429046,
+        "appearances": 5,
+        "rank_consistency": 1.0,
+        "score_consistency": 0.4633401977685079
+      },
+      "feature_3": {
+        "avg_rank": 3.0,
+        "std_rank": 0.0,
+        "avg_score": 4.924805855488958,
+        "std_score": 3.054619840330605,
+        "appearances": 5,
+        "rank_consistency": 1.0,
+        "score_consistency": 0.37974817079823187
+      },
+      "feature_11": {
+        "avg_rank": 11.0,
+        "std_rank": 0.0,
+        "avg_score": 4.564057377464524,
+        "std_score": 2.12158628294566,
+        "appearances": 5,
+        "rank_consistency": 1.0,
+        "score_consistency": 0.5351534594150376
+      },
+      "feature_20": {
+        "avg_rank": 20.0,
+        "std_rank": 0.0,
+        "avg_score": 4.237821380985182,
+        "std_score": 2.9057618125143168,
+        "appearances": 5,
+        "rank_consistency": 1.0,
+        "score_consistency": 0.314326501453725
+      },
+      "feature_18": {
+        "avg_rank": 18.0,
+        "std_rank": 0.0,
+        "avg_score": 3.560541054010522,
+        "std_score": 2.1059008171073086,
+        "appearances": 5,
+        "rank_consistency": 1.0,
+        "score_consistency": 0.4085447168948483
+      }
+    },
+    "feature_consistency": {
+      "feature_1": {
+        "avg_rank": 1.0,
+        "std_rank": 0.0,
+        "avg_score": 7.105006723925854,
+        "std_score": 1.7813494484774326,
+        "appearances": 5,
+        "rank_consistency": 1.0,
+        "score_consistency": 0.7492825105317913
+      },
+      "feature_2": {
+        "avg_rank": 2.0,
+        "std_rank": 0.0,
+        "avg_score": 8.161366030691514,
+        "std_score": 1.2196465629719764,
+        "appearances": 5,
+        "rank_consistency": 1.0,
+        "score_consistency": 0.8505585267974269
+      },
+      "feature_3": {
+        "avg_rank": 3.0,
+        "std_rank": 0.0,
+        "avg_score": 4.924805855488958,
+        "std_score": 3.054619840330605,
+        "appearances": 5,
+        "rank_consistency": 1.0,
+        "score_consistency": 0.37974817079823187
+      },
+      "feature_4": {
+        "avg_rank": 4.0,
+        "std_rank": 0.0,
+        "avg_score": 7.045440611570737,
+        "std_score": 2.5364419118128687,
+        "appearances": 5,
+        "rank_consistency": 1.0,
+        "score_consistency": 0.6399881779363428
+      },
+      "feature_5": {
+        "avg_rank": 5.0,
+        "std_rank": 0.0,
+        "avg_score": 6.041214461223194,
+        "std_score": 2.537109402716492,
+        "appearances": 5,
+        "rank_consistency": 1.0,
+        "score_consistency": 0.5800332169961085
+      },
+      "feature_6": {
+        "avg_rank": 6.0,
+        "std_rank": 0.0,
+        "avg_score": 5.320806969338603,
+        "std_score": 2.1487709700768454,
+        "appearances": 5,
+        "rank_consistency": 1.0,
+        "score_consistency": 0.5961569396410662
+      },
+      "feature_7": {
+        "avg_rank": 7.0,
+        "std_rank": 0.0,
+        "avg_score": 5.007952545083197,
+        "std_score": 2.687566822429046,
+        "appearances": 5,
+        "rank_consistency": 1.0,
+        "score_consistency": 0.4633401977685079
+      },
+      "feature_8": {
+        "avg_rank": 8.0,
+        "std_rank": 0.0,
+        "avg_score": 5.09707740318432,
+        "std_score": 2.517035640001072,
+        "appearances": 5,
+        "rank_consistency": 1.0,
+        "score_consistency": 0.5061806127510261
+      },
+      "feature_9": {
+        "avg_rank": 9.0,
+        "std_rank": 0.0,
+        "avg_score": 6.277408723429753,
+        "std_score": 2.40363432085239,
+        "appearances": 5,
+        "rank_consistency": 1.0,
+        "score_consistency": 0.6170976868399403
+      },
+      "feature_10": {
+        "avg_rank": 10.0,
+        "std_rank": 0.0,
+        "avg_score": 6.617235292269041,
+        "std_score": 2.383793436477437,
+        "appearances": 5,
+        "rank_consistency": 1.0,
+        "score_consistency": 0.6397599101149631
+      },
+      "feature_11": {
+        "avg_rank": 11.0,
+        "std_rank": 0.0,
+        "avg_score": 4.564057377464524,
+        "std_score": 2.12158628294566,
+        "appearances": 5,
+        "rank_consistency": 1.0,
+        "score_consistency": 0.5351534594150376
+      },
+      "feature_12": {
+        "avg_rank": 12.0,
+        "std_rank": 0.0,
+        "avg_score": 5.172431491783292,
+        "std_score": 1.697193845405212,
+        "appearances": 5,
+        "rank_consistency": 1.0,
+        "score_consistency": 0.6718769793082222
+      },
+      "feature_13": {
+        "avg_rank": 13.0,
+        "std_rank": 0.0,
+        "avg_score": 5.6342040645314935,
+        "std_score": 2.127834199477773,
+        "appearances": 5,
+        "rank_consistency": 1.0,
+        "score_consistency": 0.622336327348713
+      },
+      "feature_14": {
+        "avg_rank": 14.0,
+        "std_rank": 0.0,
+        "avg_score": 6.076820606957172,
+        "std_score": 2.445101680414008,
+        "appearances": 5,
+        "rank_consistency": 1.0,
+        "score_consistency": 0.5976347108857083
+      },
+      "feature_15": {
+        "avg_rank": 15.0,
+        "std_rank": 0.0,
+        "avg_score": 6.138339797922648,
+        "std_score": 3.3291049378305035,
+        "appearances": 5,
+        "rank_consistency": 1.0,
+        "score_consistency": 0.4576538530895361
+      },
+      "feature_16": {
+        "avg_rank": 16.0,
+        "std_rank": 0.0,
+        "avg_score": 6.992805957320679,
+        "std_score": 2.914426248089848,
+        "appearances": 5,
+        "rank_consistency": 1.0,
+        "score_consistency": 0.583225065034334
+      },
+      "feature_17": {
+        "avg_rank": 17.0,
+        "std_rank": 0.0,
+        "avg_score": 6.63167778742997,
+        "std_score": 1.9922113848539478,
+        "appearances": 5,
+        "rank_consistency": 1.0,
+        "score_consistency": 0.6995916495475565
+      },
+      "feature_18": {
+        "avg_rank": 18.0,
+        "std_rank": 0.0,
+        "avg_score": 3.560541054010522,
+        "std_score": 2.1059008171073086,
+        "appearances": 5,
+        "rank_consistency": 1.0,
+        "score_consistency": 0.4085447168948483
+      },
+      "feature_19": {
+        "avg_rank": 19.0,
+        "std_rank": 0.0,
+        "avg_score": 8.668901793064432,
+        "std_score": 0.6220826654431888,
+        "appearances": 5,
+        "rank_consistency": 1.0,
+        "score_consistency": 0.9282397378245896
+      },
+      "feature_20": {
+        "avg_rank": 20.0,
+        "std_rank": 0.0,
+        "avg_score": 4.237821380985182,
+        "std_score": 2.9057618125143168,
+        "appearances": 5,
+        "rank_consistency": 1.0,
+        "score_consistency": 0.314326501453725
+      }
+    },
+    "most_consistent": [
+      [
+        "feature_1",
+        {
+          "avg_rank": 1.0,
+          "std_rank": 0.0,
+          "avg_score": 7.105006723925854,
+          "std_score": 1.7813494484774326,
+          "appearances": 5,
+          "rank_consistency": 1.0,
+          "score_consistency": 0.7492825105317913
+        }
+      ],
+      [
+        "feature_2",
+        {
+          "avg_rank": 2.0,
+          "std_rank": 0.0,
+          "avg_score": 8.161366030691514,
+          "std_score": 1.2196465629719764,
+          "appearances": 5,
+          "rank_consistency": 1.0,
+          "score_consistency": 0.8505585267974269
+        }
+      ],
+      [
+        "feature_3",
+        {
+          "avg_rank": 3.0,
+          "std_rank": 0.0,
+          "avg_score": 4.924805855488958,
+          "std_score": 3.054619840330605,
+          "appearances": 5,
+          "rank_consistency": 1.0,
+          "score_consistency": 0.37974817079823187
+        }
+      ],
+      [
+        "feature_4",
+        {
+          "avg_rank": 4.0,
+          "std_rank": 0.0,
+          "avg_score": 7.045440611570737,
+          "std_score": 2.5364419118128687,
+          "appearances": 5,
+          "rank_consistency": 1.0,
+          "score_consistency": 0.6399881779363428
+        }
+      ],
+      [
+        "feature_5",
+        {
+          "avg_rank": 5.0,
+          "std_rank": 0.0,
+          "avg_score": 6.041214461223194,
+          "std_score": 2.537109402716492,
+          "appearances": 5,
+          "rank_consistency": 1.0,
+          "score_consistency": 0.5800332169961085
+        }
+      ],
+      [
+        "feature_6",
+        {
+          "avg_rank": 6.0,
+          "std_rank": 0.0,
+          "avg_score": 5.320806969338603,
+          "std_score": 2.1487709700768454,
+          "appearances": 5,
+          "rank_consistency": 1.0,
+          "score_consistency": 0.5961569396410662
+        }
+      ],
+      [
+        "feature_7",
+        {
+          "avg_rank": 7.0,
+          "std_rank": 0.0,
+          "avg_score": 5.007952545083197,
+          "std_score": 2.687566822429046,
+          "appearances": 5,
+          "rank_consistency": 1.0,
+          "score_consistency": 0.4633401977685079
+        }
+      ],
+      [
+        "feature_8",
+        {
+          "avg_rank": 8.0,
+          "std_rank": 0.0,
+          "avg_score": 5.09707740318432,
+          "std_score": 2.517035640001072,
+          "appearances": 5,
+          "rank_consistency": 1.0,
+          "score_consistency": 0.5061806127510261
+        }
+      ],
+      [
+        "feature_9",
+        {
+          "avg_rank": 9.0,
+          "std_rank": 0.0,
+          "avg_score": 6.277408723429753,
+          "std_score": 2.40363432085239,
+          "appearances": 5,
+          "rank_consistency": 1.0,
+          "score_consistency": 0.6170976868399403
+        }
+      ],
+      [
+        "feature_10",
+        {
+          "avg_rank": 10.0,
+          "std_rank": 0.0,
+          "avg_score": 6.617235292269041,
+          "std_score": 2.383793436477437,
+          "appearances": 5,
+          "rank_consistency": 1.0,
+          "score_consistency": 0.6397599101149631
+        }
+      ]
+    ],
+    "top_10_stability": {
+      "feature_19": 0.0,
+      "feature_2": 1.0,
+      "feature_1": 1.0,
+      "feature_4": 1.0,
+      "feature_16": 0.0,
+      "feature_17": 0.0,
+      "feature_10": 1.0,
+      "feature_9": 1.0,
+      "feature_15": 0.0,
+      "feature_14": 0.0
+    }
+  },
+  "overall_score": 64.90501882686254,
+  "recommendations": [
+    "Improve risk management to increase profit factor",
+    "Improve system performance (>30s per analysis)"
+  ]
+}

@@ -178,5 +178,55 @@
     "stop_loss": 1.095,
     "take_profit": 1.11,
     "decision": {}
+  },
+  {
+    "timestamp": "2025-12-23T02:28:39.537993",
+    "symbol": "EURUSD",
+    "direction": "BUY",
+    "volume": 0.1,
+    "price": 0.0,
+    "stop_loss": 1.095,
+    "take_profit": 1.11,
+    "decision": {}
+  },
+  {
+    "timestamp": "2025-12-25T06:59:03.626100",
+    "symbol": "EURUSD",
+    "direction": "BUY",
+    "volume": 0.1,
+    "price": 0.0,
+    "stop_loss": 1.095,
+    "take_profit": 1.11,
+    "decision": {}
+  },
+  {
+    "timestamp": "2025-12-25T08:28:55.971520",
+    "symbol": "EURUSD",
+    "direction": "BUY",
+    "volume": 0.1,
+    "price": 0.0,
+    "stop_loss": 1.095,
+    "take_profit": 1.11,
+    "decision": {}
+  },
+  {
+    "timestamp": "2025-12-25T09:56:40.985992",
+    "symbol": "EURUSD",
+    "direction": "BUY",
+    "volume": 0.1,
+    "price": 0.0,
+    "stop_loss": 1.095,
+    "take_profit": 1.11,
+    "decision": {}
+  },
+  {
+    "timestamp": "2025-12-25T10:09:48.937565",
+    "symbol": "EURUSD",
+    "direction": "BUY",
+    "volume": 0.1,
+    "price": 0.0,
+    "stop_loss": 1.095,
+    "take_profit": 1.11,
+    "decision": {}
   }
 ]
