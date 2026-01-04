@@ -8,6 +8,7 @@ import pandas as pd
 import numpy as np
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
+from .signal_quality_optimizer import SignalQualityOptimizer, SignalQualityConfig
 from enum import Enum
 import logging
 
@@ -66,14 +67,21 @@ class DecisionConfig:
     trend_period: int = 20
     volatility_period: int = 14
     volume_threshold: float = 1.2
+    trend_strength_threshold: float = 25.0  # ADX threshold for trend detection
     
     # Enhanced features
     liquidity_adjustment: bool = False
+    
+    # Professional Signal Quality Optimization
+    signal_quality_enabled: bool = True
+    confidence_gate_percentile: float = 70.0  # Trade only top 70% of signals
+    regime_execution_enabled: bool = True
 
 
 def decision_function(swing_points: List, features: pd.DataFrame, 
                      causality_results: Dict, config: Optional[DecisionConfig] = None,
-                     market_structure: Optional[Dict] = None) -> DecisionSignal:
+                     market_structure: Optional[Dict] = None,
+                     signal_optimizer: Optional[SignalQualityOptimizer] = None) -> DecisionSignal:
     """
     Make trading decision based on market structure, features, and causal analysis.
     
@@ -83,6 +91,7 @@ def decision_function(swing_points: List, features: pd.DataFrame,
         causality_results: Results from causal analysis
         config: Decision configuration
         market_structure: Market structure analysis results
+        signal_optimizer: Signal quality optimizer for professional improvements
         
     Returns:
         DecisionSignal with trading recommendation
@@ -116,18 +125,65 @@ def decision_function(swing_points: List, features: pd.DataFrame,
     # 7. Determine decision
     decision, confidence = _determine_decision(combined_score, regime, config)
     
-    # 8. Calculate risk parameters
+    # 8. Apply Professional Signal Quality Optimization
+    if config.signal_quality_enabled and signal_optimizer:
+        # Create signal DataFrame for optimization
+        signal_data = pd.DataFrame({
+            'decision': [decision.value],
+            'confidence': [confidence],
+            'regime': [regime.value],
+            'combined_score': [combined_score]
+        })
+        
+        # Apply confidence gate
+        optimized_signals = signal_optimizer.apply_confidence_gate(signal_data)
+        
+        if len(optimized_signals) == 0:
+            # Signal filtered out by confidence gate
+            return DecisionSignal(
+                decision=DecisionType.HOLD,
+                confidence=confidence,
+                regime=regime,
+                reasoning=["Signal filtered by confidence gate"],
+                key_features=[],
+                risk_score=0.0,
+                expected_return=0.0,
+                stop_loss=0.0,
+                take_profit=0.0
+            )
+        
+        # Apply regime-conditional execution
+        if config.regime_execution_enabled:
+            regime_data = pd.Series([regime.value])
+            optimized_signals = signal_optimizer.apply_regime_conditional_execution(
+                optimized_signals, regime_data
+            )
+            
+            if optimized_signals.iloc[0].get('skip_trade', False):
+                return DecisionSignal(
+                    decision=DecisionType.HOLD,
+                    confidence=confidence,
+                    regime=regime,
+                    reasoning=[f"Trade skipped for {regime.value} regime"],
+                    key_features=[],
+                    risk_score=0.0,
+                    expected_return=0.0,
+                    stop_loss=0.0,
+                    take_profit=0.0
+                )
+    
+    # 9. Calculate risk parameters
     risk_score, stop_loss, take_profit = _calculate_risk_parameters(
         features, decision, regime, config
     )
     
-    # 9. Compile reasoning
+    # 10. Compile reasoning
     reasoning = structure_reasoning + feature_reasoning + causal_reasoning
     
-    # 10. Identify key features
+    # 11. Identify key features
     key_features = _identify_key_features(causality_results, feature_signals)
     
-    # 11. Calculate expected return
+    # 12. Calculate expected return
     expected_return = _calculate_expected_return(decision, features, regime)
     
     return DecisionSignal(
