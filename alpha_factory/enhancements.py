@@ -14,12 +14,78 @@ This module implements:
 import pandas as pd
 import numpy as np
 from typing import Dict, List, Tuple, Optional
-from scipy import stats
+from scipy import stats, norm
 from sklearn.preprocessing import StandardScaler
 import warnings
 import logging
 
 logger = logging.getLogger(__name__)
+
+class ProbabilisticRegimeDetector:
+    """
+    detects market regimes using soft probabilities rather than hard thresholds.
+    """
+    def __init__(self, window: int = 20):
+        self.window = window
+
+    def compute_regime_probabilities(self, df: pd.DataFrame) -> Dict[str, float]:
+        """
+        Calculate probability distribution across regimes using Z-scores and Sigmoids.
+        
+        Returns:
+            Dict with 'bullish', 'bearish', 'neutral', 'volatile' probabilities summing to 1.0.
+        """
+        if len(df) < self.window:
+            return {'bullish': 0.25, 'bearish': 0.25, 'neutral': 0.25, 'volatile': 0.25}
+
+        # 1. Feature Extraction
+        closes = df['close']
+        returns = closes.pct_change().dropna()
+        
+        # Volatility Z-Score (vs rolling baseline)
+        current_vol = returns.std()
+        rolling_vol = returns.rolling(window=self.window * 5).std().iloc[-1]
+        if pd.isna(rolling_vol) or rolling_vol == 0: rolling_vol = current_vol
+        vol_z = (current_vol - rolling_vol) / rolling_vol if rolling_vol > 0 else 0
+        
+        # Trend Strength (ADX-proxy using efficiency ratio)
+        change = (closes.iloc[-1] - closes.iloc[-self.window])
+        path = np.sum(np.abs(closes.diff().tail(self.window)))
+        efficiency = abs(change / path) if path > 0 else 0
+        
+        # Directional Score (-1 to 1)
+        # Using simple linear regression slope normalized by volatility
+        y = closes.tail(self.window).values
+        x = np.arange(len(y))
+        slope, _, _, _, _ = stats.linregress(x, y)
+        normalized_slope = slope / (closes.iloc[-1] * 0.001) # Normalize to % terms
+        
+        # 2. Probability Calculation (Sigmoids)
+        # P(Volatile) increases as Vol Z-Score increases
+        p_volatile = 1 / (1 + np.exp(-(vol_z - 1.5) * 2))  # Shift center to 1.5 std devs
+        
+        # P(Trend) increases with efficiency
+        p_trend = 1 / (1 + np.exp(-(efficiency - 0.4) * 10))
+        
+        # P(Direction)
+        p_bull_raw = 1 / (1 + np.exp(-(normalized_slope - 0.5) * 2))
+        p_bear_raw = 1 - p_bull_raw
+        
+        # 3. Regime Synthesis
+        # Volatility consumes probability mass first
+        probs = {}
+        probs['volatile'] = p_volatile
+        
+        remaining = 1.0 - p_volatile
+        probs['neutral'] = remaining * (1 - p_trend)
+        
+        trend_mass = remaining * p_trend
+        probs['bullish'] = trend_mass * p_bull_raw
+        probs['bearish'] = trend_mass * p_bear_raw
+        
+        # Normalize ensuring sum is 1.0
+        total = sum(probs.values())
+        return {k: v/total for k, v in probs.items()}
 
 
 def check_stationarity(series: pd.Series, significance_level: float = 0.05) -> Dict:

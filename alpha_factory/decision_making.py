@@ -8,9 +8,11 @@ import pandas as pd
 import numpy as np
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
-from .signal_quality_optimizer import SignalQualityOptimizer, SignalQualityConfig
 from enum import Enum
 import logging
+
+from .signal_quality_optimizer import SignalQualityOptimizer, SignalQualityConfig
+from .enhancements import ProbabilisticRegimeDetector
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +44,7 @@ class DecisionSignal:
     expected_return: float  # Expected return in pips/points
     stop_loss: float
     take_profit: float
+    regime_probabilities: Dict[str, float] = None
 
 
 @dataclass
@@ -77,6 +80,25 @@ class DecisionConfig:
     confidence_gate_percentile: float = 70.0  # Trade only top 70% of signals
     regime_execution_enabled: bool = True
 
+def _calculate_probabilistic_score(structure, feature, causal, probs) -> float:
+    """Blends scores based on the probability of being in each regime."""
+    score = 0.0
+    
+    # Define weight profiles for each regime
+    profiles = {
+        'bullish': {'trend': 0.6, 'mom': 0.25, 'causal': 0.15},
+        'bearish': {'trend': 0.6, 'mom': 0.25, 'causal': 0.15},
+        'neutral': {'trend': 0.1, 'mom': 0.2, 'causal': 0.7},
+        'volatile': {'trend': 0.2, 'mom': 0.4, 'causal': 0.4}
+    }
+    
+    for regime_name, p in probs.items():
+        w = profiles[regime_name]
+        regime_score = (structure * w['trend'] + feature * w['mom'] + causal * w['causal'])
+        score += regime_score * p
+        
+    return np.clip(score, -1, 1)
+
 
 def decision_function(swing_points: List, features: pd.DataFrame, 
                      causality_results: Dict, config: Optional[DecisionConfig] = None,
@@ -98,11 +120,19 @@ def decision_function(swing_points: List, features: pd.DataFrame,
     """
     if config is None:
         config = DecisionConfig()
+
+    # 1. Soft Regime Detection
+    regime_detector = ProbabilisticRegimeDetector(window=config.trend_period)
+    regime_probs = regime_detector.compute_regime_probabilities(features)
     
-    # 1. Analyze market regime
+    # Determine dominant regime for backward compatibility
+    dominant_regime_str = max(regime_probs, key=regime_probs.get)
+    regime = MarketRegime(dominant_regime_str)
+    
+    # 2. Analyze market regime
     regime = _determine_market_regime(features, swing_points, config)
     
-    # 2. Check for mean reversion opportunities in neutral/ranging markets
+    # 3. Check for mean reversion opportunities in neutral/ranging markets
     if market_structure and regime == MarketRegime.NEUTRAL:
         mean_reversion_signal = _apply_mean_reversion_logic(
             regime.value, market_structure, features, swing_points, config
@@ -110,22 +140,28 @@ def decision_function(swing_points: List, features: pd.DataFrame,
         if mean_reversion_signal and mean_reversion_signal.confidence >= config.min_confidence * 0.8:
             return mean_reversion_signal
     
-    # 3. Evaluate market structure
+    # 4. Evaluate market structure
     structure_score, structure_reasoning = _evaluate_market_structure(swing_points, config)
     
-    # 4. Analyze feature signals
+    # 5. Analyze feature signals
     feature_signals, feature_reasoning = _analyze_feature_signals(features, config)
     
-    # 5. Evaluate causal relationships
+    # 6. Evaluate causal relationships
     causal_score, causal_reasoning = _evaluate_causal_signals(causality_results, config)
+
+    # 6.1 Regime Weighted Score (Probabilistic)
+    # Instead of hard switching, blend weights based on regime probability
+    combined_score = _calculate_probabilistic_score(
+        structure_score, feature_signals, causal_score, regime_probs
+    )
     
-    # 6. Combine all signals with regime-specific weighting
+    # 7. Combine all signals with regime-specific weighting
     combined_score = _calculate_regime_weighted_score(structure_score, feature_signals, causal_score, regime)
     
-    # 7. Determine decision
+    # 8. Determine decision
     decision, confidence = _determine_decision(combined_score, regime, config)
     
-    # 8. Apply Professional Signal Quality Optimization
+    # 9. Apply Professional Signal Quality Optimization
     if config.signal_quality_enabled and signal_optimizer:
         # Create signal DataFrame for optimization
         signal_data = pd.DataFrame({
@@ -172,18 +208,18 @@ def decision_function(swing_points: List, features: pd.DataFrame,
                     take_profit=0.0
                 )
     
-    # 9. Calculate risk parameters
+    # 10. Calculate risk parameters
     risk_score, stop_loss, take_profit = _calculate_risk_parameters(
         features, decision, regime, config
     )
     
-    # 10. Compile reasoning
+    # 11. Compile reasoning
     reasoning = structure_reasoning + feature_reasoning + causal_reasoning
     
-    # 11. Identify key features
+    # 12. Identify key features
     key_features = _identify_key_features(causality_results, feature_signals)
     
-    # 12. Calculate expected return
+    # 13. Calculate expected return
     expected_return = _calculate_expected_return(decision, features, regime)
     
     return DecisionSignal(
@@ -195,7 +231,8 @@ def decision_function(swing_points: List, features: pd.DataFrame,
         risk_score=risk_score,
         expected_return=expected_return,
         stop_loss=stop_loss,
-        take_profit=take_profit
+        take_profit=take_profit,
+        regime_probabilities=regime_probs
     )
 
 

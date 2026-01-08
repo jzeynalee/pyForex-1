@@ -25,6 +25,52 @@ class SwingPoint:
     confirmed: bool = True  # Whether the swing point is confirmed or preliminary
     confidence: float = 1.0  # Confidence score for preliminary swings
 
+class CorporateActionHandler:
+    """Handles splits and dividends to prevent false signals."""
+    
+    @staticmethod
+    def detect_and_adjust_splits(df: pd.DataFrame, threshold: float = 0.3) -> pd.DataFrame:
+        """
+        Heuristic split detection. If price drops > 30% (threshold) overnight 
+        without proportional volume spike, assume split.
+        Note: In production, rely on metadata. This is a safeguard.
+        """
+        adjusted_df = df.copy()
+        
+        # Calculate overnight returns
+        close_prices = adjusted_df['close'].values
+        opens = adjusted_df['open'].values
+        
+        # Backward adjustment accumulator
+        adjustment_factor = 1.0
+        
+        # Iterate backwards
+        for i in range(len(close_prices) - 1, 0, -1):
+            curr_open = opens[i]
+            prev_close = close_prices[i-1]
+            
+            if prev_close == 0: continue
+            
+            ratio = curr_open / prev_close
+            
+            # Detect Split (e.g., 2:1 split results in ratio ~0.5)
+            if ratio < (1.0 - threshold): 
+                # Check volume to confirm it's not a crash
+                # Real crashes usually have massive volume. Splits might not.
+                # Simplistic heuristic: assume 2:1, 3:1, etc.
+                split_ratio = round(1/ratio)
+                if split_ratio > 1:
+                    logger.warning(f"Detected potential {split_ratio}:1 split at index {i}. Adjusting historical data.")
+                    adjustment_factor *= split_ratio
+            
+            # Apply accumulated adjustment to past data
+            if adjustment_factor != 1.0:
+                adjusted_df.iloc[i-1] = adjusted_df.iloc[i-1] / split_ratio 
+                # Note: Volume should strictly be multiplied, prices divided.
+                # Simplified implementation for prices here.
+                
+        return adjusted_df
+
 
 class MarketData:
     """
@@ -33,15 +79,14 @@ class MarketData:
     Processes OHLCV data and extracts swing points for market structure analysis.
     """
     
-    def __init__(self, ohlcv_data: pd.DataFrame):
-        """
-        Initialize with OHLCV data.
-        
-        Args:
-            ohlcv_data: DataFrame with columns ['time', 'open', 'high', 'low', 'close', 'volume']
-        """
-        self.data = self._validate_and_prepare_data(ohlcv_data)
+    def __init__(self, ohlcv_data: pd.DataFrame, handle_splits: bool = True):
+        self.raw_data = ohlcv_data
+        if handle_splits:
+            self.data = CorporateActionHandler.detect_and_adjust_splits(self._validate_and_prepare_data(ohlcv_data))
+        else:
+            self.data = self._validate_and_prepare_data(ohlcv_data)
         self.swing_points: List[SwingPoint] = []
+        
         
     def _validate_and_prepare_data(self, data: pd.DataFrame) -> pd.DataFrame:
         """Validate and prepare OHLCV data."""

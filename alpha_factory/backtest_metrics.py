@@ -13,8 +13,75 @@ from datetime import datetime, timedelta
 import json
 from pathlib import Path
 import logging
+import random
+
 
 logger = logging.getLogger(__name__)
+
+class PlaceboTester:
+    """
+    Validates strategy edge by comparing against random entry placebo tests.
+    Disproves 'luck' by shuffling entry signals while keeping market data intact.
+    """
+    
+    @staticmethod
+    def run_randomized_entry_test(market_data: pd.DataFrame, 
+                                  actual_trades: List[Dict], 
+                                  n_simulations: int = 500) -> Dict[str, Any]:
+        """
+        Runs N simulations with random entry times but actual strategy exit logic.
+        """
+        if not actual_trades or len(market_data) < 100:
+            return {'status': 'insufficient_data'}
+            
+        actual_pnl = sum(t['pnl'] for t in actual_trades)
+        actual_sharpe = PlaceboTester._calculate_simple_sharpe(actual_trades)
+        
+        simulated_sharpes = []
+        simulated_pnls = []
+        
+        avg_duration = int(np.mean([t.get('duration_bars', 5) for t in actual_trades]))
+        
+        logger.info(f"Running {n_simulations} placebo simulations...")
+        
+        valid_indices = list(range(len(market_data) - avg_duration - 1))
+        
+        for _ in range(n_simulations):
+            # Pick N random entry points (N = number of actual trades)
+            random_entries = random.sample(valid_indices, len(actual_trades))
+            sim_trades = []
+            
+            for entry_idx in random_entries:
+                entry_price = market_data.iloc[entry_idx]['close']
+                exit_idx = entry_idx + avg_duration
+                exit_price = market_data.iloc[exit_idx]['close']
+                
+                # Random direction to test structural bias
+                direction = random.choice([1, -1]) 
+                pnl = (exit_price - entry_price) * direction
+                sim_trades.append({'pnl': pnl})
+                
+            simulated_sharpes.append(PlaceboTester._calculate_simple_sharpe(sim_trades))
+            simulated_pnls.append(sum(t['pnl'] for t in sim_trades))
+            
+        # Calculate p-value: Fraction of random sims that beat the actual strategy
+        sharpe_beat_ratio = sum(s > actual_sharpe for s in simulated_sharpes) / n_simulations
+        pnl_beat_ratio = sum(p > actual_pnl for p in simulated_pnls) / n_simulations
+        
+        return {
+            'actual_sharpe': actual_sharpe,
+            'placebo_mean_sharpe': np.mean(simulated_sharpes),
+            'placebo_std_sharpe': np.std(simulated_sharpes),
+            'p_value_sharpe': sharpe_beat_ratio, # < 0.05 implies significance
+            'p_value_pnl': pnl_beat_ratio,
+            'is_significant': sharpe_beat_ratio < 0.05
+        }
+
+    @staticmethod
+    def _calculate_simple_sharpe(trades):
+        pnls = [t['pnl'] for t in trades]
+        if not pnls or np.std(pnls) == 0: return 0
+        return np.mean(pnls) / np.std(pnls)
 
 
 class BacktestMetrics:
@@ -754,6 +821,7 @@ def analyze_backtest_results(trades: List[Dict], decisions: List[Dict],
                            equity_curve: List[Tuple[datetime, float]],
                            processing_times: Dict[str, float],
                            causality_results: List[Dict],
+                           market_data: pd.DataFrame = None,
                            save_report: bool = True) -> Dict[str, Any]:
     """
     Convenience function to analyze complete backtest results.
@@ -773,6 +841,21 @@ def analyze_backtest_results(trades: List[Dict], decisions: List[Dict],
     report = metrics.generate_comprehensive_report(
         trades, decisions, equity_curve, processing_times, causality_results
     )
+
+    # Run Placebo Test
+    if market_data is not None and len(trades) > 10:
+        placebo_results = PlaceboTester.run_randomized_entry_test(market_data, trades)
+        report['placebo_validation'] = placebo_results
+        
+        # Print Placebo Summary
+        print(f"\n🎲 PLACEBO VALIDATION")
+        print(f"   Actual Sharpe: {placebo_results['actual_sharpe']:.2f}")
+        print(f"   Placebo Mean Sharpe: {placebo_results['placebo_mean_sharpe']:.2f}")
+        print(f"   P-Value (Luck Factor): {placebo_results['p_value_sharpe']:.4f}")
+        if placebo_results['is_significant']:
+            print(f"   ✅ Strategy Statistically Significant (p < 0.05)")
+        else:
+            print(f"   ❌ Strategy Indistinguishable from Noise")
     
     if save_report:
         metrics.save_report(report)
