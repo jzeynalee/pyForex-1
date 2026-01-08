@@ -11,14 +11,15 @@ from .trading_profiles import get_profile, TradingProfile, TimeFrame
 
 def load_data_for_profile(profile: TradingProfile) -> Dict[str, pd.DataFrame]:
     """
-    Mock data loader. In production, this would query your DB/Parquet files
-    for the specific timeframes defined in the profile.
+    Mock data loader. In production, queries DB for specific timeframes.
     """
     print(f"Loading data for {profile.type.value}: {profile.ltf.value}, {profile.mtf.value}, {profile.htf.value}")
     
     # Mock data generation
     def make_df(freq):
-        dates = pd.date_range(end=datetime.now(), periods=500, freq=freq.replace('m', 'min').replace('h', 'H').replace('d', 'D'))
+        # Convert simple freq strings to pandas offset aliases if needed
+        pd_freq = freq.replace('m', 'min').replace('h', 'H').replace('d', 'D')
+        dates = pd.date_range(end=datetime.now(), periods=500, freq=pd_freq)
         data = {
             'open': np.random.randn(500).cumsum() + 100,
             'high': np.random.randn(500).cumsum() + 101,
@@ -36,7 +37,7 @@ def load_data_for_profile(profile: TradingProfile) -> Dict[str, pd.DataFrame]:
 
 def run_profile_pipeline(profile_name: str, symbol: str = "EURUSD"):
     """
-    Runs the 3TF logic for a specific trading profile.
+    Runs the strict 3TF logic for a specific trading profile.
     """
     try:
         profile = get_profile(profile_name)
@@ -48,29 +49,28 @@ def run_profile_pipeline(profile_name: str, symbol: str = "EURUSD"):
     data_map = load_data_for_profile(profile)
     
     # 2. Initialize Feature Pools (Alpha Factories)
-    # In a real system, these might be loaded from saved states
     print(f"--- Initializing Feature Pools for {symbol} ({profile_name}) ---")
     factory_htf = AlphaFactory()
     factory_mtf = AlphaFactory()
     factory_ltf = AlphaFactory()
     
     # 3. Process Data (Generate Raw Intelligence)
-    print("Processing HTF...")
+    # Note: In production, this happens offline/separately
     strat_htf = factory_htf.process_data(data_map['htf'])
-    
-    print("Processing MTF...")
     strat_mtf = factory_mtf.process_data(data_map['mtf'])
-    
-    print("Processing LTF...")
     strat_ltf = factory_ltf.process_data(data_map['ltf'])
     
-    # 4. Create Snapshots
+    # 4. Create Snapshots (The Bridge) with Locked Versioning
+    # We use a shared version hash for this run to enforce consistency
+    run_version_hash = "run_v1_integrity_check"
+    
     snapshot_htf = FeatureAdapter.create_snapshot(
         timestamp=datetime.now(),
         timeframe=profile.htf.value,
         decision_signal=strat_htf['decision'],
         causality_results=factory_htf.causality_results,
-        market_regime=strat_htf['decision']['regime']
+        market_regime=strat_htf['decision']['regime'],
+        feature_version=run_version_hash
     )
     
     snapshot_mtf = FeatureAdapter.create_snapshot(
@@ -78,7 +78,8 @@ def run_profile_pipeline(profile_name: str, symbol: str = "EURUSD"):
         timeframe=profile.mtf.value,
         decision_signal=strat_mtf['decision'],
         causality_results=factory_mtf.causality_results,
-        market_regime=strat_mtf['decision']['regime']
+        market_regime=strat_mtf['decision']['regime'],
+        feature_version=run_version_hash
     )
     
     snapshot_ltf = FeatureAdapter.create_snapshot(
@@ -86,7 +87,8 @@ def run_profile_pipeline(profile_name: str, symbol: str = "EURUSD"):
         timeframe=profile.ltf.value,
         decision_signal=strat_ltf['decision'],
         causality_results=factory_ltf.causality_results,
-        market_regime=strat_ltf['decision']['regime']
+        market_regime=strat_ltf['decision']['regime'],
+        feature_version=run_version_hash
     )
     
     # 5. Run Orchestrator
@@ -96,13 +98,14 @@ def run_profile_pipeline(profile_name: str, symbol: str = "EURUSD"):
     if instruction:
         print(f"\n✅ {profile_name} TRADE EXECUTED")
         print(f"Direction: {instruction.direction}")
-        print(f"Confidence: {instruction.confidence:.2f}")
+        print(f"Size Mult: {instruction.size_multiplier}")
         print(f"Logic Path: {instruction.logic_path}")
+        print(f"Confidence: {instruction.confidence:.2f}")
     else:
-        print(f"\n❌ {profile_name} NO TRADE (Constraints Active)")
+        print(f"\n❌ {profile_name} NO TRADE (System Constraints Active)")
 
 if __name__ == "__main__":
-    # Demonstrate all 3 profiles
+    # Demonstrate all 3 profiles with strict enforcement
     print("=========================================")
     run_profile_pipeline("SCALPING")
     print("\n=========================================")

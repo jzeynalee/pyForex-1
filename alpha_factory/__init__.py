@@ -32,7 +32,8 @@ from .three_tf_system import (
     MTFDecision, 
     LTFSignal, 
     ThreeTFOrchestrator,
-    ThreeTFLogic
+    ThreeTFLogic,
+    TradeInstruction
 )
 
 from .trading_profiles import (
@@ -56,12 +57,13 @@ __all__ = [
     'MarketRegime',
     'DecisionType',
     'create_decision_summary',
-    'FeatureSnapshot',
+   'FeatureSnapshot',
     'HTFDecision',
     'MTFDecision',
     'LTFSignal',
     'ThreeTFOrchestrator',
     'ThreeTFLogic',
+    'TradeInstruction',
     'TradingProfile',
     'ProfileType',
     'TimeFrame',
