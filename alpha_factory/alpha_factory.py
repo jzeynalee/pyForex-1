@@ -25,15 +25,13 @@ from .profitability_optimizer import ProfitabilityOptimizer, ProfitabilityConfig
 from utils.features_engineering import FeatureEngineerOptimized
 
 # Import enhanced features
-try:
-    from .enhancements import (
-        enhanced_causal_analysis, check_lookahead_bias, optimize_memory_usage,
-        enhanced_market_structure_analysis, calculate_liquidity_adjusted_return,
-        create_enhanced_alpha_factory
-    )
-    HAS_ENHANCEMENTS = True
-except ImportError:
-    HAS_ENHANCEMENTS = False
+
+from .enhancements import (
+    enhanced_causal_analysis, check_lookahead_bias, optimize_memory_usage,
+    enhanced_market_structure_analysis, calculate_liquidity_adjusted_return,
+    create_enhanced_alpha_factory
+)
+HAS_ENHANCEMENTS = True
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +92,7 @@ class AlphaFactory:
                 'batch_processing': True,
                 'max_lookback': 1050,
                 'memory_optimization': False,
-                'target_dtype': 'float64',
+                'target_dtype': 'float32',
                 'stationarity_check': False
             },
             'causality': {

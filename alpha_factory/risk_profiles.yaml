@@ -1,0 +1,86 @@
+# Alpha Factory Risk Profiles
+# Separates research logic from production logic
+
+RESEARCH:
+  # Purpose: Alpha discovery and evaluation
+  # Goal: Maximum signal preservation, minimal censorship
+  
+  # Core thresholds
+  min_ev_threshold: 0.0          # Accept all positive EV
+  position_size_multiplier: 1.0   # Full position sizing
+  
+  # Safeguard severity scale (0.0 = disabled, 1.0 = full)
+  safeguard_severity_scale: 0.1   # Minimal safeguard impact
+  
+  # Trade management
+  max_concurrent_trades: 50       # High limit for research
+  drawdown_soft_limit: 0.30       # 30% soft limit
+  drawdown_hard_limit: 0.50       # 50% hard limit
+  
+  # Decay response
+  decay_ev_penalty: 0.0           # No EV penalty for research
+  decay_size_reduction: 0.0       # No size reduction for research
+  
+  # Emergency conditions (disabled for research)
+  catastrophic_block_enabled: false
+  emergency_stop_enabled: false
+  
+  # Release conditions (aggressive for research)
+  min_active_duration: 1          # Release quickly
+  max_active_duration: 10         # Force release quickly
+
+VALIDATION:
+  # Purpose: Alpha validation with realistic risk
+  # Goal: Balance signal preservation with risk management
+  
+  # Core thresholds
+  min_ev_threshold: 2.0          # Require $2+ EV
+  position_size_multiplier: 0.7   # 70% position sizing
+  
+  # Safeguard severity scale
+  safeguard_severity_scale: 0.5   # Moderate safeguard impact
+  
+  # Trade management
+  max_concurrent_trades: 10       # Moderate limit
+  drawdown_soft_limit: 0.20       # 20% soft limit
+  drawdown_hard_limit: 0.35       # 35% hard limit
+  
+  # Decay response
+  decay_ev_penalty: 2.0           # $2 EV penalty
+  decay_size_reduction: 0.2        # 20% size reduction
+  
+  # Emergency conditions
+  catastrophic_block_enabled: true
+  emergency_stop_enabled: false
+  
+  # Release conditions
+  min_active_duration: 3          # Moderate duration
+  max_active_duration: 25         # Moderate force release
+
+PRODUCTION:
+  # Purpose: Live trading with capital protection
+  # Goal: Maximum capital preservation, high selectivity
+  
+  # Core thresholds
+  min_ev_threshold: 10.0         # Require $10+ EV
+  position_size_multiplier: 0.3   # 30% position sizing
+  
+  # Safeguard severity scale
+  safeguard_severity_scale: 1.0   # Full safeguard impact
+  
+  # Trade management
+  max_concurrent_trades: 3        # Low limit for safety
+  drawdown_soft_limit: 0.10       # 10% soft limit
+  drawdown_hard_limit: 0.20       # 20% hard limit
+  
+  # Decay response
+  decay_ev_penalty: 5.0           # $5 EV penalty
+  decay_size_reduction: 0.5        # 50% size reduction
+  
+  # Emergency conditions
+  catastrophic_block_enabled: true
+  emergency_stop_enabled: true
+  
+  # Release conditions
+  min_active_duration: 5          # Longer duration
+  max_active_duration: 50         # Longer force release
