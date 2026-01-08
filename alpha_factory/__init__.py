@@ -26,6 +26,23 @@ from .decision_making import (
 __version__ = "1.0.0"
 __author__ = "Alpha Factory Team"
 
+from .three_tf_system import (
+    FeatureSnapshot, 
+    HTFDecision, 
+    MTFDecision, 
+    LTFSignal, 
+    ThreeTFOrchestrator,
+    ThreeTFLogic
+)
+
+from .trading_profiles import (
+    TradingProfile,
+    ProfileType,
+    TimeFrame,
+    PROFILES,
+    get_profile
+)
+
 # Convenience imports
 __all__ = [
     'MarketData',
@@ -39,4 +56,15 @@ __all__ = [
     'MarketRegime',
     'DecisionType',
     'create_decision_summary',
+    'FeatureSnapshot',
+    'HTFDecision',
+    'MTFDecision',
+    'LTFSignal',
+    'ThreeTFOrchestrator',
+    'ThreeTFLogic',
+    'TradingProfile',
+    'ProfileType',
+    'TimeFrame',
+    'PROFILES',
+    'get_profile'
 ]
