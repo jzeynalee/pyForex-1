@@ -462,6 +462,9 @@ class CapacityController:
         # Reset exposure
         self.current_exposure = 0.0
         
+        # Reset EV history to prevent stale data affecting new session rankings
+        self.ev_history.clear()
+        
         logger.info(f"Session capacity reset for {current_session}")
     
     def update_correlation_matrix(self, returns_data: pd.DataFrame):
