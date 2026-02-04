@@ -28,17 +28,101 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+class FocalLoss(nn.Module):
+    """
+    Focal Loss for handling class imbalance.
+    
+    FL(p_t) = -alpha_t * (1 - p_t)^gamma * log(p_t)
+    
+    This down-weights easy examples and focuses on hard ones,
+    which helps when classes are imbalanced.
+    
+    Reference: Lin et al., "Focal Loss for Dense Object Detection", ICCV 2017
+    """
+    
+    def __init__(
+        self,
+        alpha: Optional[torch.Tensor] = None,
+        gamma: float = 2.0,
+        reduction: str = 'mean'
+    ):
+        """
+        Args:
+            alpha: Class weights tensor of shape (num_classes,). If None, all classes weighted equally.
+            gamma: Focusing parameter. Higher values focus more on hard examples. Default 2.0.
+            reduction: 'mean', 'sum', or 'none'
+        """
+        super().__init__()
+        self.alpha = alpha
+        self.gamma = gamma
+        self.reduction = reduction
+    
+    def forward(self, inputs: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            inputs: (batch, num_classes) - logits or log-probabilities
+            targets: (batch,) - class indices
+        
+        Returns:
+            Focal loss value
+        """
+        # Get probabilities
+        p = F.softmax(inputs, dim=-1)
+        
+        # Get the probability for the true class
+        ce_loss = F.cross_entropy(inputs, targets, reduction='none')
+        p_t = p.gather(1, targets.unsqueeze(1)).squeeze(1)
+        
+        # Focal weight: (1 - p_t)^gamma
+        focal_weight = (1 - p_t) ** self.gamma
+        
+        # Apply focal weight
+        focal_loss = focal_weight * ce_loss
+        
+        # Apply class weights (alpha)
+        if self.alpha is not None:
+            alpha = self.alpha.to(inputs.device)
+            alpha_t = alpha.gather(0, targets)
+            focal_loss = alpha_t * focal_loss
+        
+        if self.reduction == 'mean':
+            return focal_loss.mean()
+        elif self.reduction == 'sum':
+            return focal_loss.sum()
+        else:
+            return focal_loss
+
+
 class DirectionLoss(nn.Module):
     """
-    Cross-entropy loss for direction prediction.
+    Loss for direction prediction with Focal Loss support.
     
-    Supports class weights for imbalanced data (common in forex).
+    Supports:
+    - Class weights for imbalanced data
+    - Focal Loss for hard example mining
+    - Label smoothing for regularization
     """
     
-    def __init__(self, class_weights: Optional[torch.Tensor] = None):
+    def __init__(
+        self,
+        class_weights: Optional[torch.Tensor] = None,
+        use_focal_loss: bool = True,
+        focal_gamma: float = 2.0,
+        label_smoothing: float = 0.0
+    ):
         super().__init__()
         self.class_weights = class_weights
-        self.ce_loss = nn.CrossEntropyLoss(weight=class_weights)
+        self.use_focal_loss = use_focal_loss
+        self.focal_gamma = focal_gamma
+        self.label_smoothing = label_smoothing
+        
+        if use_focal_loss:
+            self.loss_fn = FocalLoss(alpha=class_weights, gamma=focal_gamma)
+        else:
+            self.loss_fn = nn.CrossEntropyLoss(
+                weight=class_weights,
+                label_smoothing=label_smoothing
+            )
     
     def forward(
         self,
@@ -55,7 +139,7 @@ class DirectionLoss(nn.Module):
         """
         # Convert probs to logits for numerical stability
         logits = torch.log(pred_probs + 1e-8)
-        return self.ce_loss(logits, target_direction)
+        return self.loss_fn(logits, target_direction)
 
 
 class VolatilityLoss(nn.Module):
@@ -179,11 +263,19 @@ class MultiTaskLoss(nn.Module):
         outcome_weight: float = 1.0,
         use_uncertainty_weighting: bool = True,
         class_weights: Optional[torch.Tensor] = None,
-        quantiles: Tuple[float, ...] = (0.05, 0.25, 0.50, 0.75, 0.95)
+        quantiles: Tuple[float, ...] = (0.05, 0.25, 0.50, 0.75, 0.95),
+        use_focal_loss: bool = True,
+        focal_gamma: float = 2.0,
+        label_smoothing: float = 0.1
     ):
         super().__init__()
         
-        self.direction_loss = DirectionLoss(class_weights)
+        self.direction_loss = DirectionLoss(
+            class_weights=class_weights,
+            use_focal_loss=use_focal_loss,
+            focal_gamma=focal_gamma,
+            label_smoothing=label_smoothing
+        )
         self.volatility_loss = VolatilityLoss()
         self.quantile_loss = QuantileLoss(quantiles)
         self.outcome_loss = OutcomeLoss()
@@ -289,6 +381,11 @@ class TrainingConfig:
     quantile_weight: float = 1.0
     outcome_weight: float = 1.0
     use_uncertainty_weighting: bool = True
+    
+    # Focal loss settings for direction head
+    use_focal_loss: bool = True
+    focal_gamma: float = 2.0     # Focusing parameter (higher = more focus on hard examples)
+    label_smoothing: float = 0.1 # Label smoothing for regularization
 
 
 class RiskDataset(Dataset):
@@ -488,7 +585,10 @@ class MultiHeadTCNTrainer:
             quantile_weight=config.quantile_weight,
             outcome_weight=config.outcome_weight,
             use_uncertainty_weighting=config.use_uncertainty_weighting,
-            class_weights=class_weights
+            class_weights=class_weights,
+            use_focal_loss=config.use_focal_loss,
+            focal_gamma=config.focal_gamma,
+            label_smoothing=config.label_smoothing
         ).to(device)
         
         # Optimizer
