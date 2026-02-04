@@ -44,7 +44,7 @@ import sys
 import os
 from pathlib import Path
 from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Tuple, List
 from dataclasses import dataclass
 
 try:
@@ -441,7 +441,6 @@ def cmd_alpha_backtest(args, logger: logging.Logger):
 
     try:
         import pandas as pd
-        from layered_backtest import LayeredBacktest
 
         logger.info(f"Loading data from {args.data}")
         df = pd.read_csv(args.data)
@@ -463,26 +462,169 @@ def cmd_alpha_backtest(args, logger: logging.Logger):
         if 'real_volume' not in df.columns:
             df['real_volume'] = df.get('tick_volume', 100) * 100
 
-        layer = str(getattr(args, 'layer', 'alpha_only') or 'alpha_only')
-        bt = LayeredBacktest(test_layer=layer)
+        engine = str(getattr(args, 'engine', 'layered') or 'layered').lower().strip()
+        if engine not in {'layered', 'decision'}:
+            engine = 'layered'
 
-        df['returns'] = df['close'].pct_change()
-        df['atr'] = bt.calculate_atr(df)
-        df['rsi'] = bt.calculate_rsi(df)
-        df['macd'], df['macd_signal'] = bt.calculate_macd(df)
-        df['adx'] = bt.calculate_adx(df)
-        df['volatility'] = df['returns'].rolling(20).std()
+        if engine == 'layered':
+            from layered_backtest import LayeredBacktest
 
-        metrics = bt.run_backtest(df.dropna().reset_index(drop=True))
+            layer = str(getattr(args, 'layer', 'alpha_only') or 'alpha_only')
+            bt = LayeredBacktest(test_layer=layer)
+
+            df['returns'] = df['close'].pct_change()
+            df['atr'] = bt.calculate_atr(df)
+            df['rsi'] = bt.calculate_rsi(df)
+            df['macd'], df['macd_signal'] = bt.calculate_macd(df)
+            df['adx'] = bt.calculate_adx(df)
+            df['volatility'] = df['returns'].rolling(20).std()
+
+            metrics = bt.run_backtest(df.dropna().reset_index(drop=True))
+            rejection_summary = None
+
+        else:
+            from alpha_factory.decision_making import decision_function, DecisionConfig
+            from alpha_factory.signal_quality_optimizer import SignalQualityOptimizer
+
+            window = int(getattr(args, 'window', 300) or 300)
+            disable_quality = bool(getattr(args, 'disable_signal_quality', False))
+
+            df = df.dropna().reset_index(drop=True)
+            if window < 50:
+                window = 50
+
+            def _calc_atr(d0: pd.DataFrame, period: int = 14) -> pd.Series:
+                high = d0['high']
+                low = d0['low']
+                close = d0['close']
+                prev_close = close.shift(1)
+                tr = pd.concat([
+                    (high - low),
+                    (high - prev_close).abs(),
+                    (low - prev_close).abs(),
+                ], axis=1).max(axis=1)
+                return tr.rolling(period, min_periods=1).mean()
+
+            def _calc_rsi(d0: pd.DataFrame, period: int = 14) -> pd.Series:
+                delta = d0['close'].diff()
+                gain = delta.where(delta > 0, 0.0)
+                loss = (-delta.where(delta < 0, 0.0))
+                avg_gain = gain.rolling(period, min_periods=1).mean()
+                avg_loss = loss.rolling(period, min_periods=1).mean()
+                rs = avg_gain / (avg_loss + 1e-12)
+                return 100 - (100 / (1 + rs))
+
+            def _calc_macd(d0: pd.DataFrame, fast: int = 12, slow: int = 26, signal: int = 9) -> Tuple[pd.Series, pd.Series]:
+                ema_fast = d0['close'].ewm(span=fast, adjust=False).mean()
+                ema_slow = d0['close'].ewm(span=slow, adjust=False).mean()
+                macd = ema_fast - ema_slow
+                macd_signal = macd.ewm(span=signal, adjust=False).mean()
+                return macd, macd_signal
+
+            def _calc_adx(d0: pd.DataFrame, period: int = 14) -> pd.Series:
+                high = d0['high']
+                low = d0['low']
+                close = d0['close']
+
+                up_move = high.diff()
+                down_move = (-low.diff())
+
+                plus_dm = up_move.where((up_move > down_move) & (up_move > 0), 0.0)
+                minus_dm = down_move.where((down_move > up_move) & (down_move > 0), 0.0)
+
+                atr = _calc_atr(d0, period=period)
+                plus_di = 100 * (plus_dm.rolling(period, min_periods=1).mean() / (atr + 1e-12))
+                minus_di = 100 * (minus_dm.rolling(period, min_periods=1).mean() / (atr + 1e-12))
+
+                dx = 100 * (plus_di - minus_di).abs() / ((plus_di + minus_di) + 1e-12)
+                return dx.rolling(period, min_periods=1).mean()
+
+            rejection_counts: Dict[str, int] = {}
+            def _bump(key: str):
+                rejection_counts[key] = int(rejection_counts.get(key, 0)) + 1
+
+            cfg = DecisionConfig()
+            optimizer = None if disable_quality else SignalQualityOptimizer()
+
+            buys = 0
+            sells = 0
+            holds = 0
+            evaluated = 0
+
+            for i in range(window - 1, len(df)):
+                w = df.iloc[max(0, i - window + 1): i + 1].copy()
+
+                if 'time' not in w.columns:
+                    w['time'] = pd.NaT
+
+                w['atr'] = _calc_atr(w)
+                w['rsi'] = _calc_rsi(w)
+                macd, macd_signal = _calc_macd(w)
+                w['macd'] = macd
+                w['macd_signal'] = macd_signal
+                w['adx'] = _calc_adx(w)
+                w['sma_20'] = w['close'].rolling(20, min_periods=1).mean()
+                w['sma_50'] = w['close'].rolling(50, min_periods=1).mean()
+                sma20 = w['sma_20']
+                std20 = w['close'].rolling(20, min_periods=1).std()
+                w['bb_upper'] = sma20 + 2.0 * std20
+                w['bb_lower'] = sma20 - 2.0 * std20
+
+                decision = decision_function(
+                    swing_points=[],
+                    features=w,
+                    causality_results={},
+                    config=cfg,
+                    market_structure=None,
+                    signal_optimizer=optimizer,
+                )
+                evaluated += 1
+
+                if decision.decision.value == 'BUY':
+                    buys += 1
+                elif decision.decision.value == 'SELL':
+                    sells += 1
+                else:
+                    holds += 1
+                    reasons = ' | '.join([str(r) for r in (decision.reasoning or [])])
+                    reasons_l = reasons.lower()
+                    if 'confidence gate' in reasons_l:
+                        _bump('CONFIDENCE_GATE')
+                    elif 'trade skipped' in reasons_l and 'regime' in reasons_l:
+                        _bump('REGIME_SKIP')
+                    elif 'threshold=' in reasons_l and 'p_long=' in reasons_l:
+                        _bump('PROB_THRESHOLD')
+                    else:
+                        _bump('HOLD_OTHER')
+
+            metrics = {
+                'engine': 'decision',
+                'bars': int(len(df)),
+                'window': int(window),
+                'evaluated': int(evaluated),
+                'buy_signals': int(buys),
+                'sell_signals': int(sells),
+                'hold_signals': int(holds),
+            }
+            rejection_summary = dict(sorted(rejection_counts.items(), key=lambda kv: kv[1], reverse=True))
 
         print("\n" + "=" * 60)
         print("  ALPHA FACTORY BACKTEST RESULTS")
         print("=" * 60)
-        print(f"\n  Layer: {layer}")
+        if engine == 'layered':
+            layer = str(getattr(args, 'layer', 'alpha_only') or 'alpha_only')
+            print(f"\n  Engine: layered")
+            print(f"  Layer: {layer}")
+        else:
+            print(f"\n  Engine: decision")
         if isinstance(metrics, dict) and 'error' in metrics:
             print(f"\n  Error: {metrics['error']}")
         else:
             for k, v in (metrics or {}).items():
+                print(f"  {k}: {v}")
+        if rejection_summary:
+            print("\n  Rejection Breakdown:")
+            for k, v in rejection_summary.items():
                 print(f"  {k}: {v}")
         print("\n" + "=" * 60)
 
@@ -708,12 +850,29 @@ def cmd_backtest(args, logger: logging.Logger):
         strategy_map = {
             "neural": BacktestNeuralStrategy,
             "tcn": BacktestNeuralStrategy,  # Alias for clarity
+            "unified3tf": None,
         }
+
+        try:
+            from strategies.unified_3tf_strategy import Unified3TFStrategy
+            strategy_map["unified3tf"] = Unified3TFStrategy
+        except Exception as e:
+            logger.warning(f"Could not import Unified3TFStrategy: {e}")
         strategy_cls = strategy_map.get(args.strategy, NeuralHybridStrategy)
 
         if bool(getattr(settings, 'ENFORCE_AUTHORITATIVE_PIPELINE', True)):
-            if not issubclass(strategy_cls, NeuralHybridStrategy):
-                logger.error("Authoritative pipeline enforced: backtest strategy must be NeuralHybridStrategy")
+            allow = False
+            try:
+                allow = issubclass(strategy_cls, NeuralHybridStrategy)
+            except Exception:
+                allow = False
+            if not allow:
+                try:
+                    allow = (strategy_cls.__name__ == 'Unified3TFStrategy')
+                except Exception:
+                    allow = False
+            if not allow:
+                logger.error("Authoritative pipeline enforced: backtest strategy must be NeuralHybridStrategy or Unified3TFStrategy")
                 return 1
         
         # Run backtest
@@ -726,7 +885,10 @@ def cmd_backtest(args, logger: logging.Logger):
             except Exception:
                 base_tf = ''
         if not base_tf:
-            base_tf = 'M5' if profile == 'SCALP' else 'H1'
+            if str(getattr(args, 'strategy', '') or '').lower().strip() == 'unified3tf':
+                base_tf = {'SCALP': 'M5', 'INTRADAY': 'M15', 'SWING': 'H1'}.get(profile, 'M15')
+            else:
+                base_tf = 'M5' if profile == 'SCALP' else 'H1'
 
         # If user provides explicit MTF/HTF CSVs, run true 3TF backtest mode
         # without relying on BacktestBot resampling.
@@ -794,6 +956,21 @@ def cmd_backtest(args, logger: logging.Logger):
 
                 window_size = 100
                 signals_out = []
+                rejection_counts: Dict[str, int] = {}
+                rejection_examples: Dict[str, str] = {}
+
+                def _bump_rej(stage: str, reason: str = ""):
+                    k = str(stage or 'UNKNOWN')
+                    rejection_counts[k] = int(rejection_counts.get(k, 0)) + 1
+                    if reason and k not in rejection_examples:
+                        rejection_examples[k] = str(reason)[:240]
+
+                engine_obj = None
+                if str(getattr(args, 'strategy', '') or '').lower().strip() == 'unified3tf':
+                    try:
+                        engine_obj = strategy._get_engine() if hasattr(strategy, '_get_engine') else None
+                    except Exception:
+                        engine_obj = None
                 for i in range(window_size, len(base_df)):
                     provider.current_idx = i
                     try:
@@ -814,6 +991,17 @@ def cmd_backtest(args, logger: logging.Logger):
                         executor.update_price(float(ltf_window['close'].iloc[-1]))
 
                     sig = strategy.on_bar(ltf_window)
+
+                    if sig is None:
+                        if engine_obj is not None:
+                            try:
+                                stage = str(getattr(engine_obj, 'last_rejection_stage', '') or 'NO_SIGNAL')
+                                reason = str(getattr(engine_obj, 'last_rejection_reason', '') or '')
+                                _bump_rej(stage, reason)
+                            except Exception:
+                                _bump_rej('NO_SIGNAL', '')
+                        else:
+                            _bump_rej('NO_SIGNAL', '')
                     try:
                         signals_out.append({'time': ltf_window['time'].iloc[-1], 'close': ltf_window['close'].iloc[-1], 'signal': sig})
                     except Exception:
@@ -829,6 +1017,8 @@ def cmd_backtest(args, logger: logging.Logger):
                     'trades': executor.get_trade_history(),
                     'final_balance': executor.balance,
                     'signals': signals_out,
+                    'rejections': dict(sorted(rejection_counts.items(), key=lambda kv: kv[1], reverse=True)),
+                    'rejection_examples': rejection_examples,
                 }
             except Exception as e:
                 logger.error(f"3TF backtest error: {e}", exc_info=True)
@@ -860,6 +1050,16 @@ def cmd_backtest(args, logger: logging.Logger):
         print(f"  P&L:             ${pnl:+,.2f} ({pnl_pct:+.2f}%)")
         
         print(f"\n  Total Trades: {len(results['trades'])}")
+
+        if isinstance(results, dict) and results.get('rejections'):
+            print("\n  Rejection Breakdown:")
+            for k, v in results['rejections'].items():
+                print(f"  {k}: {v}")
+            examples = results.get('rejection_examples') or {}
+            if examples:
+                print("\n  Rejection Examples:")
+                for k, v in examples.items():
+                    print(f"  {k}: {v}")
         
         # Detailed metrics if available
         if results['trades']:
@@ -1316,10 +1516,27 @@ Examples:
     )
     ab_parser.add_argument("--data", required=True, help="Path to OHLCV CSV file")
     ab_parser.add_argument(
+        "--engine",
+        type=str,
+        default="layered",
+        help="Alpha backtest engine (layered, decision)",
+    )
+    ab_parser.add_argument(
         "--layer",
         type=str,
         default="alpha_only",
         help="Layer to run (alpha_only, alpha_execution, alpha_risk, full_system)",
+    )
+    ab_parser.add_argument(
+        "--window",
+        type=int,
+        default=300,
+        help="Rolling window size (bars) for engine=decision",
+    )
+    ab_parser.add_argument(
+        "--disable-signal-quality",
+        action="store_true",
+        help="Disable signal quality optimizer in engine=decision",
     )
     ab_parser.add_argument(
         "--max-bars",
