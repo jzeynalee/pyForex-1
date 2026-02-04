@@ -413,8 +413,16 @@ class RiskAwareTCNPredictor:
         if expected_dim is not None and expected_dim > 0:
             current_dim = int(features.shape[-1])
             if current_dim > expected_dim:
+                logger.warning(
+                    f"Feature dimension mismatch: input has {current_dim} features but model expects {expected_dim}. "
+                    f"Truncating extra {current_dim - expected_dim} features."
+                )
                 features = features[..., :expected_dim]
             elif current_dim < expected_dim:
+                logger.warning(
+                    f"Feature dimension mismatch: input has {current_dim} features but model expects {expected_dim}. "
+                    f"Padding with {expected_dim - current_dim} zeros."
+                )
                 pad = np.zeros((features.shape[0], features.shape[1], expected_dim - current_dim), dtype=features.dtype)
                 features = np.concatenate([features, pad], axis=-1)
         
