@@ -190,14 +190,26 @@ def _regime_probability_from_swings(swing_points: List, features: pd.DataFrame, 
     return _normalize_probs(probs)
 
 
+def _safe_float(val, default: float = 0.0) -> float:
+    """Safely convert value to float with null check."""
+    if val is None or (isinstance(val, float) and np.isnan(val)):
+        return default
+    try:
+        result = float(val)
+        return result if np.isfinite(result) else default
+    except (TypeError, ValueError):
+        return default
+
+
 def _feature_evidence_probabilities(features: pd.DataFrame) -> Dict[str, Dict[str, float]]:
     if features is None or features.empty:
         return {}
     row = features.iloc[-1]
     out: Dict[str, Dict[str, float]] = {}
 
-    if 'rsi' in features.columns and np.isfinite(float(row.get('rsi'))):
-        rsi = float(row.get('rsi'))
+    rsi_val = row.get('rsi') if 'rsi' in features.columns else None
+    if rsi_val is not None and np.isfinite(_safe_float(rsi_val, np.nan)):
+        rsi = _safe_float(rsi_val)
         score = (rsi - 50.0) / 10.0
         out['rsi'] = {
             'bullish': float(np.clip(_sigmoid(score), 0.3, 0.9)),
@@ -205,8 +217,8 @@ def _feature_evidence_probabilities(features: pd.DataFrame) -> Dict[str, Dict[st
         }
 
     if 'macd' in features.columns and 'macd_signal' in features.columns:
-        macd = float(row.get('macd') or 0.0)
-        macd_sig = float(row.get('macd_signal') or 0.0)
+        macd = _safe_float(row.get('macd'), 0.0)
+        macd_sig = _safe_float(row.get('macd_signal'), 0.0)
         diff = (macd - macd_sig)
         score = float(np.tanh(diff * 5.0))
         out['macd'] = {
@@ -215,17 +227,17 @@ def _feature_evidence_probabilities(features: pd.DataFrame) -> Dict[str, Dict[st
         }
 
     if 'close' in features.columns and 'sma_20' in features.columns and 'sma_50' in features.columns:
-        close = float(row.get('close') or 0.0)
-        sma20 = float(row.get('sma_20') or close)
-        sma50 = float(row.get('sma_50') or close)
+        close = _safe_float(row.get('close'), 0.0)
+        sma20 = _safe_float(row.get('sma_20'), close)
+        sma50 = _safe_float(row.get('sma_50'), close)
         bull = 0.7 if (close > sma20 > sma50) else (0.55 if close > sma20 else 0.4)
         bear = 0.7 if (close < sma20 < sma50) else (0.55 if close < sma20 else 0.4)
         out['ma_structure'] = {'bullish': float(bull), 'bearish': float(bear)}
 
     if 'bb_upper' in features.columns and 'bb_lower' in features.columns and 'close' in features.columns:
-        close = float(row.get('close') or 0.0)
-        upper = float(row.get('bb_upper') or close)
-        lower = float(row.get('bb_lower') or close)
+        close = _safe_float(row.get('close'), 0.0)
+        upper = _safe_float(row.get('bb_upper'), close)
+        lower = _safe_float(row.get('bb_lower'), close)
         width = max(1e-12, upper - lower)
         pos = (close - lower) / width
         out['bb_position'] = {
@@ -233,8 +245,9 @@ def _feature_evidence_probabilities(features: pd.DataFrame) -> Dict[str, Dict[st
             'bearish': float(np.clip(0.3 + 0.6 * (1.0 - pos), 0.3, 0.9)),
         }
 
-    if 'adx' in features.columns and np.isfinite(float(row.get('adx'))):
-        adx = float(row.get('adx'))
+    adx_val = row.get('adx') if 'adx' in features.columns else None
+    if adx_val is not None and np.isfinite(_safe_float(adx_val, np.nan)):
+        adx = _safe_float(adx_val)
         strength = float(np.clip((adx - 15.0) / 25.0, 0.0, 1.0))
         out['trend_strength'] = {
             'bullish': float(np.clip(0.4 + 0.4 * strength, 0.3, 0.9)),
@@ -672,25 +685,23 @@ def _determine_decision(combined_score: float, regime: MarketRegime, config: Dec
     """Determine final trading decision and confidence."""
     confidence = abs(combined_score)
 
-    # NEW: Higher barriers for entry to reduce over-trading
-    threshold = 0.82 if regime == MarketRegime.NEUTRAL else 0.75
-
-    if confidence < threshold:
-        return DecisionType.HOLD, confidence
-    
-    # Only proceed if expected return is 4x the transaction cost
-    return (DecisionType.BUY if combined_score > 0 else DecisionType.SELL), confidence
-    
-    # Adjust confidence based on regime
+    # Adjust confidence based on regime BEFORE threshold check
     if regime == MarketRegime.VOLATILE:
         confidence *= 0.7  # Reduce confidence in volatile markets
     elif regime == MarketRegime.NEUTRAL:
         confidence *= 0.8  # Reduce confidence in neutral markets
-    
-    # Determine decision
-    if confidence < config.min_confidence:
+
+    # Higher barriers for entry to reduce over-trading
+    threshold = 0.82 if regime == MarketRegime.NEUTRAL else 0.75
+
+    # Also check against config minimum
+    effective_threshold = max(threshold, config.min_confidence)
+
+    if confidence < effective_threshold:
         return DecisionType.HOLD, confidence
-    elif combined_score > 0:
+    
+    # Determine decision based on score direction
+    if combined_score > 0:
         return DecisionType.BUY, confidence
     else:
         return DecisionType.SELL, confidence
