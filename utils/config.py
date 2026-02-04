@@ -28,7 +28,9 @@ class Settings(BaseSettings):
     # Model Config
     DEVICE: str = "cuda" if os.environ.get("CUDA_VISIBLE_DEVICES") else "cpu"
     CONFIDENCE_THRESHOLD: float = 0.60
-    WEIGHTS_DIR: Path = Path("models/weights")
+    ASSETS_DIR: Path = Path("e:/pyProject/pyForex-assets")
+    WEIGHTS_DIR: Path = Path("e:/pyProject/pyForex-assets/models/weights")
+    TREND_MODEL_PATH: Path = Path("e:/pyProject/pyForex-assets/models/trend_classifier.joblib")
     
     # Data Config
     SEQUENCE_LENGTH: int = 60
@@ -36,6 +38,9 @@ class Settings(BaseSettings):
     
     # Polling
     TICK_INTERVAL: float = 10.0  # seconds between checks
+
+    # Guardrails
+    ENFORCE_AUTHORITATIVE_PIPELINE: bool = True
 
     @field_validator('CONFIDENCE_THRESHOLD')
     @classmethod

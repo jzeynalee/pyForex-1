@@ -2,17 +2,10 @@
 <project version="4">
   <component name="ChangeListManager">
     <list default="true" id="2b98d5ed-b808-40be-b358-495afbfd9969" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/.idea/inspectionProfiles/profiles_settings.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/misc.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/modules.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/pyForex-1.iml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/vcs.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/coverage.xml" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/logs/open_positions.json" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/mock_backtest_data.csv" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tests/integration/conftest.py" beforeDir="false" afterPath="$PROJECT_DIR$/tests/integration/conftest.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/trading/bot.py" beforeDir="false" afterPath="$PROJECT_DIR$/trading/bot.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/alpha_factory/alpha_factory.py" beforeDir="false" afterPath="$PROJECT_DIR$/alpha_factory/alpha_factory.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/alpha_factory/alpha_factory.zip" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/alpha_factory/enhancements.py" beforeDir="false" afterPath="$PROJECT_DIR$/alpha_factory/enhancements.py" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -34,6 +27,7 @@
   "keyToString": {
     "ModuleVcsDetector.initialDetectionPerformed": "true",
     "RunOnceActivity.ShowReadmeOnStart": "true",
+    "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252": "true",
     "RunOnceActivity.git.unshallow": "true",
     "RunOnceActivity.typescript.service.memoryLimit.init": "true",
     "git-widget-placeholder": "main",
@@ -47,7 +41,6 @@
   <component name="SharedIndexes">
     <attachedChunks>
       <set>
-        <option value="bundled-js-predefined-d6986cc7102b-c7e53b3be11b-JavaScript-PY-253.28294.336" />
         <option value="bundled-python-sdk-0978a7220b69-9867c7d4c0a4-com.jetbrains.pycharm.pro.sharedIndexes.bundled-PY-253.28294.336" />
       </set>
     </attachedChunks>
@@ -61,10 +54,22 @@
       <updated>1765804934563</updated>
       <workItem from="1765804935894" duration="154000" />
       <workItem from="1765898983144" duration="292000" />
+      <workItem from="1768657119210" duration="21000" />
     </task>
     <servers />
   </component>
   <component name="TypeScriptGeneratedFilesManager">
     <option name="version" value="3" />
+  </component>
+  <component name="Vcs.Log.Tabs.Properties">
+    <option name="TAB_STATES">
+      <map>
+        <entry key="MAIN">
+          <value>
+            <State />
+          </value>
+        </entry>
+      </map>
+    </option>
   </component>
 </project>

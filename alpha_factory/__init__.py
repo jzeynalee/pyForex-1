@@ -7,6 +7,7 @@ This package provides a comprehensive framework for:
 - Feature engineering with 220+ technical indicators
 - Causal analysis using Granger causality, mutual information, and lead-lag analysis
 - Decision making based on market regimes and feature signals
+- MH-TCN integration for unified 3TF trading
 
 Main Components:
 - MarketData: OHLCV data processing and swing point extraction
@@ -14,6 +15,7 @@ Main Components:
 - CausalAnalysis: Statistical causality analysis between features
 - DecisionMaking: Trading decision logic and risk management
 - AlphaFactory: Main orchestrator class
+- MHTCNIntegration: Unified MH-TCN + 3TF pipeline
 """
 
 from .market_data import MarketData, SwingPoint
@@ -23,7 +25,7 @@ from .decision_making import (
     MarketRegime, DecisionType, create_decision_summary
 )
 
-__version__ = "1.0.0"
+__version__ = "2.0.0"
 __author__ = "Alpha Factory Team"
 
 from .three_tf_system import (
@@ -44,6 +46,13 @@ from .trading_profiles import (
     get_profile
 )
 
+# MH-TCN Integration (new unified pipeline)
+from .mhtcn_integration import (
+    MHTCNPrediction,
+    MHTCNFeatureProvider,
+    UnifiedThreeTFEngine
+)
+
 # Convenience imports
 __all__ = [
     'MarketData',
@@ -57,7 +66,7 @@ __all__ = [
     'MarketRegime',
     'DecisionType',
     'create_decision_summary',
-   'FeatureSnapshot',
+    'FeatureSnapshot',
     'HTFDecision',
     'MTFDecision',
     'LTFSignal',
@@ -68,5 +77,9 @@ __all__ = [
     'ProfileType',
     'TimeFrame',
     'PROFILES',
-    'get_profile'
+    'get_profile',
+    # MH-TCN Integration
+    'MHTCNPrediction',
+    'MHTCNFeatureProvider',
+    'UnifiedThreeTFEngine',
 ]

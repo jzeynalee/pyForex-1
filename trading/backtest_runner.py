@@ -43,8 +43,8 @@ class BacktestRunner:
         try:
             df = self.loader.load_csv(self.data_path)
         except Exception as e:
-            logger.warning(f"Could not load data: {e}. Generating synthetic data.")
-            df = self.loader.generate_synthetic_data(n=2000)
+            logger.error(f"Could not load data: {e}. Aborting (synthetic backtest disabled).")
+            return
             
         # 2. Validate Data
         val_res = self.loader.validate_data(df)

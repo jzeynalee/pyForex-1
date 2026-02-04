@@ -234,7 +234,7 @@ class LayeredBacktest:
         
         # Apply capacity control
         if self.capacity_controller:
-            selection_results = self.capacity_controller.select_trades(enhanced_signals)
+            selection_results = self.capacity_controller.select_trades(enhanced_signals, ev_optimizer=self.ev_optimizer)
             final_signals = selection_results['selected_trades_data']
         else:
             final_signals = enhanced_signals

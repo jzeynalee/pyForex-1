@@ -17,10 +17,12 @@ import pandas as pd
 from typing import Dict, Optional, List, Tuple
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, date
+from pathlib import Path
 from enum import Enum
 import logging
 
 from utils.candle_to_image import candle_image
+from utils.config import settings
 
 # Core imports
 from inference.predictor import (
@@ -122,7 +124,7 @@ class StrategyConfig:
     
     # Model paths
     tcn_weights: str = 'models/weights/tcn_best.pt'
-    vit_weights: Optional[str] = 'models/weights/vit_best.pt'
+    vit_weights: Optional[str] = None  # DISABLED - ViT removed for weak performance
     yolo_weights: Optional[str] = None  # Disabled - replaced by price action
     fusion_weights: Optional[str] = 'models/weights/fusion_best.pt'
     meta_model_path: Optional[str] = 'models/weights/meta_model.joblib'
@@ -130,18 +132,18 @@ class StrategyConfig:
     
     # Feature settings
     sequence_length: int = 60
-    use_vision: bool = True
+    use_vision: bool = False  # DISABLED - ViT removed for weak performance
     use_price_action: bool = True
     
-    # Risk settings
-    base_risk_percent: float = 1.0
-    min_risk_reward: float = 1.5
-    max_open_trades: int = 3
+    # Risk settings - RAISED for better trade quality
+    base_risk_percent: float = 0.5  # Was 1.0 - reduced for safety
+    min_risk_reward: float = 2.0    # Was 1.5 - higher R:R requirement
+    max_open_trades: int = 2        # Was 3 - fewer concurrent trades
     
-    # Confidence thresholds
-    min_direction_confidence: float = 0.55
-    min_meta_score: float = 0.5
-    min_mtf_alignment: float = 0.6
+    # Confidence thresholds - RAISED significantly
+    min_direction_confidence: float = 0.65  # Was 0.55
+    min_meta_score: float = 0.60            # Was 0.5
+    min_mtf_alignment: float = 0.70         # Was 0.6
 
     # SCALP-only controls (TTF=M15)
     cooldown_after_loss_m15: int = 0
@@ -168,6 +170,80 @@ class StrategyConfig:
 
     def __post_init__(self):
         self.profile = str(self.profile or 'INTRADAY').upper()
+
+        try:
+            weights_dir = Path(getattr(settings, 'WEIGHTS_DIR', 'models/weights'))
+        except Exception:
+            weights_dir = Path('models/weights')
+
+        def _exists(p: Optional[str]) -> bool:
+            if not p:
+                return False
+            try:
+                return Path(str(p)).exists()
+            except Exception:
+                return False
+
+        tcn_name = {
+            'SCALP': 'multihead_tcn_SCALP.pth',
+            'INTRADAY': 'multihead_tcn_INTRADAY.pth',
+            'SWING': 'multihead_tcn_SWING.pth',
+        }.get(self.profile, 'multihead_tcn_INTRADAY.pth')
+
+        if bool(self.use_price_action):
+            tcn_name_pa = {
+                'SCALP': 'multihead_tcn_SCALP_pa_v1.pth',
+                'INTRADAY': 'multihead_tcn_INTRADAY_pa_v1.pth',
+                'SWING': 'multihead_tcn_SWING_pa_v1.pth',
+            }.get(self.profile)
+            if tcn_name_pa:
+                tcn_name = tcn_name_pa
+
+        if not _exists(self.tcn_weights) or str(self.tcn_weights).startswith('models/weights/'):
+            candidates = [
+                weights_dir / tcn_name,
+            ]
+            # Fallback chain: profile non-PA -> intraday PA -> intraday non-PA
+            candidates.extend([
+                weights_dir / {
+                    'SCALP': 'multihead_tcn_SCALP.pth',
+                    'INTRADAY': 'multihead_tcn_INTRADAY.pth',
+                    'SWING': 'multihead_tcn_SWING.pth',
+                }.get(self.profile, 'multihead_tcn_INTRADAY.pth'),
+                weights_dir / 'multihead_tcn_INTRADAY_pa_v1.pth',
+                weights_dir / 'multihead_tcn_INTRADAY.pth',
+            ])
+
+            for candidate in candidates:
+                if candidate.exists():
+                    self.tcn_weights = str(candidate)
+                    break
+
+        if bool(self.use_vision):
+            vit_name = {
+                'SCALP': 'vit_SCALP.pth',
+                'INTRADAY': 'vit_INTRADAY.pth',
+                'SWING': 'vit_SWING.pth',
+            }.get(self.profile, 'vit_INTRADAY.pth')
+            if not _exists(self.vit_weights) or str(self.vit_weights).startswith('models/weights/'):
+                vit_candidates = [
+                    weights_dir / vit_name,
+                    weights_dir / 'vit_INTRADAY.pth',
+                ]
+                for vit_candidate in vit_candidates:
+                    if vit_candidate.exists():
+                        self.vit_weights = str(vit_candidate)
+                        break
+        else:
+            self.vit_weights = None
+
+        # Fusion weights are not shipped in the extracted zip; keep disabled unless explicitly provided.
+        if not _exists(self.fusion_weights):
+            self.fusion_weights = None
+
+        # Meta-model is optional and not present in the extracted zip by default.
+        if self.meta_model_path and not _exists(self.meta_model_path):
+            self.meta_model_path = None
 
         # SCALP profile tightening defaults
         if self.profile == 'SCALP':
@@ -238,11 +314,12 @@ class NeuralHybridStrategy:
         self.data_provider = data_provider
         self.executor = executor
         
-        # Handle extra args like risk_manager if passed
-        if 'risk_manager' in kwargs:
-            # We currently use internal decision_engine which wraps risk logic
-            # but we could store this if needed
-            pass
+        # Guardrail: reject external risk_manager injection when unified pipeline is enforced.
+        if 'risk_manager' in kwargs and bool(getattr(settings, 'ENFORCE_AUTHORITATIVE_PIPELINE', True)):
+            raise ValueError(
+                "Unsupported 'risk_manager' injection: NeuralHybridStrategy uses internal EnhancedDecisionEngine "
+                "as the authoritative risk pipeline."
+            )
             
         self.name = "NeuralHybridStrategy"
         
@@ -566,6 +643,12 @@ class NeuralHybridStrategy:
             
             # Initialize decision engine with balance
             self.decision_engine.initialize(self._starting_balance)
+
+            if bool(getattr(settings, 'ENFORCE_AUTHORITATIVE_PIPELINE', True)):
+                if not isinstance(self.decision_engine, EnhancedDecisionEngine):
+                    raise RuntimeError(
+                        "Authoritative pipeline violation: decision_engine must be EnhancedDecisionEngine"
+                    )
             
             # Initialize Phase 4: Exit Advisor
             if self.config.enable_exit_advisor and HAS_EXIT_ADVISOR:

@@ -229,7 +229,7 @@ class ComprehensiveBacktest:
             enhanced_signals.append(enhanced_signal)
         
         # Apply capacity control
-        selection_results = self.capacity_controller.select_trades(enhanced_signals)
+        selection_results = self.capacity_controller.select_trades(enhanced_signals, ev_optimizer=self.ev_optimizer)
         
         # Update decay detector with recent trade results
         if self.trades:

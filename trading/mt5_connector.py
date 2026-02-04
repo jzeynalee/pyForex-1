@@ -62,7 +62,7 @@ class MT5Connector:
     
     # Timeframe mapping
     TF_MAP = {
-        "M1": 1,   # mt5.TIMEFRAME_M1
+        "M1": 1,
         "M5": 5,
         "M15": 15,
         "M30": 30,
@@ -103,9 +103,20 @@ class MT5Connector:
         tf_upper = tf.upper()
         if tf_upper not in self.TF_MAP:
             logger.warning(f"Unknown timeframe {tf}, defaulting to H1")
-            return self.TF_MAP["H1"]  # Use our TF_MAP instead of mt5 constants
-        
-        # Return from our TF_MAP (uses minute values)
+            tf_upper = "H1"
+
+        if MT5_AVAILABLE:
+            mapping = {
+                "M1": mt5.TIMEFRAME_M1,
+                "M5": mt5.TIMEFRAME_M5,
+                "M15": mt5.TIMEFRAME_M15,
+                "M30": mt5.TIMEFRAME_M30,
+                "H1": mt5.TIMEFRAME_H1,
+                "H4": mt5.TIMEFRAME_H4,
+                "D1": mt5.TIMEFRAME_D1,
+            }
+            return mapping.get(tf_upper, mt5.TIMEFRAME_H1)
+
         return self.TF_MAP[tf_upper]
     
     def connect(self) -> bool:

@@ -8,7 +8,7 @@ Goal: Take the best trades first, not all allowed trades
 
 import pandas as pd
 import numpy as np
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Tuple, Any, Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 import logging
@@ -29,6 +29,11 @@ class CapacityConfig:
     # Ranking and selection
     ranking_method: str = 'ev'  # 'ev', 'probability', 'hybrid'
     min_rank_threshold: float = 0.3  # Minimum rank score
+
+    ev_history_window: int = 500
+    ev_norm_min_samples: int = 30
+    ev_percentile_low: float = 50.0
+    ev_percentile_high: float = 90.0
     
     # Time windows
     session_duration_hours: int = 8
@@ -80,10 +85,11 @@ class TradeCandidate:
         hour = self.timestamp.hour
         return f"hour_{hour}"
     
-    def calculate_rank_score(self, method: str = 'ev') -> float:
+    def calculate_rank_score(self, method: str = 'ev', ev_normalizer: Optional[Callable[[float], float]] = None) -> float:
         """Calculate ranking score based on method."""
         if method == 'ev':
-            # Normalize EV to 0-1 scale (assuming max EV of 50)
+            if ev_normalizer is not None:
+                return ev_normalizer(float(self.expected_value))
             return min(1.0, self.expected_value / 50.0)
         elif method == 'probability':
             return self.probability
@@ -91,7 +97,10 @@ class TradeCandidate:
             # Weighted combination
             ev_weight = 0.7
             prob_weight = 0.3
-            ev_score = min(1.0, self.expected_value / 50.0)
+            if ev_normalizer is not None:
+                ev_score = ev_normalizer(float(self.expected_value))
+            else:
+                ev_score = min(1.0, self.expected_value / 50.0)
             return ev_weight * ev_score + prob_weight * self.probability
         else:
             return 0.0
@@ -114,6 +123,8 @@ class CapacityController:
         
         # Deferred trades queue
         self.deferred_trades = deque(maxlen=self.config.max_deferred_trades)
+
+        self.ev_history = deque(maxlen=self.config.ev_history_window)
         
         # Correlation tracking
         self.symbol_correlations = {}
@@ -128,6 +139,35 @@ class CapacityController:
         }
         
         logger.info("Capacity controller initialized")
+
+    def _ingest_ev_history(self, candidates: List[TradeCandidate]) -> None:
+        for c in candidates:
+            try:
+                ev = float(c.expected_value)
+            except Exception:
+                continue
+
+            if not np.isfinite(ev):
+                continue
+            self.ev_history.append(ev)
+
+    def _normalize_ev(self, ev: float) -> float:
+        if not np.isfinite(ev):
+            return 0.0
+
+        if len(self.ev_history) < self.config.ev_norm_min_samples:
+            return float(np.clip(ev / 50.0, 0.0, 1.0))
+
+        ev_values = np.asarray(self.ev_history, dtype=np.float64)
+        p_low = float(np.percentile(ev_values, self.config.ev_percentile_low))
+        p_high = float(np.percentile(ev_values, self.config.ev_percentile_high))
+
+        denom = p_high - p_low
+        if denom <= 0:
+            return float(np.clip(ev / 50.0, 0.0, 1.0))
+
+        score = (ev - p_low) / denom
+        return float(np.clip(score, 0.0, 1.0))
     
     def update_symbol_correlations(self, correlation_matrix: Dict[str, Dict[str, float]]):
         """Update symbol correlation matrix."""
@@ -198,7 +238,7 @@ class CapacityController:
         """Rank trade candidates by configured method."""
         # Calculate rank scores
         for candidate in candidates:
-            candidate.rank_score = candidate.calculate_rank_score(self.config.ranking_method)
+            candidate.rank_score = candidate.calculate_rank_score(self.config.ranking_method, ev_normalizer=self._normalize_ev)
         
         # Sort by rank score (descending)
         ranked_candidates = sorted(candidates, key=lambda x: x.rank_score, reverse=True)
@@ -235,7 +275,7 @@ class CapacityController:
         
         return eligible_trades
     
-    def select_trades(self, candidates: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def select_trades(self, candidates: List[Dict[str, Any]], ev_optimizer: Optional[Any] = None) -> Dict[str, Any]:
         """
         Select optimal trades with capacity constraints.
         
@@ -246,6 +286,14 @@ class CapacityController:
             Dictionary with selection results
         """
         logger.info(f"Processing {len(candidates)} trade candidates")
+
+        if ev_optimizer is not None:
+            try:
+                needs_ev = any(('expected_value' not in c or c.get('expected_value') is None) for c in candidates)
+                if needs_ev and hasattr(ev_optimizer, 'rank_trades_by_ev'):
+                    candidates = ev_optimizer.rank_trades_by_ev(candidates)
+            except Exception as e:
+                logger.error(f"EV optimizer integration error: {e}")
         
         # Convert to TradeCandidate objects
         trade_candidates = [TradeCandidate(c) for c in candidates]
@@ -254,6 +302,8 @@ class CapacityController:
         # Process any deferred trades first
         deferred_candidates = self.process_deferred_trades()
         trade_candidates.extend(deferred_candidates)
+
+        self._ingest_ev_history(trade_candidates)
         
         # Rank all candidates
         ranked_candidates = self.rank_candidates(trade_candidates)
@@ -300,12 +350,12 @@ class CapacityController:
                 else:
                     # Drop the trade
                     candidate.status = 'dropped'
-                    candidate.selection_reason = 'below_threshold'
+                    candidate.selection_reason = 'capacity_full_dropped'
                     dropped_trades.append(candidate)
                     self.capacity_stats['dropped_trades'] += 1
         
         # Update capacity rejections
-        capacity_rejections = len([c for c in dropped_trades if 'capacity' in c.selection_reason])
+        capacity_rejections = len([c for c in (deferred_trades + dropped_trades) if 'capacity_full' in c.selection_reason])
         self.capacity_stats['capacity_rejections'] += capacity_rejections
         
         # Prepare results

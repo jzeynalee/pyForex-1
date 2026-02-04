@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 # main.py
 """
-pyForex - Multi-Modal Forex Trading System
-==========================================
+pyForex - Multi-Modal Forex Trading System (v2.0)
+==================================================
 
 Unified CLI entry point for all operations:
     - Multi-style trading (scalp + intraday + swing simultaneously)
     - Live trading with MT5 (single strategy)
     - Backtesting on historical data
-    - Model training (TCN, ViT, Fusion, YOLO, Trend Classifier)
+    - Model training (MH-TCN with walk-forward validation)
     - Single predictions / inference
     - Dataset generation
 
@@ -27,10 +27,15 @@ Examples:
     python main.py multi --mock                             # Test with mock connector
     python main.py live --symbol EURUSD --timeframe H1      # Single strategy
     python main.py backtest --data data/EURUSD_H1.csv --strategy neural
-    python main.py train tcn --epochs 50 --data data/raw/eurusd.csv
-    python main.py train vit --data-dir datasets/vit --epochs 30
-    python main.py generate yolo --synthetic --samples 5000
+    python main.py train walk-forward --data data/raw/eurusd.csv --profile INTRADAY
+    python main.py train mhtcn --data data/raw/eurusd.csv --epochs 30
     python main.py status --verbose
+
+Training Models (v2.0):
+    walk-forward (wf)  - Walk-forward validated MH-TCN (RECOMMENDED)
+    mhtcn / tcn        - Single-fold MH-TCN training
+    trend              - Trend classifier (XGBoost)
+    fusion             - Fusion network training
 """
 
 import argparse
@@ -41,6 +46,13 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict, Any
 from dataclasses import dataclass
+
+try:
+    from utils.mtf_config import get_profile
+    HAS_MTF = True
+except ImportError:
+    get_profile = None
+    HAS_MTF = False
 
 # Add project root to path
 PROJECT_ROOT = Path(__file__).parent
@@ -129,13 +141,17 @@ class SystemChecker:
     
     def check_weights(self, required: list[str] = None) -> bool:
         """Check if model weights exist."""
-        weights_dir = CONFIG.weights_dir
+        try:
+            from utils.config import settings
+            weights_dir = Path(getattr(settings, 'WEIGHTS_DIR', CONFIG.weights_dir))
+        except Exception:
+            weights_dir = CONFIG.weights_dir
         
         if not weights_dir.exists():
             self.issues.append(f"Weights directory not found: {weights_dir}")
             return False
         
-        required = required or ["tcn_best.pt", "fusion_best.pt"]
+        required = required or ["multihead_tcn_INTRADAY.pth"]
         missing = []
         
         for weight_file in required:
@@ -236,10 +252,10 @@ class SystemChecker:
         
         if mode == "live":
             self.check_mt5()
-            self.check_weights(["tcn_best.pt", "fusion_best.pt"])
+            self.check_weights(["multihead_tcn_INTRADAY.pth"])
 
         elif mode == "backtest":
-            self.check_weights(["tcn_best.pt"])
+            self.check_weights(["multihead_tcn_INTRADAY.pth"])
         
         elif mode == "train":
             # Just check CUDA info
@@ -298,10 +314,18 @@ class SystemChecker:
         
         # Model Weights
         print("\n⚖️  Model Weights:")
-        weights_dir = CONFIG.weights_dir
+        try:
+            from utils.config import settings
+            weights_dir = Path(getattr(settings, 'WEIGHTS_DIR', CONFIG.weights_dir))
+            trend_model = Path(getattr(settings, 'TREND_MODEL_PATH', weights_dir / 'trend_classifier.joblib'))
+        except Exception:
+            weights_dir = CONFIG.weights_dir
+            trend_model = weights_dir / 'trend_classifier.joblib'
         weight_files = [
-            "tcn_best.pt", "vit_best.pt", "fusion_best.pt",
-            "yolo_best.pt", "trend_classifier.joblib",
+            "multihead_tcn_INTRADAY.pth",
+            "multihead_tcn_INTRADAY_pa_v1.pth",
+            "vit_INTRADAY.pth",
+            "scaler.joblib",
         ]
         for wf in weight_files:
             path = weights_dir / wf
@@ -310,6 +334,12 @@ class SystemChecker:
                 print(f"   ✅ {wf} ({size_mb:.1f} MB)")
             else:
                 print(f"   ❌ {wf} (not found)")
+
+        if trend_model.exists():
+            size_mb = trend_model.stat().st_size / (1024 * 1024)
+            print(f"   ✅ trend_classifier.joblib ({size_mb:.1f} MB)")
+        else:
+            print("   ❌ trend_classifier.joblib (not found)")
         
         # MT5
         print("\n📊 MetaTrader 5:")
@@ -367,6 +397,14 @@ def cmd_multi_style(args, logger: logging.Logger):
     if not checker.run_all_checks("live"):
         logger.error("Prerequisites not met. Aborting.")
         return 1
+
+    try:
+        from utils.config import settings
+        if bool(getattr(settings, 'ENFORCE_AUTHORITATIVE_PIPELINE', True)):
+            logger.error("Authoritative pipeline enforced: multi-style orchestrator is disabled")
+            return 1
+    except Exception:
+        pass
     
     if args.dry_run:
         logger.info("DRY RUN - would start multi-style trading with:")
@@ -394,6 +432,136 @@ def cmd_multi_style(args, logger: logging.Logger):
         return 0
     except Exception as e:
         logger.error(f"Multi-style trading error: {e}", exc_info=True)
+        return 1
+
+
+def cmd_alpha_backtest(args, logger: logging.Logger):
+    """Run the Alpha Factory layered backtest on a CSV (separate from ML strategy backtest)."""
+    logger.info("📊 Starting Alpha Factory Backtest Mode")
+
+    try:
+        import pandas as pd
+        from layered_backtest import LayeredBacktest
+
+        logger.info(f"Loading data from {args.data}")
+        df = pd.read_csv(args.data)
+        df.columns = df.columns.str.lower()
+
+        if 'time' in df.columns:
+            df['time'] = pd.to_datetime(df['time'])
+
+        if getattr(args, 'max_bars', None):
+            df = df.tail(int(args.max_bars)).reset_index(drop=True)
+
+        if 'spread' not in df.columns:
+            df['spread'] = 1.0
+        if 'tick_volume' not in df.columns:
+            if 'volume' in df.columns:
+                df['tick_volume'] = df['volume']
+            else:
+                df['tick_volume'] = 100
+        if 'real_volume' not in df.columns:
+            df['real_volume'] = df.get('tick_volume', 100) * 100
+
+        layer = str(getattr(args, 'layer', 'alpha_only') or 'alpha_only')
+        bt = LayeredBacktest(test_layer=layer)
+
+        df['returns'] = df['close'].pct_change()
+        df['atr'] = bt.calculate_atr(df)
+        df['rsi'] = bt.calculate_rsi(df)
+        df['macd'], df['macd_signal'] = bt.calculate_macd(df)
+        df['adx'] = bt.calculate_adx(df)
+        df['volatility'] = df['returns'].rolling(20).std()
+
+        metrics = bt.run_backtest(df.dropna().reset_index(drop=True))
+
+        print("\n" + "=" * 60)
+        print("  ALPHA FACTORY BACKTEST RESULTS")
+        print("=" * 60)
+        print(f"\n  Layer: {layer}")
+        if isinstance(metrics, dict) and 'error' in metrics:
+            print(f"\n  Error: {metrics['error']}")
+        else:
+            for k, v in (metrics or {}).items():
+                print(f"  {k}: {v}")
+        print("\n" + "=" * 60)
+
+        return 0
+    except Exception as e:
+        logger.error(f"Alpha backtest error: {e}", exc_info=True)
+        return 1
+
+
+def cmd_fetch_data(args, logger: logging.Logger):
+    """Fetch real historical OHLCV from MT5 and save outside the repo (external assets folder)."""
+    logger.info("📥 Fetching Historical Data (MT5)")
+
+    checker = SystemChecker(logger)
+    if not checker.run_all_checks("live"):
+        logger.error("Prerequisites not met. Aborting.")
+        return 1
+
+    try:
+        import pandas as pd
+        from datetime import datetime
+        from utils.config import settings
+        from trading.mt5_connector import MT5Connector
+
+        symbol = str(getattr(args, 'symbol', None) or getattr(settings, 'SYMBOL', 'EURUSD')).upper()
+        tfs = str(getattr(args, 'timeframes', 'H1') or 'H1')
+        timeframes = [tf.strip().upper() for tf in tfs.split(',') if tf.strip()]
+        n_bars = int(getattr(args, 'bars', 50000) or 50000)
+
+        out_root = (settings.ASSETS_DIR / 'data' / 'mt5' / symbol)
+        out_root.mkdir(parents=True, exist_ok=True)
+
+        connector = MT5Connector(
+            account=int(getattr(settings, 'MT5_ACCOUNT', 0) or 0),
+            password=str(getattr(settings, 'MT5_PASSWORD', '') or ''),
+            server=str(getattr(settings, 'MT5_SERVER', '') or ''),
+            path=str(getattr(settings, 'MT5_PATH', '') or ''),
+            symbol=symbol,
+            timeframe=timeframes[0] if timeframes else 'H1',
+            magic_number=int(getattr(settings, 'MAGIC_NUMBER', 123456) or 123456),
+        )
+        if not connector.connect():
+            logger.error("Failed to connect/login to MT5")
+            return 1
+
+        written = []
+        for tf in timeframes:
+            df = connector.get_data(n=n_bars, timeframe=tf)
+            if df is None or df.empty:
+                logger.error(f"No data fetched for {symbol} {tf}")
+                continue
+
+            df = df.copy()
+            df.columns = [c.lower().strip() for c in df.columns]
+            if 'time' in df.columns:
+                df['time'] = pd.to_datetime(df['time'])
+
+            stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            out_path = out_root / f"{symbol}_{tf}_{stamp}.csv"
+            df.to_csv(out_path, index=False)
+            written.append(str(out_path))
+            logger.info(f"Wrote {len(df)} rows -> {out_path}")
+
+        connector.disconnect()
+
+        if not written:
+            logger.error("No files written")
+            return 1
+
+        print("\n" + "=" * 60)
+        print("  DATA FETCH COMPLETE")
+        print("=" * 60)
+        for p in written:
+            print(f"  {p}")
+        print("=" * 60 + "\n")
+
+        return 0
+    except Exception as e:
+        logger.error(f"Fetch-data error: {e}", exc_info=True)
         return 1
 
 
@@ -431,6 +599,11 @@ def cmd_live(args, logger: logging.Logger):
         }
         
         strategy_cls = strategy_map.get(args.strategy, NeuralHybridStrategy)
+
+        if bool(getattr(settings, 'ENFORCE_AUTHORITATIVE_PIPELINE', True)):
+            if strategy_cls is not NeuralHybridStrategy:
+                logger.error("Authoritative pipeline enforced: only NeuralHybridStrategy is allowed")
+                return 1
         
         bot = TradingBot(config=config, strategy_class=strategy_cls)
         bot.run()
@@ -476,18 +649,31 @@ def cmd_backtest(args, logger: logging.Logger):
         import pandas as pd
         from trading.bot import BacktestBot
         from strategies.neural_hybrid import NeuralHybridStrategy, StrategyConfig
+        from utils.config import settings
 
         # Reduce per-bar inference logging noise during backtest.
         logging.getLogger("inference.predictor").setLevel(logging.WARNING)
         logging.getLogger("strategies.neural_hybrid").setLevel(logging.INFO)
+        logging.getLogger("risk_management.phase5_capital_protection.protection_rules").setLevel(logging.WARNING)
 
-        # Load data
+        def _load_csv(path: str) -> pd.DataFrame:
+            df0 = pd.read_csv(path)
+            df0.columns = df0.columns.str.lower()
+            if 'time' in df0.columns:
+                df0['time'] = pd.to_datetime(df0['time'])
+            return df0
+
         logger.info(f"Loading data from {args.data}")
-        df = pd.read_csv(args.data)
-        df.columns = df.columns.str.lower()
+        df = _load_csv(args.data)
 
-        if 'time' in df.columns:
-            df['time'] = pd.to_datetime(df['time'])
+        mtf_df = None
+        htf_df = None
+        if getattr(args, 'data_mtf', None):
+            logger.info(f"Loading MTF data from {args.data_mtf}")
+            mtf_df = _load_csv(args.data_mtf)
+        if getattr(args, 'data_htf', None):
+            logger.info(f"Loading HTF data from {args.data_htf}")
+            htf_df = _load_csv(args.data_htf)
 
         if getattr(args, 'max_bars', None):
             df = df.tail(int(args.max_bars)).reset_index(drop=True)
@@ -506,10 +692,15 @@ def cmd_backtest(args, logger: logging.Logger):
                 cfg = StrategyConfig(
                     profile=str(getattr(args, 'profile', 'INTRADAY') or 'INTRADAY').upper(),
                     use_vision=not bool(getattr(args, 'no_vision', False)),
-                    use_yolo=not bool(getattr(args, 'no_yolo', False)),
+                    use_price_action=not bool(getattr(args, 'no_yolo', False)),
                     min_direction_confidence=float(getattr(args, 'min_confidence', 0.55)),
                     min_mtf_alignment=min_mtf_alignment if min_mtf_alignment is not None else StrategyConfig.min_mtf_alignment,
                 )
+                try:
+                    if cfg.tcn_weights and not Path(str(cfg.tcn_weights)).exists():
+                        cfg.tcn_weights = ''
+                except Exception:
+                    cfg.tcn_weights = ''
                 if cfg.profile == 'SCALP':
                     cfg.avoid_rollover = False
                 super().__init__(config=cfg, data_provider=data_provider, executor=executor, **kwargs)
@@ -519,21 +710,139 @@ def cmd_backtest(args, logger: logging.Logger):
             "tcn": BacktestNeuralStrategy,  # Alias for clarity
         }
         strategy_cls = strategy_map.get(args.strategy, NeuralHybridStrategy)
+
+        if bool(getattr(settings, 'ENFORCE_AUTHORITATIVE_PIPELINE', True)):
+            if not issubclass(strategy_cls, NeuralHybridStrategy):
+                logger.error("Authoritative pipeline enforced: backtest strategy must be NeuralHybridStrategy")
+                return 1
         
         # Run backtest
         profile = str(getattr(args, 'profile', 'INTRADAY') or 'INTRADAY').upper()
         base_tf = str(getattr(args, 'base_tf', '') or '').upper()
         if not base_tf:
+            try:
+                if HAS_MTF:
+                    base_tf = str(get_profile(profile).lower_tf.value)
+            except Exception:
+                base_tf = ''
+        if not base_tf:
             base_tf = 'M5' if profile == 'SCALP' else 'H1'
-        bot = BacktestBot(
-            data=df,
-            strategy_class=strategy_cls,
-            initial_balance=args.balance,
-            profile=profile,
-            base_timeframe=base_tf,
-        )
-        
-        results = bot.run()
+
+        # If user provides explicit MTF/HTF CSVs, run true 3TF backtest mode
+        # without relying on BacktestBot resampling.
+        if mtf_df is not None or htf_df is not None:
+            from trading.backtest import BacktestExecutor, BacktestConfig
+
+            try:
+                prof = get_profile(profile) if HAS_MTF and get_profile else None
+                if prof is None:
+                    raise ValueError("MTF profiles not available")
+
+                ltf_tf = str(prof.lower_tf.value).upper()
+                primary_tf = str(prof.primary_tf.value).upper()
+                higher_tf = str(prof.higher_tf.value).upper()
+
+                data_map = {
+                    ltf_tf: df,
+                }
+                if mtf_df is not None:
+                    data_map[primary_tf] = mtf_df
+                if htf_df is not None:
+                    data_map[higher_tf] = htf_df
+
+                logger.info(f"3TF backtest enabled: LTF={ltf_tf}, MTF={primary_tf}, HTF={higher_tf}")
+
+                class ThreeTFDataProvider:
+                    def __init__(self, base_tf: str, data_by_tf: Dict[str, pd.DataFrame]):
+                        self.base_tf = str(base_tf).upper()
+                        self.data_by_tf = {str(k).upper(): v.copy() for k, v in data_by_tf.items() if v is not None}
+                        for k, d0 in list(self.data_by_tf.items()):
+                            d0.columns = [str(c).lower().strip() for c in d0.columns]
+                            if 'time' in d0.columns:
+                                d0['time'] = pd.to_datetime(d0['time'])
+                                d0.sort_values('time', inplace=True)
+                                d0.reset_index(drop=True, inplace=True)
+                            self.data_by_tf[k] = d0
+                        self.current_idx = 0
+                        self.current_time: Optional[datetime] = None
+
+                    def get_ohlcv(self, symbol: str, timeframe: str = "", count: int = 200) -> pd.DataFrame:
+                        tf = str(timeframe or self.base_tf).upper()
+                        d0 = self.data_by_tf.get(tf)
+                        if d0 is None or d0.empty:
+                            return pd.DataFrame()
+
+                        d = d0
+                        if self.current_time is not None and 'time' in d.columns:
+                            try:
+                                d = d.loc[d['time'] <= pd.Timestamp(self.current_time)]
+                            except Exception:
+                                d = d0
+                        out = d.tail(int(count)).copy()
+                        out.columns = [str(c).lower().strip() for c in out.columns]
+                        return out
+
+                base_df = data_map.get(base_tf.upper(), df)
+                provider = ThreeTFDataProvider(base_tf=base_tf, data_by_tf=data_map)
+                executor = BacktestExecutor(config=BacktestConfig(initial_balance=args.balance))
+                strategy = strategy_cls(data_provider=provider, executor=executor)
+                if hasattr(strategy, 'initialize') and not getattr(strategy, '_initialized', False):
+                    try:
+                        strategy.initialize(starting_balance=float(args.balance))
+                    except Exception:
+                        pass
+
+                window_size = 100
+                signals_out = []
+                for i in range(window_size, len(base_df)):
+                    provider.current_idx = i
+                    try:
+                        ts = None
+                        if 'time' in base_df.columns:
+                            ts = pd.to_datetime(base_df.iloc[i]['time']).to_pydatetime()
+                        provider.current_time = ts
+                    except Exception:
+                        provider.current_time = None
+
+                    ltf_window = provider.get_ohlcv(getattr(args, 'symbol', 'EURUSD'), timeframe=base_tf, count=window_size)
+                    if ltf_window is None or ltf_window.empty:
+                        continue
+                    try:
+                        exec_ts = ltf_window['time'].iloc[-1] if 'time' in ltf_window.columns else None
+                        executor.update_price(float(ltf_window['close'].iloc[-1]), time=exec_ts)
+                    except Exception:
+                        executor.update_price(float(ltf_window['close'].iloc[-1]))
+
+                    sig = strategy.on_bar(ltf_window)
+                    try:
+                        signals_out.append({'time': ltf_window['time'].iloc[-1], 'close': ltf_window['close'].iloc[-1], 'signal': sig})
+                    except Exception:
+                        signals_out.append({'time': None, 'close': None, 'signal': sig})
+
+                try:
+                    if hasattr(executor, 'close_all_positions'):
+                        executor.close_all_positions()
+                except Exception:
+                    pass
+
+                results = {
+                    'trades': executor.get_trade_history(),
+                    'final_balance': executor.balance,
+                    'signals': signals_out,
+                }
+            except Exception as e:
+                logger.error(f"3TF backtest error: {e}", exc_info=True)
+                return 1
+        else:
+            bot = BacktestBot(
+                data=df,
+                strategy_class=strategy_cls,
+                initial_balance=args.balance,
+                profile=profile,
+                base_timeframe=base_tf,
+            )
+
+            results = bot.run()
         
         # Print results
         print("\n" + "=" * 60)
@@ -608,78 +917,61 @@ def cmd_train(args, logger: logging.Logger):
         return 0
     
     try:
-        if model == "vit":
-            from training.train_vit import train_classifier, maybe_build_cache, get_args as get_vit_args
+        if model == "walk-forward" or model == "wf":
+            # Walk-forward training for MH-TCN
+            from training.walk_forward_trainer import WalkForwardTrainer, WalkForwardConfig
             
-            # Build cache and train
-            device = "cuda" if __import__("torch").cuda.is_available() else "cpu"
-            cache = maybe_build_cache(args.data_dir, args.cache_path or "./dataset_cache.pt", device)
+            if not args.data:
+                logger.error("Walk-forward training requires --data path to OHLCV CSV")
+                return 1
             
-            # Create args-like object for training
-            class VitArgs:
-                pass
-            
-            vit_args = VitArgs()
-            vit_args.data_dir = args.data_dir
-            vit_args.batch_size = args.batch_size
-            vit_args.num_epochs = args.epochs
-            vit_args.lr = args.lr
-            vit_args.weight_decay = 0.05
-            vit_args.dropout = 0.2
-            vit_args.label_smoothing = 0.1
-            vit_args.mixup_alpha = 0.2
-            vit_args.patience = 10
-            vit_args.save_dir = args.save_dir or "./checkpoints_vit"
-            vit_args.cache_path = args.cache_path or "./dataset_cache.pt"
-            vit_args.device = device
-            
-            train_classifier(
-                cache["train_x"], cache["train_y"],
-                cache["val_x"], cache["val_y"],
-                cache["num_classes"], vit_args
+            config = WalkForwardConfig(
+                profile=str(getattr(args, 'profile', 'INTRADAY') or 'INTRADAY').upper(),
+                epochs_per_fold=args.epochs,
+                output_dir=args.save_dir or 'models/weights/walk_forward',
             )
+            
+            import pandas as pd
+            df = pd.read_csv(args.data)
+            
+            trainer = WalkForwardTrainer(config)
+            results = trainer.run(df)
+            
+            best_model = trainer.get_best_model_path()
+            logger.info(f"Walk-forward training complete. Best model: {best_model}")
+            logger.info(f"Average F1: {sum(r.test_f1 for r in results) / len(results):.4f}")
         
-        elif model == "vit-finetune":
-            from training.finetune_vit import train
+        elif model == "mhtcn" or model == "tcn":
+            # MH-TCN training (standard or walk-forward)
+            logger.info("For MH-TCN training, use 'walk-forward' mode for proper validation:")
+            logger.info("  python main.py train walk-forward --data <path> --profile INTRADAY")
+            logger.info("")
+            logger.info("Or for quick single-fold training:")
             
-            class FTArgs:
-                pass
+            from training.walk_forward_trainer import WalkForwardTrainer, WalkForwardConfig
             
-            ft_args = FTArgs()
-            ft_args.data_dir = args.data_dir
-            ft_args.batch_size = args.batch_size
-            ft_args.num_epochs = args.epochs
-            ft_args.lr_head = args.lr
-            ft_args.lr_backbone = args.lr / 100
-            ft_args.weight_decay = 0.01
-            ft_args.unfreeze_blocks = 4
-            ft_args.dropout = 0.1
-            ft_args.label_smoothing = 0.1
-            ft_args.patience = 7
-            ft_args.warmup_epochs = 2
-            ft_args.save_dir = args.save_dir or "./checkpoints_vit_finetuned"
-            ft_args.num_workers = 4
-            ft_args.device = "cuda" if __import__("torch").cuda.is_available() else "cpu"
-            ft_args.resume = None
+            if not args.data:
+                logger.error("MH-TCN training requires --data path to OHLCV CSV")
+                return 1
             
-            train(ft_args)
-        
-        elif model == "fusion":
-            from training.train_fusion import train_fusion_model
-            
-            train_fusion_model(
-                data_path=args.data,
-                weights_dir=args.save_dir or "models/weights",
-                epochs=args.epochs,
-                batch_size=args.batch_size,
-                learning_rate=args.lr,
+            # Single fold training (quick mode)
+            config = WalkForwardConfig(
+                profile=str(getattr(args, 'profile', 'INTRADAY') or 'INTRADAY').upper(),
+                epochs_per_fold=args.epochs,
+                train_window=10000,
+                test_window=2000,
+                step_size=100000,  # Large step = single fold
+                output_dir=args.save_dir or 'models/weights',
             )
-        
-        elif model == "yolo":
-            from training.train_yolo import model as yolo_model
-            logger.info("YOLO training started via ultralytics...")
-            # Note: train_yolo.py runs directly, this is informational
-            logger.info("Run: python training/train_yolo.py directly for full control")
+            
+            import pandas as pd
+            df = pd.read_csv(args.data)
+            
+            trainer = WalkForwardTrainer(config)
+            results = trainer.run(df)
+            
+            best_model = trainer.get_best_model_path()
+            logger.info(f"Training complete. Model saved to: {best_model}")
         
         elif model == "trend":
             from training.train_trend_classifier import main as train_trend_main
@@ -698,7 +990,9 @@ def cmd_train(args, logger: logging.Logger):
         
         else:
             logger.error(f"Unknown model: {model}")
-            logger.info("Available models: tcn, vit, vit-finetune, fusion, yolo, trend")
+            logger.info("Available models: walk-forward, wf, mhtcn, tcn, trend")
+            logger.info("")
+            logger.info("Recommended: python main.py train walk-forward --data <path> --profile INTRADAY")
             return 1
         
         logger.info("✅ Training complete!")
@@ -725,7 +1019,8 @@ def cmd_predict(args, logger: logging.Logger):
     try:
         import pandas as pd
         import torch
-        from inference.predictor import HybridPredictor, RiskAwareTCNPredictor
+        from inference.predictor import HybridPredictor, RiskAwareTCNPredictor, PredictorConfig
+        from utils.config import settings
 
         # Load data
         if args.data:
@@ -752,13 +1047,20 @@ def cmd_predict(args, logger: logging.Logger):
 
         # Run prediction
         if args.simple:
+            default_weights = str(Path(getattr(settings, 'WEIGHTS_DIR', 'models/weights')) / 'multihead_tcn_INTRADAY.pth')
             predictor = RiskAwareTCNPredictor(
-                weights_path=args.weights or "models/weights/tcn_best.pt"
+                weights_path=args.weights or default_weights
             )
         else:
-            predictor = HybridPredictor(
-                weights_dir=args.weights or "models/weights"
+            weights_dir = Path(getattr(settings, 'WEIGHTS_DIR', 'models/weights'))
+            profile = str(getattr(args, 'profile', 'INTRADAY') or 'INTRADAY').upper()
+            cfg = PredictorConfig(
+                profile=profile,
+                use_vision=False,
+                use_price_action=False,
             )
+            tcn_weights = args.weights or str(weights_dir / 'multihead_tcn_INTRADAY.pth')
+            predictor = HybridPredictor(config=cfg, tcn_weights=tcn_weights)
 
         result = predictor.predict(df)
 
@@ -899,7 +1201,9 @@ Examples:
   %(prog)s multi --no-scalp                       # Intraday + Swing only
   %(prog)s multi --mock                           # Test with mock connector
   %(prog)s live --symbol EURUSD --timeframe H1    # Single strategy mode
+  %(prog)s fetch-data --symbol EURUSD --timeframes H1,H4 --bars 20000
   %(prog)s backtest --data data/EURUSD_H1.csv
+  %(prog)s alpha-backtest --data data/EURUSD_H1.csv --layer alpha_only
   %(prog)s train tcn --epochs 50
   %(prog)s predict --symbol EURUSD
   %(prog)s generate vit --synthetic --samples 10000
@@ -963,6 +1267,18 @@ Examples:
         description="Backtest strategy on historical OHLCV data",
     )
     bt_parser.add_argument("--data", required=True, help="Path to OHLCV CSV file")
+    bt_parser.add_argument(
+        "--data-mtf",
+        type=str,
+        default=None,
+        help="Optional MTF CSV path (profile primary TF, e.g. M15 for SCALP, H1 for INTRADAY, H4 for SWING)",
+    )
+    bt_parser.add_argument(
+        "--data-htf",
+        type=str,
+        default=None,
+        help="Optional HTF CSV path (profile higher TF, e.g. H1 for SCALP, H4 for INTRADAY, D1 for SWING)",
+    )
     bt_parser.add_argument("--strategy", default="neural", help="Strategy (neural, tcn)")
     bt_parser.add_argument("--balance", type=float, default=10000.0, help="Initial balance")
     bt_parser.add_argument(
@@ -997,6 +1313,44 @@ Examples:
         help="Minimum multi-timeframe alignment (0-1). If omitted, uses strategy profile default.",
     )
     bt_parser.add_argument("--output", type=str, help="Save results to JSON file")
+
+    # -------------------------------------------------------------------------
+    # ALPHA FACTORY BACKTEST (SEPARATE)
+    # -------------------------------------------------------------------------
+    ab_parser = subparsers.add_parser(
+        "alpha-backtest",
+        help="Run Alpha Factory backtest on historical data",
+        description="Run the Alpha Factory layered backtest separately from the ML strategy backtest",
+    )
+    ab_parser.add_argument("--data", required=True, help="Path to OHLCV CSV file")
+    ab_parser.add_argument(
+        "--layer",
+        type=str,
+        default="alpha_only",
+        help="Layer to run (alpha_only, alpha_execution, alpha_risk, full_system)",
+    )
+    ab_parser.add_argument(
+        "--max-bars",
+        type=int,
+        help="Optional cap on number of candles (use most recent N) for faster backtests",
+    )
+
+    # -------------------------------------------------------------------------
+    # FETCH-DATA (MT5 -> external assets)
+    # -------------------------------------------------------------------------
+    fd_parser = subparsers.add_parser(
+        "fetch-data",
+        help="Fetch historical data from MT5 and save to external assets folder",
+        description="Fetch OHLCV from MT5 and write CSVs under settings.ASSETS_DIR/data/mt5 (outside repo)",
+    )
+    fd_parser.add_argument("--symbol", default="EURUSD", help="Symbol to fetch")
+    fd_parser.add_argument(
+        "--timeframes",
+        type=str,
+        default="H1",
+        help="Comma-separated timeframes (e.g. M15,H1,H4)",
+    )
+    fd_parser.add_argument("--bars", type=int, default=50000, help="Number of bars per timeframe")
     
     # -------------------------------------------------------------------------
     # TRAIN
@@ -1004,22 +1358,25 @@ Examples:
     train_parser = subparsers.add_parser(
         "train",
         help="Train a model",
-        description="Train ML models (TCN, ViT, Fusion, YOLO, Trend)",
+        description="Train ML models (MH-TCN with walk-forward validation, Trend classifier)",
     )
     train_parser.add_argument(
         "model",
-        choices=["tcn", "vit", "vit-finetune", "fusion", "yolo", "trend"],
-        help="Model to train",
+        choices=["walk-forward", "wf", "mhtcn", "tcn", "trend"],
+        help="Model to train (recommended: walk-forward for MH-TCN with proper validation)",
     )
     train_parser.add_argument("--data", type=str, help="Path to training data CSV")
-    train_parser.add_argument("--data-dir", type=str, help="Path to dataset directory (for ViT)")
+    train_parser.add_argument("--data-dir", type=str, help="Path to dataset directory")
     train_parser.add_argument("--save-dir", type=str, help="Directory to save weights")
     train_parser.add_argument("--epochs", type=int, default=50, help="Training epochs")
     train_parser.add_argument("--batch-size", type=int, default=64, help="Batch size")
     train_parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate")
     train_parser.add_argument("--seq-len", type=int, default=60, help="Sequence length (TCN)")
-    train_parser.add_argument("--cache-path", type=str, help="Feature cache path (ViT)")
+    train_parser.add_argument("--cache-path", type=str, help="Feature cache path")
     train_parser.add_argument("--synthetic", action="store_true", help="Use synthetic data (trend)")
+    train_parser.add_argument("--profile", type=str, default="INTRADAY", 
+                              choices=["SCALP", "INTRADAY", "SWING"],
+                              help="Trading profile for MH-TCN training")
     
     # -------------------------------------------------------------------------
     # PREDICT
@@ -1103,6 +1460,8 @@ def main():
         "multi": cmd_multi_style,
         "live": cmd_live,
         "backtest": cmd_backtest,
+        "alpha-backtest": cmd_alpha_backtest,
+        "fetch-data": cmd_fetch_data,
         "train": cmd_train,
         "predict": cmd_predict,
         "generate": cmd_generate,

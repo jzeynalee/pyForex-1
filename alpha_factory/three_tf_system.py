@@ -143,7 +143,7 @@ class ThreeTFLogic:
             if snapshot_sign != 0 and snapshot_sign != bias_sign:
                 return MTFDecision(False, 0.0, f"Structure ({snapshot_sign}) contradicts HTF {htf.bias}")
 
-        return MTFDecision(True, 0.25, "Structure Aligned")
+        return MTFDecision(True, 0.20, "Structure Aligned")
 
     @staticmethod
     def ltf_trigger(snapshot: FeatureSnapshot, htf: HTFDecision, mtf: MTFDecision) -> LTFSignal:

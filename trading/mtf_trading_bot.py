@@ -21,6 +21,7 @@ from trading.risk_manager import RiskManager, RiskConfig
 from trading.mtf_data_provider import MTFDataProvider
 from trend_detection.mtf_trend_detector import MTFTrendDetector
 from utils.mtf_config import get_profile
+from utils.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +71,10 @@ class MTFTradingBot:
         connector: Optional[Any] = None,
         ml_model: Optional[Any] = None,
     ):
+        if bool(getattr(settings, 'ENFORCE_AUTHORITATIVE_PIPELINE', True)):
+            raise RuntimeError(
+                "Authoritative pipeline enforced: MTFTradingBot is disabled (uses legacy trading.risk_manager path)"
+            )
         self.config = config or MTFBotConfig()
         self.ml_model = ml_model
         

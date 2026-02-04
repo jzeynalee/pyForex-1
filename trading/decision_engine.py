@@ -138,16 +138,16 @@ class DecisionEngineConfig:
     # Trading profile
     profile: str = 'INTRADAY'
     
-    # Confidence thresholds
-    min_direction_confidence: float = 0.55
-    min_meta_score: float = 0.5
-    min_mtf_alignment: float = 0.6
+    # Confidence thresholds - RAISED for better trade quality
+    min_direction_confidence: float = 0.65  # Was 0.55
+    min_meta_score: float = 0.60            # Was 0.5
+    min_mtf_alignment: float = 0.70         # Was 0.6
 
     use_meta_labeling: bool = True
     
-    # Risk parameters
-    base_risk_percent: float = 1.0
-    min_risk_reward: float = 1.5
+    # Risk parameters - TIGHTENED
+    base_risk_percent: float = 0.5   # Was 1.0
+    min_risk_reward: float = 2.0     # Was 1.5
     max_leverage: float = 10.0
     
     # Regime restrictions
@@ -156,11 +156,11 @@ class DecisionEngineConfig:
     
     # Capital protection settings (Phase 5)
     enable_capital_protection: bool = True
-    max_daily_loss_pct: float = 3.0
-    max_weekly_loss_pct: float = 6.0
-    max_drawdown_pct: float = 10.0
-    max_consecutive_losses: int = 5
-    cooldown_minutes: int = 30
+    max_daily_loss_pct: float = 2.0   # Was 3.0 - tighter daily limit
+    max_weekly_loss_pct: float = 5.0  # Was 6.0 - tighter weekly limit
+    max_drawdown_pct: float = 8.0     # Was 10.0 - tighter drawdown limit
+    max_consecutive_losses: int = 4   # Was 5
+    cooldown_minutes: int = 60        # Was 30 - longer cooldown
 
     # Hard-rules controls
     avoid_rollover: bool = True

@@ -24,6 +24,8 @@ from threading import Thread, Event
 from queue import Queue, Empty
 import pandas as pd
 
+from utils.config import settings
+
 from trading.style_config import (
     TradingStyle, StyleConfig, OrchestratorConfig,
     get_all_required_timeframes, get_timeframe_minutes,

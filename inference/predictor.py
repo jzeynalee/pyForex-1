@@ -71,8 +71,8 @@ class PredictorConfig:
     profile: str = "INTRADAY"       # 'SCALP', 'INTRADAY', 'SWING'
     use_risk_heads: bool = True     # Enable volatility/quantile heads
     
-    # Vision
-    use_vision: bool = True
+    # Vision - DISABLED by default (weak signal, adds latency)
+    use_vision: bool = False
     image_size: int = 224
     
     # Price Action
@@ -81,8 +81,8 @@ class PredictorConfig:
     # Fusion
     fusion_type: str = "gated"      # 'gated', 'simple', 'attention'
     
-    # Inference
-    confidence_threshold: float = 0.55
+    # Inference - RAISED thresholds for better trade quality
+    confidence_threshold: float = 0.65  # Was 0.55
 
 
 def get_device(device_str: str) -> torch.device:
@@ -145,14 +145,7 @@ class RiskAwareTCNPredictor:
             logger.info("Using MultiHeadTCN with risk outputs")
             
         except ImportError:
-            # Fallback to standard TCN
-            try:
-                from models.tcn import TCNModel
-                self.model = TCNModel.from_profile(self.config.profile).to(self.device)
-                self._use_risk_heads = False
-                logger.info("Using standard TCN (no risk heads)")
-            except ImportError:
-                raise ImportError("No TCN model available. Install risk_management or models.tcn")
+            raise ImportError("MultiHeadTCN not available. Ensure risk_management.phase1_predictive.tcn_backbone is installed.")
     
     def load_weights(self, path: str):
         """Load model weights from checkpoint.
@@ -218,61 +211,10 @@ class RiskAwareTCNPredictor:
                     logger.warning(f"Could not reinitialize MultiHeadTCN: {e}")
         
         if is_simple_tcn and self._use_risk_heads:
-            # Checkpoint is from simple TCN but we loaded MultiHeadTCN - switch models
-            logger.info("Checkpoint is from simple TCN - switching model architecture")
-            try:
-                from models.tcn import TCNModel
-                # Get input_dim from checkpoint config if available
-                input_dim = 5
-                hidden_dim = 64
-
-                if 'config' in checkpoint and isinstance(checkpoint['config'], dict):
-                    ckpt_cfg = checkpoint['config']
-                    if isinstance(ckpt_cfg.get('model'), dict):
-                        input_dim = ckpt_cfg.get('model', {}).get('input_dim', input_dim)
-                        hidden_dim = ckpt_cfg.get('model', {}).get('hidden_dim', hidden_dim)
-                    else:
-                        input_dim = ckpt_cfg.get('input_dim', input_dim)
-                        hidden_dim = ckpt_cfg.get('hidden_dim', hidden_dim)
-
-                # Infer from state dict if config is missing/wrong.
-                try:
-                    conv_candidates = [
-                        k for k in state_keys
-                        if 'tcn.network.0.conv1' in k and ('weight' in k or 'original' in k)
-                    ]
-                    if conv_candidates:
-                        # Prefer weight_norm's vector parameter (original1), not the scale (original0).
-                        preferred = None
-                        for k in conv_candidates:
-                            if k.endswith('original1'):
-                                preferred = k
-                                break
-                        if preferred is None:
-                            for k in conv_candidates:
-                                if k.endswith('.weight'):
-                                    preferred = k
-                                    break
-                        if preferred is None:
-                            preferred = conv_candidates[0]
-
-                        w = state_dict[preferred]
-                        if hasattr(w, 'shape') and len(w.shape) >= 2:
-                            hidden_dim = int(w.shape[0])
-                            input_dim = int(w.shape[1])
-                except Exception:
-                    pass
-
-                self.model = TCNModel(
-                    input_dim=input_dim,
-                    hidden_dim=hidden_dim,
-                    num_layers=5,
-                    num_classes=3
-                ).to(self.device)
-                self._use_risk_heads = False
-                logger.info(f"Switched to simple TCNModel (input_dim={input_dim})")
-            except ImportError:
-                logger.error("Could not import TCNModel for fallback")
+            # Legacy checkpoint from old TCN - cannot load, warn user
+            logger.warning("Checkpoint is from legacy TCN format which is no longer supported.")
+            logger.warning("Please retrain using walk-forward training: python main.py train walk-forward --data <path>")
+            logger.warning("Model will use random initialization.")
         
         try:
             self.model.load_state_dict(state_dict)
@@ -563,62 +505,17 @@ class HybridPredictor:
         
         if self.config.use_price_action:
             self._init_price_action(price_action_weights)
-        
-        if self.vit_model or self.price_action_model:
+
+        if (self.vit_model or self.price_action_model) and fusion_weights and Path(fusion_weights).exists():
             self._init_fusion(fusion_weights)
         
         logger.info("HybridPredictor initialized")
     
     def _init_vision(self, weights_path: Optional[str]):
-        """Initialize ViT model."""
-        try:
-            from models.vit import ViTChartClassifier
-            self.vit_model = ViTChartClassifier().to(self.device)
-            
-            if weights_path and Path(weights_path).exists():
-                checkpoint = torch.load(weights_path, map_location=self.device)
-                
-                # Handle different checkpoint structures
-                if isinstance(checkpoint, dict) and 'state_dict' in checkpoint:
-                    # Checkpoint from simplified training - contains raw timm state dict
-                    state_dict = checkpoint['state_dict']
-                    
-                    # Load raw timm weights into the vit sub-module
-                    try:
-                        self.vit_model.vit.load_state_dict(state_dict, strict=False)
-                        logger.info("Loaded raw timm weights into ViT model")
-                    except Exception as e:
-                        logger.warning(f"Failed to load raw timm weights: {e}")
-                        # Try loading as full model state dict
-                        try:
-                            self.vit_model.load_state_dict(state_dict, strict=False)
-                            logger.info("Loaded weights as full model state dict")
-                        except Exception as e2:
-                            logger.warning(f"Failed to load full model state dict: {e2}")
-                            logger.warning("ViT model will use random weights")
-                
-                elif isinstance(checkpoint, dict):
-                    # Direct state dict
-                    try:
-                        # Try loading into vit sub-module first (raw timm weights)
-                        self.vit_model.vit.load_state_dict(checkpoint, strict=False)
-                        logger.info("Loaded direct weights into ViT sub-module")
-                    except Exception as e:
-                        # Try loading as full model
-                        try:
-                            self.vit_model.load_state_dict(checkpoint, strict=False)
-                            logger.info("Loaded direct weights as full model")
-                        except Exception as e2:
-                            logger.warning(f"Failed to load direct weights: {e2}")
-                            logger.warning("ViT model will use random weights")
-                else:
-                    logger.warning("Unknown checkpoint structure for ViT")
-                    
-            self.vit_model.eval()
-            logger.info("ViT model initialized")
-        except (ImportError, Exception) as e:
-            logger.warning(f"Could not load ViT: {e}")
-            self.vit_model = None
+        """Initialize ViT model - DISABLED in v2.0."""
+        # ViT has been removed in v2.0 due to weak performance
+        logger.info("ViT model disabled in v2.0 - using MH-TCN + Price Action only")
+        self.vit_model = None
     
     def _init_price_action(self, weights_path: Optional[str]):
         """Initialize Price Action pattern detector."""

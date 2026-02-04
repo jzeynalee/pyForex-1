@@ -14,7 +14,8 @@ This module implements:
 import pandas as pd
 import numpy as np
 from typing import Dict, List, Tuple, Optional
-from scipy import stats, norm
+from scipy import stats
+from scipy.stats import norm
 from sklearn.preprocessing import StandardScaler
 import warnings
 import logging
@@ -161,7 +162,24 @@ def preprocess_for_stationarity(features: pd.DataFrame, target_col: str = 'close
             preprocessing_info[f'{target_col}_transformation'] = 'differenced_and_pct_change'
     
     # Check feature stationarity for key features
-    key_features = ['rsi', 'macd', 'atr', 'volume', 'sma_20', 'ema_12']
+    key_features = [
+    'rsi', 'connors_rsi', 'rsi_30', 'stoch_rsi', 'stoch_rsi_k', 'stoch_rsi_d',
+    'macd', 'macd_signal', 'atr', 'atr_ratio', 'atr_mean', 'atr_percent',
+    'volume', 'wma_20', 'vwma', 'ao', 'ultimate_osc', 'tsi', 'ulcer_index',
+    'sma_7', 'sma_20', 'sma_50', 'sma_100', 'sma_200', 'obv', 'obv_mean',
+    'ema_9', 'ema_12', 'ema_26', 'ema_50', 'ema_200', 'cmf',
+    'bb_middle', 'bb_bandwidth', 'bb_width', 'bb_upper', 'bb_lower', 'bb_mean', 'bb_pct', 
+    'smma', 'dema', 'tema', 'hma', 'lsma', 'mcginley', 'roc', 'roc_20', 'kama', 
+    'ppo', 'ppo_signal', 'ppo_hist', 'ppo_mean',
+    'smi', 'smi_signal', 'smi_ergodic', 'smi_ergodic_signal',
+    'di_plus', 'di_minus', 'adx', 'aroon_osc', 'aroon_up', 'aroon_down', 
+    'ichimoku_conversion', 'ichimoku_a', 'ichimoku_b', 'ichimoku_lagging', 'ichimoku_base', 
+    'psar', 'trix_signal', 'trix', 'mass_index', 'dpo', 'kst', 'kst_signal', 'williams_r',
+    'kc_middle', 'kc_upper', 'kc_lower', 'kc_width','kc_pct',
+    'dc_middle', 'dc_upper', 'dc_lower', 'dc_width','dc_pct',
+    'force_index_ema', 'force_index', 'eom', 'eom_sma', 'vpt', 'nvi', 'ad', 'mfi', 'vwap', 
+    'woodies_cci_signal', 'woodies_cci', 'cci', 'momentum_pct', 'momentum', 'chaikin_osc', 
+    'vortex_pos', 'vortex_neg', 'vortex_diff', 'bop']
     
     for feature in key_features:
         if feature in preprocessed.columns:

@@ -10,6 +10,8 @@ from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from enum import Enum
 import logging
+import json
+from pathlib import Path
 
 from .signal_quality_optimizer import SignalQualityOptimizer, SignalQualityConfig
 from .enhancements import ProbabilisticRegimeDetector
@@ -45,15 +47,17 @@ class DecisionSignal:
     stop_loss: float
     take_profit: float
     regime_probabilities: Dict[str, float] = None
+    decision_probabilities: Dict[str, float] = None
+    evidence_probabilities: Dict[str, float] = None
 
 
 @dataclass
 class DecisionConfig:
     """Configuration for decision making."""
-    # Thresholds
-    min_confidence: float = 0.6
-    min_causal_score: float = 0.3
-    max_risk_score: float = 0.7
+    # Thresholds - RAISED for better trade quality
+    min_confidence: float = 0.65   # Was 0.6
+    min_causal_score: float = 0.35 # Was 0.3
+    max_risk_score: float = 0.6    # Was 0.7 - more conservative
     
     # Market structure weights
     trend_weight: float = 0.3
@@ -61,23 +65,28 @@ class DecisionConfig:
     momentum_weight: float = 0.25
     causal_weight: float = 0.25
     
-    # Risk management
-    base_risk_percent: float = 1.0
-    max_risk_reward_ratio: float = 3.0
-    min_risk_reward_ratio: float = 1.5
+    # Risk management - TIGHTENED
+    base_risk_percent: float = 0.5  # Was 1.0
+    max_risk_reward_ratio: float = 4.0  # Was 3.0 - higher R:R
+    min_risk_reward_ratio: float = 2.0  # Was 1.5 - higher minimum
     
     # Regime detection
     trend_period: int = 20
     volatility_period: int = 14
     volume_threshold: float = 1.2
     trend_strength_threshold: float = 25.0  # ADX threshold for trend detection
+
+    # Probability engine
+    feature_stats_path: Optional[str] = None
+    causal_neutral_floor: float = 0.3
+    stability_decay_rate: float = 0.0
     
     # Enhanced features
     liquidity_adjustment: bool = False
     
     # Professional Signal Quality Optimization
     signal_quality_enabled: bool = True
-    confidence_gate_percentile: float = 70.0  # Trade only top 70% of signals
+    confidence_gate_percentile: float = 75.0  # Was 70.0 - trade only top 75%
     regime_execution_enabled: bool = True
 
 def _calculate_probabilistic_score(structure, feature, causal, probs) -> float:
@@ -98,6 +107,202 @@ def _calculate_probabilistic_score(structure, feature, causal, probs) -> float:
         score += regime_score * p
         
     return np.clip(score, -1, 1)
+
+
+def _sigmoid(x: float) -> float:
+    try:
+        return float(1.0 / (1.0 + np.exp(-x)))
+    except Exception:
+        return 0.5
+
+
+def _normalize_probs(probs: Dict[str, float]) -> Dict[str, float]:
+    total = float(sum(float(v) for v in probs.values()))
+    if total <= 0:
+        n = max(1, len(probs))
+        return {k: 1.0 / n for k in probs.keys()}
+    return {k: float(v) / total for k, v in probs.items()}
+
+
+def _noisy_or(probabilities: List[float]) -> float:
+    if not probabilities:
+        return 0.0
+    ps = [float(np.clip(p, 0.0, 1.0)) for p in probabilities]
+    return float(1.0 - np.prod([1.0 - p for p in ps]))
+
+
+def _stability_score_from_causality(causality_results: Dict) -> float:
+    stat = causality_results.get('stationarity_analysis') if isinstance(causality_results, dict) else None
+    if isinstance(stat, dict):
+        checked = float(stat.get('features_checked', 0) or 0)
+        stationary = float(stat.get('stationary_features', 0) or 0)
+        if checked > 0:
+            return float(np.clip(stationary / checked, 0.0, 1.0))
+    return 0.8
+
+
+def _regime_probability_from_swings(swing_points: List, features: pd.DataFrame, config: DecisionConfig) -> Dict[str, float]:
+    if features is None or features.empty or 'close' not in features.columns:
+        return {'bullish': 0.25, 'bearish': 0.25, 'neutral': 0.25, 'volatile': 0.25}
+
+    recent = features.tail(max(int(config.trend_period), 20))
+    closes = recent['close']
+    returns = closes.pct_change().dropna()
+    current_vol = float(returns.std()) if len(returns) > 5 else 0.0
+    rolling_vol = float(returns.rolling(window=max(int(config.trend_period), 20)).std().iloc[-1]) if len(returns) > 30 else current_vol
+    if not np.isfinite(rolling_vol) or rolling_vol <= 0:
+        rolling_vol = current_vol if current_vol > 0 else 1e-6
+    vol_z = (current_vol - rolling_vol) / (rolling_vol + 1e-12)
+
+    p_volatile = _sigmoid((vol_z - 1.5) * 2.0)
+
+    swings = [sp for sp in (swing_points or []) if getattr(sp, 'confirmed', True)]
+    if len(swings) < 2:
+        remaining = 1.0 - p_volatile
+        base = remaining / 3.0
+        return _normalize_probs({'volatile': p_volatile, 'bullish': base, 'bearish': base, 'neutral': base})
+
+    swings = sorted(swings, key=lambda s: getattr(s, 'index', 0))
+    a = swings[-2]
+    b = swings[-1]
+
+    try:
+        price_change = float(getattr(b, 'price', 0.0) - getattr(a, 'price', 0.0))
+        duration = float(max(1, int(getattr(b, 'index', 0)) - int(getattr(a, 'index', 0))))
+    except Exception:
+        price_change = float(closes.iloc[-1] - closes.iloc[0])
+        duration = float(max(1, len(closes) - 1))
+
+    slope = price_change / duration
+    vol_adj = slope / ((current_vol * float(closes.iloc[-1])) + 1e-12)
+
+    p_bull_raw = _sigmoid(vol_adj)
+    p_bear_raw = _sigmoid(-vol_adj)
+    p_neutral_raw = float(np.clip(1.0 - abs(p_bull_raw - p_bear_raw), 0.0, 1.0))
+
+    remaining = 1.0 - p_volatile
+    probs = {
+        'volatile': p_volatile,
+        'bullish': remaining * p_bull_raw,
+        'bearish': remaining * p_bear_raw,
+        'neutral': remaining * p_neutral_raw,
+    }
+    return _normalize_probs(probs)
+
+
+def _feature_evidence_probabilities(features: pd.DataFrame) -> Dict[str, Dict[str, float]]:
+    if features is None or features.empty:
+        return {}
+    row = features.iloc[-1]
+    out: Dict[str, Dict[str, float]] = {}
+
+    if 'rsi' in features.columns and np.isfinite(float(row.get('rsi'))):
+        rsi = float(row.get('rsi'))
+        score = (rsi - 50.0) / 10.0
+        out['rsi'] = {
+            'bullish': float(np.clip(_sigmoid(score), 0.3, 0.9)),
+            'bearish': float(np.clip(_sigmoid(-score), 0.3, 0.9)),
+        }
+
+    if 'macd' in features.columns and 'macd_signal' in features.columns:
+        macd = float(row.get('macd') or 0.0)
+        macd_sig = float(row.get('macd_signal') or 0.0)
+        diff = (macd - macd_sig)
+        score = float(np.tanh(diff * 5.0))
+        out['macd'] = {
+            'bullish': float(np.clip(0.5 + 0.4 * max(score, 0.0), 0.3, 0.9)),
+            'bearish': float(np.clip(0.5 + 0.4 * max(-score, 0.0), 0.3, 0.9)),
+        }
+
+    if 'close' in features.columns and 'sma_20' in features.columns and 'sma_50' in features.columns:
+        close = float(row.get('close') or 0.0)
+        sma20 = float(row.get('sma_20') or close)
+        sma50 = float(row.get('sma_50') or close)
+        bull = 0.7 if (close > sma20 > sma50) else (0.55 if close > sma20 else 0.4)
+        bear = 0.7 if (close < sma20 < sma50) else (0.55 if close < sma20 else 0.4)
+        out['ma_structure'] = {'bullish': float(bull), 'bearish': float(bear)}
+
+    if 'bb_upper' in features.columns and 'bb_lower' in features.columns and 'close' in features.columns:
+        close = float(row.get('close') or 0.0)
+        upper = float(row.get('bb_upper') or close)
+        lower = float(row.get('bb_lower') or close)
+        width = max(1e-12, upper - lower)
+        pos = (close - lower) / width
+        out['bb_position'] = {
+            'bullish': float(np.clip(0.3 + 0.6 * pos, 0.3, 0.9)),
+            'bearish': float(np.clip(0.3 + 0.6 * (1.0 - pos), 0.3, 0.9)),
+        }
+
+    if 'adx' in features.columns and np.isfinite(float(row.get('adx'))):
+        adx = float(row.get('adx'))
+        strength = float(np.clip((adx - 15.0) / 25.0, 0.0, 1.0))
+        out['trend_strength'] = {
+            'bullish': float(np.clip(0.4 + 0.4 * strength, 0.3, 0.9)),
+            'bearish': float(np.clip(0.4 + 0.4 * strength, 0.3, 0.9)),
+        }
+
+    return out
+
+
+def _load_feature_stats(path: Optional[str]) -> Dict[str, Dict[str, float]]:
+    if not path:
+        return {}
+    try:
+        p = Path(path)
+        if not p.exists():
+            return {}
+        data = json.loads(p.read_text(encoding='utf-8'))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _causal_confidence(feature_name: str, causality_results: Dict, neutral_floor: float) -> float:
+    base = float(np.clip(neutral_floor, 0.0, 1.0))
+    try:
+        ranking = causality_results.get('causal_ranking', {})
+        data = ranking.get(feature_name)
+        if isinstance(data, dict):
+            score = float(data.get('combined_score', 0.0) or 0.0)
+            score = float(np.clip(score, 0.0, 1.0))
+            return float(np.clip(base + (1.0 - base) * score, 0.0, 1.0))
+    except Exception:
+        pass
+    return base
+
+
+def _aggregate_evidence(regime_probs: Dict[str, float], evidence: Dict[str, Dict[str, float]],
+                        feature_stats: Dict[str, Dict[str, float]], causality_results: Dict,
+                        stability_score: float, config: DecisionConfig) -> Tuple[float, float, Dict[str, float]]:
+    bull_ps: List[float] = []
+    bear_ps: List[float] = []
+
+    for fname, probs in (evidence or {}).items():
+        p_bull = float(probs.get('bullish', 0.0) or 0.0)
+        p_bear = float(probs.get('bearish', 0.0) or 0.0)
+
+        stats = feature_stats.get(fname, {}) if isinstance(feature_stats, dict) else {}
+        hit_rate = float(stats.get('hit_rate', 1.0) or 1.0)
+        regime_spec = float(stats.get('regime_specificity', 1.0) or 1.0)
+        reliability = float(np.clip(hit_rate * regime_spec, 0.0, 1.0))
+
+        causal = _causal_confidence(fname, causality_results, config.causal_neutral_floor)
+
+        bull_ps.append(float(np.clip(p_bull * reliability * causal, 0.0, 1.0)))
+        bear_ps.append(float(np.clip(p_bear * reliability * causal, 0.0, 1.0)))
+
+    p_e_bull = _noisy_or(bull_ps)
+    p_e_bear = _noisy_or(bear_ps)
+
+    p_long = float(np.clip(float(regime_probs.get('bullish', 0.25)) * p_e_bull * stability_score, 0.0, 1.0))
+    p_short = float(np.clip(float(regime_probs.get('bearish', 0.25)) * p_e_bear * stability_score, 0.0, 1.0))
+
+    evidence_summary = {
+        'evidence_bullish': float(p_e_bull),
+        'evidence_bearish': float(p_e_bear),
+        'stability_score': float(stability_score),
+    }
+    return p_long, p_short, evidence_summary
 
 
 def decision_function(swing_points: List, features: pd.DataFrame, 
@@ -121,16 +326,32 @@ def decision_function(swing_points: List, features: pd.DataFrame,
     if config is None:
         config = DecisionConfig()
 
-    # 1. Soft Regime Detection
-    regime_detector = ProbabilisticRegimeDetector(window=config.trend_period)
-    regime_probs = regime_detector.compute_regime_probabilities(features)
-    
-    # Determine dominant regime for backward compatibility
+    regime_probs = _regime_probability_from_swings(swing_points, features, config)
     dominant_regime_str = max(regime_probs, key=regime_probs.get)
     regime = MarketRegime(dominant_regime_str)
-    
-    # 2. Analyze market regime
-    regime = _determine_market_regime(features, swing_points, config)
+
+    feature_stats = _load_feature_stats(getattr(config, 'feature_stats_path', None))
+    evidence = _feature_evidence_probabilities(features)
+    stability_score = _stability_score_from_causality(causality_results)
+    p_long, p_short, evidence_summary = _aggregate_evidence(
+        regime_probs, evidence, feature_stats, causality_results, stability_score, config
+    )
+
+    confidence = float(max(p_long, p_short))
+    combined_score = float(np.clip(p_long - p_short, -1.0, 1.0))
+
+    vol = 0.0
+    try:
+        if features is not None and not features.empty and 'close' in features.columns:
+            vol = float(features['close'].pct_change().tail(max(int(config.trend_period), 20)).std() or 0.0)
+    except Exception:
+        vol = 0.0
+    threshold = float(np.clip(float(config.min_confidence) + max(0.0, (vol - 0.002)) * 10.0, 0.0, 0.95))
+
+    if confidence >= threshold:
+        decision = DecisionType.BUY if p_long > p_short else DecisionType.SELL
+    else:
+        decision = DecisionType.HOLD
     
     # 3. Check for mean reversion opportunities in neutral/ranging markets
     if market_structure and regime == MarketRegime.NEUTRAL:
@@ -140,26 +361,9 @@ def decision_function(swing_points: List, features: pd.DataFrame,
         if mean_reversion_signal and mean_reversion_signal.confidence >= config.min_confidence * 0.8:
             return mean_reversion_signal
     
-    # 4. Evaluate market structure
     structure_score, structure_reasoning = _evaluate_market_structure(swing_points, config)
-    
-    # 5. Analyze feature signals
     feature_signals, feature_reasoning = _analyze_feature_signals(features, config)
-    
-    # 6. Evaluate causal relationships
     causal_score, causal_reasoning = _evaluate_causal_signals(causality_results, config)
-
-    # 6.1 Regime Weighted Score (Probabilistic)
-    # Instead of hard switching, blend weights based on regime probability
-    combined_score = _calculate_probabilistic_score(
-        structure_score, feature_signals, causal_score, regime_probs
-    )
-    
-    # 7. Combine all signals with regime-specific weighting
-    combined_score = _calculate_regime_weighted_score(structure_score, feature_signals, causal_score, regime)
-    
-    # 8. Determine decision
-    decision, confidence = _determine_decision(combined_score, regime, config)
     
     # 9. Apply Professional Signal Quality Optimization
     if config.signal_quality_enabled and signal_optimizer:
@@ -213,8 +417,9 @@ def decision_function(swing_points: List, features: pd.DataFrame,
         features, decision, regime, config
     )
     
-    # 11. Compile reasoning
     reasoning = structure_reasoning + feature_reasoning + causal_reasoning
+    reasoning.append(f"P_long={p_long:.3f} P_short={p_short:.3f} threshold={threshold:.3f}")
+    reasoning.append(f"RegimeProbs={{{', '.join([f'{k}:{v:.2f}' for k,v in regime_probs.items()])}}}")
     
     # 12. Identify key features
     key_features = _identify_key_features(causality_results, feature_signals)
@@ -232,7 +437,9 @@ def decision_function(swing_points: List, features: pd.DataFrame,
         expected_return=expected_return,
         stop_loss=stop_loss,
         take_profit=take_profit,
-        regime_probabilities=regime_probs
+        regime_probabilities=regime_probs,
+        decision_probabilities={'long': p_long, 'short': p_short},
+        evidence_probabilities=evidence_summary
     )
 
 

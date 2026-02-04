@@ -12,8 +12,6 @@ from datetime import datetime
 from dataclasses import dataclass
 
 from trading.mt5_connector import MT5Connector, MockMT5Connector
-from trading.risk_manager import RiskManager, RiskConfig
-from risk_management.risk_manager import RiskManager as RiskManagerV2, RiskManagerConfig
 from strategies.base import Strategy
 from strategies.neural_hybrid import NeuralHybridStrategy
 from utils.config import settings
@@ -58,7 +56,6 @@ class TradingBot:
         if self.connector is None:
             self._init_connector()
             
-        self._init_risk_manager()
         self._init_strategy(strategy_class)
         
         # State
@@ -87,26 +84,6 @@ class TradingBot:
                 magic_number=settings.MAGIC_NUMBER,
             )
     
-    def _init_risk_manager(self):
-        """Initialize risk management."""
-        # Get initial balance
-        initial_balance = 10000.0  # Default fallback
-        
-        if self.connector.connect():
-            account_info = self.connector.get_account_info()
-            if account_info:
-                initial_balance = account_info.balance
-        
-        # Create risk manager config
-        config = RiskManagerConfig(
-            profile=settings.TRADING_PROFILE if hasattr(settings, 'TRADING_PROFILE') else 'INTRADAY',
-            input_features=settings.INPUT_FEATURES if hasattr(settings, 'INPUT_FEATURES') else 64,
-        )
-        
-        self.risk_manager = RiskManagerV2(config=config)
-        
-        logger.info(f"Risk manager initialized with balance: {initial_balance:.2f}")
-    
     def _init_strategy(self, strategy_class: Optional[Type[Strategy]]):
         """Initialize trading strategy."""
         strategy_cls = strategy_class or NeuralHybridStrategy
@@ -114,7 +91,6 @@ class TradingBot:
         self.strategy = strategy_cls(
             data_provider=self.connector,
             executor=self.connector,
-            risk_manager=self.risk_manager,
         )
         
         logger.info(f"Strategy initialized: {self.strategy.name}")
@@ -146,10 +122,16 @@ class TradingBot:
             logger.error("Failed to connect. Exiting.")
             return
         
-        # Update risk manager with real balance
-        account_info = self.connector.get_account_info()
-        if account_info:
-            self.risk_manager.update_balance(account_info.balance)
+        # Initialize strategy with real balance (important for capital protection sizing)
+        account_info = None
+        try:
+            account_info = self.connector.get_account_info()
+        except Exception:
+            account_info = None
+        
+        if hasattr(self.strategy, 'initialize') and not getattr(self.strategy, '_initialized', False):
+            starting_balance = float(getattr(account_info, 'balance', 10000.0) or 10000.0)
+            self.strategy.initialize(starting_balance=starting_balance)
         
         logger.info(
             f"🚀 Bot started | Symbol: {self.config.symbol} | "
@@ -217,8 +199,8 @@ class TradingBot:
             stats = self.strategy.get_stats()
             logger.info(f"Strategy stats: {stats}")
         
-        risk_status = self.risk_manager.get_status()
-        logger.info(f"Risk status: {risk_status}")
+        if hasattr(self.strategy, 'get_protection_status'):
+            logger.info(f"Risk status: {self.strategy.get_protection_status()}")
         
         # Disconnect
         self.connector.disconnect()
@@ -232,7 +214,7 @@ class TradingBot:
             'iteration_count': self.iteration_count,
             'last_bar_time': str(self.last_bar_time) if self.last_bar_time else None,
             'strategy': self.strategy.get_stats() if hasattr(self.strategy, 'get_stats') else {},
-            'risk': self.risk_manager.get_status() if hasattr(self.risk_manager, 'get_status') else {},
+            'risk': self.strategy.get_protection_status() if hasattr(self.strategy, 'get_protection_status') else {},
             'positions': self.connector.get_open_positions(),
         }
 
@@ -261,13 +243,6 @@ class BacktestBot:
         # FIX: Create config object and pass it to executor
         config = BacktestConfig(initial_balance=initial_balance)
         self.executor = BacktestExecutor(config=config)
-        
-        # Create risk manager config
-        risk_config = RiskManagerConfig(
-            profile=self.profile,
-            input_features=64,
-        )
-        self.risk_manager = RiskManagerV2(config=risk_config)
         
         self.strategy = strategy_class(
             data_provider=self,  # Bot acts as data provider
