@@ -53,6 +53,34 @@ from .mhtcn_integration import (
     UnifiedThreeTFEngine
 )
 
+# Probabilistic Alpha Factory v2 (full probabilistic pipeline)
+from .probabilistic_alpha_factory import (
+    ProbabilisticAlphaFactory,
+    ProbabilisticConfig,
+    RegimeProbabilities,
+    FeatureProbability,
+    DecisionOutput,
+    FeatureMetadataStore,
+    create_probabilistic_alpha_factory
+)
+
+# Temporal Refinement (MH-TCN for probability sequences)
+from .mhtcn_temporal_refinement import (
+    TemporalRefinementProvider,
+    TemporalRefinementTCN,
+    TemporalRefinementConfig,
+    create_temporal_refinement_provider
+)
+
+# Calibration Monitoring
+from .calibration_monitor import (
+    CalibrationMonitor,
+    CalibrationMetrics,
+    OnlineCalibrationTracker,
+    FeatureAblationAnalyzer,
+    calculate_brier_skill_score
+)
+
 # Convenience imports
 __all__ = [
     'MarketData',
@@ -82,4 +110,23 @@ __all__ = [
     'MHTCNPrediction',
     'MHTCNFeatureProvider',
     'UnifiedThreeTFEngine',
+    # Probabilistic Alpha Factory v2
+    'ProbabilisticAlphaFactory',
+    'ProbabilisticConfig',
+    'RegimeProbabilities',
+    'FeatureProbability',
+    'DecisionOutput',
+    'FeatureMetadataStore',
+    'create_probabilistic_alpha_factory',
+    # Temporal Refinement
+    'TemporalRefinementProvider',
+    'TemporalRefinementTCN',
+    'TemporalRefinementConfig',
+    'create_temporal_refinement_provider',
+    # Calibration Monitoring
+    'CalibrationMonitor',
+    'CalibrationMetrics',
+    'OnlineCalibrationTracker',
+    'FeatureAblationAnalyzer',
+    'calculate_brier_skill_score',
 ]
