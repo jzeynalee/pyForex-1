@@ -62,6 +62,81 @@ sys.path.insert(0, str(PROJECT_ROOT))
 logger = logging.getLogger(__name__)
 
 
+def compute_optimal_threshold(
+    close_prices: np.ndarray,
+    horizon: int,
+    target_imbalance_ratio: float = 1.5,
+    search_range: Tuple[float, float] = (0.0001, 0.01),
+    num_steps: int = 20
+) -> float:
+    """
+    Dynamically compute the optimal direction threshold for balanced classes.
+    
+    This function searches for a threshold that produces the most balanced
+    distribution of Bear/Sideways/Bull labels.
+    
+    Args:
+        close_prices: Array of close prices
+        horizon: Number of bars ahead for direction calculation
+        target_imbalance_ratio: Maximum acceptable imbalance ratio (default 1.5:1)
+        search_range: (min_threshold, max_threshold) to search
+        num_steps: Number of threshold values to test
+    
+    Returns:
+        Optimal threshold value that minimizes class imbalance
+    """
+    n = len(close_prices)
+    
+    # Calculate future returns for all samples
+    future_returns = np.zeros(n)
+    for i in range(n - horizon):
+        future_returns[i] = (close_prices[i + horizon] - close_prices[i]) / close_prices[i]
+    
+    # Search for optimal threshold
+    min_thresh, max_thresh = search_range
+    thresholds = np.linspace(min_thresh, max_thresh, num_steps)
+    
+    best_threshold = 0.001  # Default fallback
+    best_balance_score = float('inf')
+    
+    for thresh in thresholds:
+        # Generate labels with this threshold
+        labels = np.ones(n, dtype=np.int64)  # Default: Sideways
+        labels[future_returns > thresh] = 2   # Bull
+        labels[future_returns < -thresh] = 0  # Bear
+        labels[-horizon:] = 1  # Last bars get Sideways
+        
+        # Count classes
+        bear_count = np.sum(labels == 0)
+        side_count = np.sum(labels == 1)
+        bull_count = np.sum(labels == 2)
+        
+        # Skip if any class has too few samples
+        min_count = min(bear_count, side_count, bull_count)
+        if min_count < 100:
+            continue
+        
+        # Calculate imbalance ratio
+        max_count = max(bear_count, side_count, bull_count)
+        imbalance_ratio = max_count / min_count
+        
+        # Calculate balance score (deviation from equal distribution)
+        expected = n / 3
+        balance_score = (
+            abs(bear_count - expected) + 
+            abs(side_count - expected) + 
+            abs(bull_count - expected)
+        ) / n
+        
+        # Prefer thresholds with low imbalance and good balance
+        if imbalance_ratio <= target_imbalance_ratio and balance_score < best_balance_score:
+            best_balance_score = balance_score
+            best_threshold = thresh
+    
+    logger.info(f"Computed optimal threshold: {best_threshold:.6f} (balance_score={best_balance_score:.4f})")
+    return best_threshold
+
+
 @dataclass
 class MHTCNTrainingConfig:
     """Configuration for MH-TCN training."""
@@ -86,7 +161,8 @@ class MHTCNTrainingConfig:
     # Labels
     direction_horizon: int = 12  # Bars ahead for direction label
     volatility_horizon: int = 12  # Bars for realized volatility
-    direction_threshold: float = 0.001  # Min move for bull/bear (0.1%)
+    direction_threshold: float = -1.0  # -1 means auto-compute from data
+    auto_threshold: bool = True  # Automatically compute optimal threshold
     
     # Triple barrier (optional)
     use_triple_barrier: bool = True
@@ -104,6 +180,9 @@ class MHTCNTrainingConfig:
     
     # Device
     device: str = "auto"
+    
+    # Class balancing
+    use_weighted_sampler: bool = True  # Use WeightedRandomSampler for balanced batches
 
 
 class MHTCNDataPreparer:
@@ -233,12 +312,30 @@ class MHTCNDataPreparer:
             0 = Bear (price drops > threshold)
             1 = Sideways (price within threshold)
             2 = Bull (price rises > threshold)
+        
+        If auto_threshold is enabled, the optimal threshold is computed
+        dynamically from the data to achieve balanced class distribution.
         """
         horizon = self.config.direction_horizon
-        threshold = self.config.direction_threshold
-        
         close = df['close'].values
         n = len(close)
+        
+        # Compute optimal threshold if auto_threshold is enabled
+        if self.config.auto_threshold or self.config.direction_threshold < 0:
+            threshold = compute_optimal_threshold(
+                close_prices=close,
+                horizon=horizon,
+                target_imbalance_ratio=1.5,
+                search_range=(0.0001, 0.01),
+                num_steps=30
+            )
+            # Update config with computed threshold for reference
+            self.config.direction_threshold = threshold
+        else:
+            threshold = self.config.direction_threshold
+        
+        logger.info(f"Using direction threshold: {threshold:.6f}")
+        
         labels = np.ones(n, dtype=np.int64)  # Default: Sideways
         
         for i in range(n - horizon):
@@ -253,7 +350,16 @@ class MHTCNDataPreparer:
         # Last `horizon` bars get Sideways label (no future data)
         labels[-horizon:] = 1
         
-        logger.info(f"Direction labels: Bear={np.sum(labels==0)}, Sideways={np.sum(labels==1)}, Bull={np.sum(labels==2)}")
+        # Log distribution
+        bear_count = np.sum(labels == 0)
+        side_count = np.sum(labels == 1)
+        bull_count = np.sum(labels == 2)
+        total = len(labels)
+        logger.info(
+            f"Direction labels: Bear={bear_count} ({100*bear_count/total:.1f}%), "
+            f"Sideways={side_count} ({100*side_count/total:.1f}%), "
+            f"Bull={bull_count} ({100*bull_count/total:.1f}%)"
+        )
         return labels
     
     def generate_volatility_labels(self, df: pd.DataFrame) -> np.ndarray:
@@ -505,8 +611,9 @@ class MHTCNTrainer:
         train_data: Dict[str, np.ndarray],
         val_data: Dict[str, np.ndarray]
     ) -> Tuple[DataLoader, DataLoader]:
-        """Create PyTorch DataLoaders."""
+        """Create PyTorch DataLoaders with optional weighted sampling."""
         from risk_management.phase1_predictive import RiskDataset
+        from torch.utils.data import WeightedRandomSampler
         
         train_dataset = RiskDataset(
             features=train_data['features'],
@@ -526,10 +633,37 @@ class MHTCNTrainer:
             outcome_labels=val_data.get('outcomes')
         )
         
+        # Create weighted sampler for balanced batches
+        sampler = None
+        shuffle = True
+        if self.config.use_weighted_sampler:
+            # Get direction labels for each sample in the dataset
+            # The dataset creates sequences, so we need to get the label for each sequence
+            seq_len = self.config.sequence_length
+            direction_labels = train_data['direction'][seq_len-1:]  # Labels aligned with sequences
+            direction_labels = direction_labels[:len(train_dataset)]  # Trim to dataset size
+            
+            # Compute sample weights (inverse of class frequency)
+            unique, counts = np.unique(direction_labels, return_counts=True)
+            class_weights = {cls: len(direction_labels) / (3 * count) for cls, count in zip(unique, counts)}
+            
+            # Assign weight to each sample based on its class
+            sample_weights = np.array([class_weights.get(int(lbl), 1.0) for lbl in direction_labels])
+            sample_weights = torch.from_numpy(sample_weights).float()
+            
+            sampler = WeightedRandomSampler(
+                weights=sample_weights,
+                num_samples=len(train_dataset),
+                replacement=True
+            )
+            shuffle = False  # Sampler handles shuffling
+            logger.info(f"Using WeightedRandomSampler for balanced batches")
+        
         train_loader = DataLoader(
             train_dataset,
             batch_size=self.config.batch_size,
-            shuffle=True,
+            shuffle=shuffle,
+            sampler=sampler,
             num_workers=0,
             pin_memory=True if self.device.type == 'cuda' else False,
             collate_fn=mhtcn_collate_fn
