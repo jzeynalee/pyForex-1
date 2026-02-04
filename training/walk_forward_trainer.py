@@ -37,6 +37,7 @@ class WalkForwardConfig:
     test_window: int = 1000        # Test window size
     step_size: int = 500           # Step between folds
     purge_gap: int = 50            # Gap between train/test to prevent leakage
+    val_split: float = 0.15        # Fraction of train window for validation
     
     # Training parameters
     epochs_per_fold: int = 30
@@ -544,13 +545,22 @@ class WalkForwardTrainer:
             test_start_time = df['time'].iloc[test_start] if 'time' in df.columns else datetime.now()
             test_end_time = df['time'].iloc[test_end - 1] if 'time' in df.columns else datetime.now()
             
-            # Create datasets
-            train_features = features[train_start:train_end]
-            train_labels = labels[train_start:train_end]
+            # Create datasets with proper train/val/test split
+            # Split training window into train and validation (val at the end to maintain temporal order)
+            train_features_full = features[train_start:train_end]
+            train_labels_full = labels[train_start:train_end]
+            
+            val_size = int(len(train_features_full) * self.config.val_split)
+            train_features = train_features_full[:-val_size] if val_size > 0 else train_features_full
+            train_labels = train_labels_full[:-val_size] if val_size > 0 else train_labels_full
+            val_features = train_features_full[-val_size:] if val_size > 0 else train_features_full[-100:]
+            val_labels = train_labels_full[-val_size:] if val_size > 0 else train_labels_full[-100:]
+            
             test_features = features[test_start:test_end]
             test_labels = labels[test_start:test_end]
             
             train_dataset = TimeSeriesDataset(train_features, train_labels, self.config.sequence_length)
+            val_dataset = TimeSeriesDataset(val_features, val_labels, self.config.sequence_length)
             test_dataset = TimeSeriesDataset(test_features, test_labels, self.config.sequence_length)
             
             if len(train_dataset) < 100 or len(test_dataset) < 50:
@@ -558,11 +568,12 @@ class WalkForwardTrainer:
                 continue
             
             train_loader = DataLoader(train_dataset, batch_size=self.config.batch_size, shuffle=True)
+            val_loader = DataLoader(val_dataset, batch_size=self.config.batch_size, shuffle=False)
             test_loader = DataLoader(test_dataset, batch_size=self.config.batch_size, shuffle=False)
             
-            # Create and train model
+            # Create and train model (use val_loader for early stopping, NOT test_loader)
             model = self.create_model(input_dim=features.shape[1])
-            train_loss, val_loss = self.train_fold(model, train_loader, test_loader, fold_idx)
+            train_loss, val_loss = self.train_fold(model, train_loader, val_loader, fold_idx)
             
             # Evaluate
             metrics = self.evaluate_fold(model, test_loader)
