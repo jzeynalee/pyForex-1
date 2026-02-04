@@ -322,11 +322,19 @@ class MHTCNDataPreparer:
         
         # Compute optimal threshold if auto_threshold is enabled
         if self.config.auto_threshold or self.config.direction_threshold < 0:
+            # Profile-specific search ranges based on typical price movements
+            profile_search_ranges = {
+                'SCALP': (0.00005, 0.0005),   # M5 data: smaller moves
+                'INTRADAY': (0.0001, 0.005),  # M15/H1 data: medium moves
+                'SWING': (0.001, 0.02),       # H4/D1 data: larger moves
+            }
+            search_range = profile_search_ranges.get(self.config.profile.upper(), (0.0001, 0.01))
+            
             threshold = compute_optimal_threshold(
                 close_prices=close,
                 horizon=horizon,
                 target_imbalance_ratio=1.5,
-                search_range=(0.0001, 0.01),
+                search_range=search_range,
                 num_steps=30
             )
             # Update config with computed threshold for reference
