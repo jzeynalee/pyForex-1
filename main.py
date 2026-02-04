@@ -942,36 +942,28 @@ def cmd_train(args, logger: logging.Logger):
             logger.info(f"Average F1: {sum(r.test_f1 for r in results) / len(results):.4f}")
         
         elif model == "mhtcn" or model == "tcn":
-            # MH-TCN training (standard or walk-forward)
-            logger.info("For MH-TCN training, use 'walk-forward' mode for proper validation:")
-            logger.info("  python main.py train walk-forward --data <path> --profile INTRADAY")
-            logger.info("")
-            logger.info("Or for quick single-fold training:")
-            
-            from training.walk_forward_trainer import WalkForwardTrainer, WalkForwardConfig
+            # Full MH-TCN training with all heads (direction, volatility, quantiles, outcomes)
+            from training.train_mhtcn import train_mhtcn
             
             if not args.data:
                 logger.error("MH-TCN training requires --data path to OHLCV CSV")
                 return 1
             
-            # Single fold training (quick mode)
-            config = WalkForwardConfig(
-                profile=str(getattr(args, 'profile', 'INTRADAY') or 'INTRADAY').upper(),
-                epochs_per_fold=args.epochs,
-                train_window=10000,
-                test_window=2000,
-                step_size=100000,  # Large step = single fold
+            profile = str(getattr(args, 'profile', 'INTRADAY') or 'INTRADAY').upper()
+            use_triple_barrier = not getattr(args, 'no_triple_barrier', False)
+            
+            results = train_mhtcn(
+                data_path=args.data,
+                profile=profile,
+                epochs=args.epochs,
+                batch_size=getattr(args, 'batch_size', 64) or 64,
+                learning_rate=getattr(args, 'learning_rate', 1e-3) or 1e-3,
                 output_dir=args.save_dir or 'models/weights',
+                use_triple_barrier=use_triple_barrier,
             )
             
-            import pandas as pd
-            df = pd.read_csv(args.data)
-            
-            trainer = WalkForwardTrainer(config)
-            results = trainer.run(df)
-            
-            best_model = trainer.get_best_model_path()
-            logger.info(f"Training complete. Model saved to: {best_model}")
+            logger.info(f"Training complete. Model saved to: {results['model_path']}")
+            logger.info(f"Test accuracy: {results['test_metrics'].get('direction_accuracy', 0):.4f}")
         
         elif model == "trend":
             from training.train_trend_classifier import main as train_trend_main
@@ -1377,6 +1369,10 @@ Examples:
     train_parser.add_argument("--profile", type=str, default="INTRADAY", 
                               choices=["SCALP", "INTRADAY", "SWING"],
                               help="Trading profile for MH-TCN training")
+    train_parser.add_argument("--no-triple-barrier", action="store_true",
+                              help="Disable triple-barrier outcome labels for MH-TCN training")
+    train_parser.add_argument("--learning-rate", type=float, default=1e-3,
+                              help="Learning rate (alias for --lr)")
     
     # -------------------------------------------------------------------------
     # PREDICT
