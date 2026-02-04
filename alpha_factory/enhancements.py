@@ -17,6 +17,7 @@ from typing import Dict, List, Tuple, Optional
 from scipy import stats
 from scipy.stats import norm
 from sklearn.preprocessing import StandardScaler
+from sklearn.feature_selection import mutual_info_regression
 import warnings
 import logging
 
@@ -161,39 +162,36 @@ def preprocess_for_stationarity(features: pd.DataFrame, target_col: str = 'close
             preprocessed[f'{target_col}_pct'] = preprocessed[target_col].pct_change()
             preprocessing_info[f'{target_col}_transformation'] = 'differenced_and_pct_change'
     
-    # Check feature stationarity for key features
-    key_features = [
-    'rsi', 'connors_rsi', 'rsi_30', 'stoch_rsi', 'stoch_rsi_k', 'stoch_rsi_d',
-    'macd', 'macd_signal', 'atr', 'atr_ratio', 'atr_mean', 'atr_percent',
-    'volume', 'wma_20', 'vwma', 'ao', 'ultimate_osc', 'tsi', 'ulcer_index',
-    'sma_7', 'sma_20', 'sma_50', 'sma_100', 'sma_200', 'obv', 'obv_mean',
-    'ema_9', 'ema_12', 'ema_26', 'ema_50', 'ema_200', 'cmf',
-    'bb_middle', 'bb_bandwidth', 'bb_width', 'bb_upper', 'bb_lower', 'bb_mean', 'bb_pct', 
-    'smma', 'dema', 'tema', 'hma', 'lsma', 'mcginley', 'roc', 'roc_20', 'kama', 
-    'ppo', 'ppo_signal', 'ppo_hist', 'ppo_mean',
-    'smi', 'smi_signal', 'smi_ergodic', 'smi_ergodic_signal',
-    'di_plus', 'di_minus', 'adx', 'aroon_osc', 'aroon_up', 'aroon_down', 
-    'ichimoku_conversion', 'ichimoku_a', 'ichimoku_b', 'ichimoku_lagging', 'ichimoku_base', 
-    'psar', 'trix_signal', 'trix', 'mass_index', 'dpo', 'kst', 'kst_signal', 'williams_r',
-    'kc_middle', 'kc_upper', 'kc_lower', 'kc_width','kc_pct',
-    'dc_middle', 'dc_upper', 'dc_lower', 'dc_width','dc_pct',
-    'force_index_ema', 'force_index', 'eom', 'eom_sma', 'vpt', 'nvi', 'ad', 'mfi', 'vwap', 
-    'woodies_cci_signal', 'woodies_cci', 'cci', 'momentum_pct', 'momentum', 'chaikin_osc', 
-    'vortex_pos', 'vortex_neg', 'vortex_diff', 'bop']
-    
-    for feature in key_features:
+    feature_candidates: List[str] = []
+    try:
+        exclude = {str(target_col), 'time'}
+        numeric_cols = [c for c in preprocessed.select_dtypes(include=[np.number]).columns if c not in exclude]
+
+        exclude_patterns = (
+            'timestamp', 'datetime', 'date', 'time',
+            'year', 'month', 'day', 'hour', 'minute', 'second',
+            'id', 'idx', 'index',
+            'session', 'bar', 'candle',
+        )
+
+        def _looks_like_metadata(col_name: str) -> bool:
+            c = str(col_name).strip().lower()
+            return any(p in c for p in exclude_patterns)
+
+        feature_candidates = [c for c in numeric_cols if not _looks_like_metadata(c)]
+    except Exception:
+        feature_candidates = [c for c in preprocessed.columns if c not in (target_col, 'time')]
+
+    for feature in feature_candidates:
         if feature in preprocessed.columns:
             stationarity = check_stationarity(preprocessed[feature])
             preprocessing_info[f'{feature}_stationarity'] = stationarity
-            
-            # Apply transformations if needed
-            if not stationarity['is_stationary']:
+
+            if not stationarity.get('is_stationary', True):
                 if feature in ['volume', 'atr']:
-                    # Log transform for positive values
                     preprocessed[f'{feature}_log'] = np.log1p(preprocessed[feature])
                     preprocessing_info[f'{feature}_transformation'] = 'log'
                 else:
-                    # Use differencing for other features
                     preprocessed[f'{feature}_diff'] = preprocessed[feature].diff()
                     preprocessing_info[f'{feature}_transformation'] = 'differenced'
     
@@ -202,6 +200,291 @@ def preprocess_for_stationarity(features: pd.DataFrame, target_col: str = 'close
     preprocessed = preprocessed.fillna(method='ffill').fillna(method='bfill')
     
     return preprocessed, preprocessing_info
+
+
+def compute_causality(features: pd.DataFrame, target_col: str, max_lag: int = 5) -> Dict:
+    filtered_features = _filter_trading_features(features, target_col)
+    logger.info(f"Analyzing causality for {len(filtered_features.columns)} features against {target_col}")
+
+    feature_cols = [col for col in filtered_features.columns if col != target_col]
+
+    correlation_results: Dict[str, Dict] = {}
+    mutual_info_results: Dict[str, Dict] = {}
+    lead_lag_results: Dict[str, Dict] = {}
+
+    logger.info("Computing correlations...")
+    for feature in feature_cols:
+        try:
+            df = filtered_features[[feature, target_col]].dropna()
+            if len(df) < 10:
+                continue
+
+            clean_feature = df[feature].values
+            clean_target = df[target_col].values
+            if np.std(clean_feature) == 0 or np.std(clean_target) == 0:
+                continue
+
+            pearson_corr, pearson_p = stats.pearsonr(clean_feature, clean_target)
+            spearman_corr, spearman_p = stats.spearmanr(clean_feature, clean_target)
+            kendall_corr, kendall_p = stats.kendalltau(clean_feature, clean_target)
+
+            correlation_results[feature] = {
+                'pearson_corr': str(pearson_corr),
+                'pearson_p_value': pearson_p,
+                'pearson_abs': str(abs(pearson_corr)),
+                'spearman_corr': spearman_corr,
+                'spearman_p_value': spearman_p,
+                'spearman_abs': abs(spearman_corr),
+                'kendall_corr': kendall_corr,
+                'kendall_p_value': kendall_p,
+                'kendall_abs': abs(kendall_corr),
+                'significant_pearson': str(pearson_p < 0.05),
+                'significant_spearman': str(spearman_p < 0.05),
+                'significant_kendall': str(kendall_p < 0.05),
+            }
+        except Exception as e:
+            logger.debug(f"Correlation analysis failed for {feature}: {e}")
+            continue
+
+    logger.info("Computing mutual information...")
+    for feature in feature_cols:
+        try:
+            df = filtered_features[[feature, target_col]].dropna()
+            if len(df) < 10:
+                continue
+
+            clean_feature = df[feature].values
+            clean_target = df[target_col].values
+            if np.std(clean_feature) == 0 or np.std(clean_target) == 0:
+                continue
+
+            mi_score = mutual_info_regression(clean_feature.reshape(-1, 1), clean_target, random_state=42)
+            max_possible_mi = min(np.log(len(df)), np.log(len(set(clean_feature))) + np.log(len(set(clean_target))))
+            normalized_mi = mi_score / max_possible_mi if max_possible_mi > 0 else 0
+
+            mutual_info_results[feature] = {
+                'mi_score': mi_score,
+                'normalized_mi': normalized_mi,
+                'rank': None,
+            }
+        except Exception as e:
+            logger.debug(f"Mutual information failed for {feature}: {e}")
+            continue
+
+    logger.info("Computing lead-lag relationships...")
+    for feature in feature_cols:
+        try:
+            df = filtered_features[[feature, target_col]].dropna()
+            if len(df) < 20:
+                continue
+
+            clean_feature = df[feature].values
+            clean_target = df[target_col].values
+            if np.std(clean_feature) == 0 or np.std(clean_target) == 0:
+                continue
+
+            correlations: List[float] = []
+            for lag in range(-max_lag, max_lag + 1):
+                if lag == 0:
+                    corr = np.corrcoef(clean_feature, clean_target)[0, 1]
+                elif lag > 0:
+                    corr = np.corrcoef(clean_feature[:-lag], clean_target[lag:])[0, 1] if len(clean_feature) > lag else 0
+                else:
+                    corr = np.corrcoef(clean_feature[abs(lag):], clean_target[:-abs(lag)])[0, 1] if len(clean_target) > abs(lag) else 0
+                correlations.append(corr)
+
+            best_lag = int(np.argmax(np.abs(correlations)) - max_lag)
+            best_correlation = float(correlations[best_lag + max_lag])
+
+            leads_target = best_lag < 0
+            lags_target = best_lag > 0
+
+            lead_lag_results[feature] = {
+                'best_lag': str(best_lag),
+                'best_correlation': best_correlation,
+                'best_abs_correlation': abs(best_correlation),
+                'all_correlations': correlations,
+                'leads_target': str(leads_target),
+                'lags_target': str(lags_target),
+                'lead_strength': abs(best_lag) if leads_target else 0,
+                'lag_strength': best_lag if lags_target else 0,
+            }
+        except Exception as e:
+            logger.debug(f"Lead-lag analysis failed for {feature}: {e}")
+            continue
+
+    causal_ranking: Dict[str, Dict] = {}
+    for feature in feature_cols:
+        if feature in correlation_results or feature in mutual_info_results or feature in lead_lag_results:
+            score = 0.0
+            methods = 0
+
+            if feature in correlation_results:
+                pearson_abs = float(correlation_results[feature]['pearson_abs'])
+                score += pearson_abs * 3
+                methods += 1
+            if feature in mutual_info_results:
+                score += float(mutual_info_results[feature]['normalized_mi']) * 2
+                methods += 1
+            if feature in lead_lag_results:
+                score += float(lead_lag_results[feature]['best_abs_correlation'])
+                methods += 1
+
+            if methods > 0:
+                causal_ranking[feature] = {
+                    'combined_score': score,
+                    'num_methods': methods,
+                    'granger_causality': {},
+                    'correlation_analysis': correlation_results.get(feature, {}),
+                    'mutual_information': mutual_info_results.get(feature, {}),
+                    'lead_lag_analysis': lead_lag_results.get(feature, {}),
+                }
+
+    sorted_features = sorted(causal_ranking.items(), key=lambda x: x[1]['combined_score'], reverse=True)
+    for rank, (feature, data) in enumerate(sorted_features, 1):
+        data['rank'] = rank
+
+    return {
+        'causal_ranking': dict(sorted_features),
+        'granger_causality': {},
+        'correlation_analysis': correlation_results,
+        'mutual_information': mutual_info_results,
+        'lead_lag_analysis': lead_lag_results,
+        'total_features_analyzed': len(feature_cols),
+        'target_column': target_col,
+    }
+
+
+def _filter_trading_features(features: pd.DataFrame, target_col: str) -> pd.DataFrame:
+    exclude_patterns = ['timestamp', 'time', 'date', 'year', 'month', 'id', 'index']
+
+    numeric_df = features.select_dtypes(include=[np.number])
+    variance_filter = numeric_df.std() > 1e-6
+    filtered_cols = numeric_df.columns[variance_filter].tolist()
+
+    final_cols: List[str] = []
+    for col in filtered_cols:
+        if col == target_col:
+            final_cols.append(col)
+            continue
+
+        try:
+            series = features[col].dropna()
+            if len(series) > 50:
+                acf = series.autocorr(lag=1)
+                if abs(acf) >= 0.99:
+                    continue
+        except Exception:
+            pass
+
+        if not any(p in col.lower() for p in exclude_patterns):
+            final_cols.append(col)
+
+    if len(final_cols) > 0:
+        valid_features = _apply_statistical_filters(features[final_cols], target_col)
+        return features[valid_features]
+    return features[[target_col]] if target_col in features.columns else features
+
+
+def _apply_statistical_filters(features: pd.DataFrame, target_col: str) -> List[str]:
+    valid_features: List[str] = []
+
+    for col in features.columns:
+        if col == target_col:
+            valid_features.append(col)
+            continue
+
+        series = features[col].dropna()
+        if len(series) < 50:
+            continue
+
+        try:
+            autocorr = series.autocorr(lag=1)
+            if abs(autocorr) > 0.99:
+                continue
+        except Exception:
+            continue
+
+        if series.var() < 1e-10:
+            continue
+
+        if target_col in features.columns:
+            try:
+                target_series = features[target_col].dropna()
+                aligned_data = pd.concat([series, target_series], axis=1).dropna()
+                if len(aligned_data) > 50:
+                    correlation = aligned_data.iloc[:, 0].corr(aligned_data.iloc[:, 1])
+                    if abs(correlation) < 0.01:
+                        continue
+            except Exception:
+                pass
+
+        valid_features.append(col)
+
+    return valid_features
+
+
+def get_top_causal_features(causality_results: Dict, top_n: int = 10) -> List[Dict]:
+    if 'causal_ranking' not in causality_results:
+        return []
+
+    top_features: List[Dict] = []
+    ranking = causality_results['causal_ranking']
+
+    for feature, data in list(ranking.items())[:top_n]:
+        feature_info = {
+            'feature': feature,
+            'rank': data.get('rank'),
+            'combined_score': data.get('combined_score'),
+            'num_methods': data.get('num_methods'),
+        }
+
+        for method in ['granger_causality', 'mutual_information', 'correlation_analysis', 'lead_lag_analysis']:
+            if method in causality_results and feature in causality_results[method]:
+                feature_info[method] = causality_results[method][feature]
+
+        top_features.append(feature_info)
+
+    return top_features
+
+
+def create_causal_network(causality_results: Dict, threshold: float = 0.05) -> Dict:
+    network = {
+        'nodes': [],
+        'edges': [],
+        'metadata': {
+            'threshold': threshold,
+            'total_nodes': 0,
+            'total_edges': 0,
+        },
+    }
+
+    if 'causal_ranking' in causality_results:
+        for feature, data in causality_results['causal_ranking'].items():
+            network['nodes'].append({
+                'id': feature,
+                'score': data.get('combined_score', 0.0),
+                'rank': data.get('rank'),
+                'methods': data.get('num_methods', 0),
+            })
+
+    for feature, data in causality_results.get('lead_lag_analysis', {}).items():
+        try:
+            if float(data.get('best_abs_correlation', 0.0)) > float(threshold):
+                edge_type = 'leads' if str(data.get('leads_target', 'False')) == 'True' else 'lags'
+                network['edges'].append({
+                    'source': feature,
+                    'target': str(causality_results.get('target_column', 'close')),
+                    'type': edge_type,
+                    'strength': float(data.get('best_abs_correlation', 0.0)),
+                    'lag': data.get('best_lag'),
+                })
+        except Exception:
+            continue
+
+    network['metadata']['total_nodes'] = len(network['nodes'])
+    network['metadata']['total_edges'] = len(network['edges'])
+    return network
 
 
 def compute_transfer_entropy(source: np.ndarray, target: np.ndarray, bins: int = 10) -> float:
@@ -265,8 +548,6 @@ def enhanced_causal_analysis(features: pd.DataFrame, target_col: str = 'close') 
     Returns:
         Enhanced causality results
     """
-    from .causal_analysis import compute_causality
-    
     # Preprocess for stationarity
     preprocessed_features, preprocessing_info = preprocess_for_stationarity(features, target_col)
     
