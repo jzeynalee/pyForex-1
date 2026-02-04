@@ -628,7 +628,8 @@ class MHTCNTrainer:
         test_loader = DataLoader(
             test_dataset,
             batch_size=self.config.batch_size,
-            shuffle=False
+            shuffle=False,
+            collate_fn=mhtcn_collate_fn
         )
         
         _, metrics = self.trainer.validate(test_loader)
