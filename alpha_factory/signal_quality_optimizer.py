@@ -39,7 +39,7 @@ class SignalQualityConfig:
     regime_multipliers: Dict[str, float] = None  # Size multipliers by regime
     
     # Feature Pruning
-    feature_pruning_enabled: bool = True
+    feature_pruning_enabled: bool = False
     min_feature_contribution: float = 0.05  # 5% minimum contribution
     
     # Signal Decay
