@@ -56,6 +56,8 @@ class Unified3TFConfig:
     max_open_trades: int = 2
     max_daily_trades: int = 5
     max_daily_loss_pct: float = 2.0
+    min_sl_pips: float = 8.0
+    max_lot: float = 1.0
     
     # Model paths
     weights_dir: str = 'models/weights'
@@ -73,6 +75,9 @@ class Unified3TFConfig:
         
         if self.profile.upper() in profile_tfs:
             self.htf, self.mtf, self.ltf = profile_tfs[self.profile.upper()]
+
+        if self.profile.upper() == 'SCALP':
+            self.max_lot = 0.3
 
 
 @dataclass
@@ -130,8 +135,60 @@ class Unified3TFStrategy(Strategy):
         self._daily_pnl = 0.0
         self._last_trade_date = None
         self._open_positions: Dict[str, dict] = {}
+        self._last_entry_time: Optional[datetime] = None
         
         logger.info(f"Unified3TFStrategy created for {self.config.symbol} ({self.config.profile})")
+
+    def _sync_open_positions(self):
+        """Sync internal open-position view from executor (backtest/live)."""
+        self._open_positions = {}
+        if self.executor is None:
+            return
+        try:
+            if hasattr(self.executor, 'get_open_positions'):
+                try:
+                    pos = self.executor.get_open_positions(symbol=getattr(self.config, 'symbol', None))
+                except TypeError:
+                    pos = self.executor.get_open_positions()
+            elif hasattr(self.executor, 'positions'):
+                pos = list(getattr(self.executor, 'positions') or [])
+            else:
+                pos = []
+        except Exception:
+            pos = []
+        try:
+            for p in (pos or []):
+                if isinstance(p, dict):
+                    ticket = p.get('ticket')
+                    if ticket is None:
+                        continue
+                    self._open_positions[str(ticket)] = p
+                else:
+                    ticket = getattr(p, 'ticket', None)
+                    if ticket is None:
+                        continue
+                    self._open_positions[str(ticket)] = {
+                        'ticket': ticket,
+                        'type': getattr(p, 'direction', None),
+                        'volume': getattr(p, 'volume', None),
+                        'price_open': getattr(p, 'entry_price', None),
+                        'sl': getattr(p, 'sl', None),
+                        'tp': getattr(p, 'tp', None),
+                        'entry_time': getattr(p, 'entry_time', None),
+                    }
+        except Exception:
+            self._open_positions = {}
+
+    def _has_open_direction(self, direction: str) -> bool:
+        d = str(direction or '').upper()
+        for p in (self._open_positions or {}).values():
+            try:
+                pdir = str(p.get('type') or p.get('direction') or '').upper()
+                if pdir == d:
+                    return True
+            except Exception:
+                continue
+        return False
     
     def _get_engine(self):
         """Lazy load the authoritative decision engine."""
@@ -191,6 +248,9 @@ class Unified3TFStrategy(Strategy):
         
         # Reset daily stats if new day
         self._check_daily_reset()
+
+        # Sync open positions from executor before enforcing limits
+        self._sync_open_positions()
         
         # Check daily limits
         if not self._check_limits():
@@ -213,8 +273,8 @@ class Unified3TFStrategy(Strategy):
             try:
                 engine = self._get_engine()
                 if engine is not None:
-                    engine.last_rejection_stage = "DATA"
-                    engine.last_rejection_reason = (
+                    self.last_rejection_stage = "DATA"
+                    self.last_rejection_reason = (
                         f"insufficient bars htf={0 if data_htf is None else len(data_htf)} "
                         f"mtf={0 if data_mtf is None else len(data_mtf)} "
                         f"ltf={0 if data_ltf is None else len(data_ltf)} "
@@ -276,8 +336,22 @@ class Unified3TFStrategy(Strategy):
 
             direction = 'BUY' if ltf_out.direction == 'LONG' else 'SELL'
 
+            # Enforce position limits using actual open positions (avoid stacking entries)
+            self._sync_open_positions()
+            if len(self._open_positions) >= int(self.config.max_open_trades or 0):
+                self.last_rejection_stage = "LIMIT"
+                self.last_rejection_reason = "max open trades"
+                return None
+            if self._has_open_direction(direction):
+                self.last_rejection_stage = "LIMIT"
+                self.last_rejection_reason = f"{direction} already open"
+                return None
+
             if self.executor is not None:
                 self._execute_trade_probabilistic(direction, ltf_out, data_ltf)
+
+            self._last_entry_time = current_time
+            self._sync_open_positions()
 
             self._daily_trades += 1
 
@@ -312,8 +386,50 @@ class Unified3TFStrategy(Strategy):
 
         swing_points = None
         try:
-            md = MarketData(d0, handle_splits=False)
-            swing_points = md.extract_swings(lookback=5, strength_threshold=0.3)
+            if feats is not None and not feats.empty and 'swing_high' in feats.columns and 'swing_low' in feats.columns:
+                from alpha_factory.market_data import SwingPoint
+
+                base = d0.reset_index(drop=True)
+                f0 = feats.reset_index(drop=True)
+
+                if 'time' in base.columns:
+                    times = pd.to_datetime(base['time'], errors='coerce')
+                else:
+                    times = pd.Series([pd.NaT] * len(base))
+
+                sh = f0['swing_high'].fillna(0).astype(int)
+                sl = f0['swing_low'].fillna(0).astype(int)
+
+                swing_points = []
+                for i in range(len(base)):
+                    if int(sh.iloc[i]) == 1:
+                        t = times.iloc[i]
+                        swing_points.append(SwingPoint(
+                            index=int(i),
+                            time=t.to_pydatetime() if hasattr(t, 'to_pydatetime') else t,
+                            price=float(base['high'].iloc[i]),
+                            point_type='high',
+                            strength=0.5,
+                            confirmed=True,
+                            confidence=1.0,
+                        ))
+                    elif int(sl.iloc[i]) == 1:
+                        t = times.iloc[i]
+                        swing_points.append(SwingPoint(
+                            index=int(i),
+                            time=t.to_pydatetime() if hasattr(t, 'to_pydatetime') else t,
+                            price=float(base['low'].iloc[i]),
+                            point_type='low',
+                            strength=0.5,
+                            confirmed=True,
+                            confidence=1.0,
+                        ))
+
+                if len(swing_points) > 200:
+                    swing_points = swing_points[-200:]
+            else:
+                md = MarketData(d0, handle_splits=False)
+                swing_points = md.extract_swings(lookback=5, strength_threshold=0.3)
         except Exception:
             swing_points = None
 
@@ -510,16 +626,20 @@ class Unified3TFStrategy(Strategy):
         sl_distance = abs(entry_price - stop_loss)
         pip_value = 0.0001 if 'JPY' not in self.config.symbol else 0.01
         sl_pips = sl_distance / pip_value
+
+        min_sl_pips = float(getattr(self.config, 'min_sl_pips', 8.0) or 8.0)
+        effective_sl_pips = max(float(sl_pips), float(min_sl_pips))
         
         # Calculate lot size (assuming $10 per pip for 1 lot)
         pip_value_per_lot = 10.0
-        if sl_pips > 0:
-            lots = risk_amount / (sl_pips * pip_value_per_lot)
+        if effective_sl_pips > 0:
+            lots = risk_amount / (effective_sl_pips * pip_value_per_lot)
         else:
             lots = 0.01
         
         # Clamp to reasonable range
-        lots = max(0.01, min(lots, 1.0))
+        max_lot = float(getattr(self.config, 'max_lot', 1.0) or 1.0)
+        lots = max(0.01, min(lots, max_lot))
         
         return round(lots, 2)
     
