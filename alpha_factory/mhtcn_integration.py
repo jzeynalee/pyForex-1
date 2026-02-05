@@ -119,6 +119,40 @@ class MHTCNFeatureProvider:
         if timeframe not in self._models:
             self._load_model(timeframe)
         return self._models.get(timeframe)
+
+    def _get_expected_input_dim(self, timeframe: str) -> int:
+        """Return the model's expected input feature dimension for a timeframe."""
+        try:
+            m = self._get_model(timeframe)
+            if m is not None and hasattr(m, 'config') and hasattr(m.config, 'input_channels'):
+                return int(m.config.input_channels)
+        except Exception:
+            pass
+        return 64
+
+    def _align_feature_dim(self, features: np.ndarray, expected_dim: int) -> np.ndarray:
+        """Pad/truncate feature matrix to expected feature dimension."""
+        if features is None:
+            return features
+        try:
+            expected_dim = int(expected_dim)
+        except Exception:
+            expected_dim = 64
+
+        if expected_dim <= 0:
+            return features
+
+        cur_dim = int(features.shape[1]) if features.ndim == 2 else 0
+        if cur_dim == expected_dim:
+            return features
+
+        if cur_dim > expected_dim:
+            return features[:, :expected_dim]
+
+        pad = expected_dim - cur_dim
+        if pad <= 0:
+            return features
+        return np.pad(features, ((0, 0), (0, pad)), mode='constant', constant_values=0.0)
     
     def _load_model(self, timeframe: str):
         """Load MH-TCN model for a specific timeframe."""
@@ -227,6 +261,9 @@ class MHTCNFeatureProvider:
             features = self._prepare_features(df, timeframe)
             if features is None:
                 return None
+
+            expected_dim = self._get_expected_input_dim(timeframe)
+            features = self._align_feature_dim(features, expected_dim)
             
             # Convert to tensor
             x = torch.tensor(features, dtype=torch.float32).unsqueeze(0).to(self.device)
@@ -262,7 +299,10 @@ class MHTCNFeatureProvider:
             )
             
         except Exception as e:
-            logger.error(f"MH-TCN prediction failed for {timeframe}: {e}")
+            logger.error(
+                f"MH-TCN prediction failed for {timeframe}: {e} "
+                f"(seq_len={getattr(df, '__len__', lambda: 'n/a')()}, expected_in={self._get_expected_input_dim(timeframe)})"
+            )
             return None
     
     def _prepare_features(self, df: pd.DataFrame, timeframe: str) -> Optional[np.ndarray]:
@@ -462,6 +502,9 @@ class UnifiedThreeTFEngine:
     ):
         self.symbol = symbol
         self.profile = get_profile(profile_type)
+
+        self.last_rejection_stage = ""
+        self.last_rejection_reason = ""
         
         # Initialize components
         self.feature_provider = MHTCNFeatureProvider(
@@ -516,20 +559,30 @@ class UnifiedThreeTFEngine:
         
         if any(s is None for s in [snapshot_htf, snapshot_mtf, snapshot_ltf]):
             logger.warning("Failed to create one or more snapshots")
+            self.last_rejection_stage = "SNAPSHOT"
+            self.last_rejection_reason = "Failed to create one or more snapshots"
             return None
         
         # Apply higher thresholds before processing
         # Check HTF with higher threshold
         if snapshot_htf.confidence < self.MIN_HTF_CONFIDENCE:
             logger.debug(f"HTF confidence {snapshot_htf.confidence:.2f} < {self.MIN_HTF_CONFIDENCE}")
+            self.last_rejection_stage = "HTF_PRECHECK"
+            self.last_rejection_reason = f"confidence {snapshot_htf.confidence:.2f} < {self.MIN_HTF_CONFIDENCE:.2f}"
             return None
         
         if snapshot_htf.stability < self.MIN_STABILITY:
             logger.debug(f"HTF stability {snapshot_htf.stability:.2f} < {self.MIN_STABILITY}")
+            self.last_rejection_stage = "HTF_PRECHECK"
+            self.last_rejection_reason = f"stability {snapshot_htf.stability:.2f} < {self.MIN_STABILITY:.2f}"
             return None
         
         if abs(snapshot_htf.directional_score) < self.MIN_DIRECTIONAL_SCORE:
             logger.debug(f"HTF directional score {abs(snapshot_htf.directional_score):.2f} < {self.MIN_DIRECTIONAL_SCORE}")
+            self.last_rejection_stage = "HTF_PRECHECK"
+            self.last_rejection_reason = (
+                f"abs(directional_score) {abs(snapshot_htf.directional_score):.2f} < {self.MIN_DIRECTIONAL_SCORE:.2f}"
+            )
             return None
         
         # Ensure version consistency (use HTF version for all)
@@ -565,6 +618,29 @@ class UnifiedThreeTFEngine:
             regime_flags=snapshot_ltf.regime_flags,
             version=version
         )
+
+        # Derive rejection reasons from strict 3TF logic (without relying on logs).
+        try:
+            htf = self.orchestrator.logic.htf_decide(snapshot_htf)
+            if not htf.allow:
+                self.last_rejection_stage = "HTF"
+                self.last_rejection_reason = str(htf.reason)
+                return None
+
+            mtf = self.orchestrator.logic.mtf_validate(snapshot_mtf, htf)
+            if not mtf.pass_structure:
+                self.last_rejection_stage = "MTF"
+                self.last_rejection_reason = str(mtf.reason)
+                return None
+
+            ltf = self.orchestrator.logic.ltf_trigger(snapshot_ltf, htf, mtf)
+            if not ltf.trigger:
+                self.last_rejection_stage = "LTF"
+                self.last_rejection_reason = str(ltf.reason)
+                return None
+        except Exception:
+            # Fall back to orchestrator errors below.
+            pass
         
         # Process through 3TF orchestrator
         try:
@@ -573,6 +649,16 @@ class UnifiedThreeTFEngine:
                 snapshot_mtf=snapshot_mtf,
                 snapshot_ltf=snapshot_ltf
             )
+
+            if instruction is None:
+                # If we reached here, precheck + derived logic said trade should pass,
+                # so treat this as an invariant/assertion rejection.
+                if not self.last_rejection_stage:
+                    self.last_rejection_stage = "ORCHESTRATOR"
+                    self.last_rejection_reason = "process_3tf returned None"
+            else:
+                self.last_rejection_stage = ""
+                self.last_rejection_reason = ""
             
             if instruction is not None:
                 logger.info(
@@ -584,9 +670,13 @@ class UnifiedThreeTFEngine:
             
         except AssertionError as e:
             logger.warning(f"3TF assertion failed: {e}")
+            self.last_rejection_stage = "ASSERT"
+            self.last_rejection_reason = str(e)
             return None
         except Exception as e:
             logger.error(f"3TF processing error: {e}")
+            self.last_rejection_stage = "ERROR"
+            self.last_rejection_reason = str(e)
             return None
     
     def _tf_to_string(self, tf: TimeFrame) -> str:
