@@ -202,11 +202,54 @@ def preprocess_for_stationarity(features: pd.DataFrame, target_col: str = 'close
     return preprocessed, preprocessing_info
 
 
-def compute_causality(features: pd.DataFrame, target_col: str, max_lag: int = 5) -> Dict:
-    filtered_features = _filter_trading_features(features, target_col)
-    logger.info(f"Analyzing causality for {len(filtered_features.columns)} features against {target_col}")
+def _select_causality_features(features: pd.DataFrame, target_col: str) -> pd.DataFrame:
+    if features is None or features.empty:
+        return features
 
-    feature_cols = [col for col in filtered_features.columns if col != target_col]
+    exclude_patterns = (
+        'timestamp', 'datetime', 'date', 'time',
+        'year', 'month', 'day', 'hour', 'minute', 'second',
+        'id', 'idx', 'index',
+        'session', 'bar', 'candle',
+    )
+
+    numeric_df = features.select_dtypes(include=[np.number])
+    cols: List[str] = []
+
+    if target_col in features.columns and target_col not in numeric_df.columns:
+        numeric_df = numeric_df.copy()
+        numeric_df[target_col] = pd.to_numeric(features[target_col], errors='coerce')
+
+    for col in numeric_df.columns:
+        if col == target_col:
+            cols.append(col)
+            continue
+
+        c = str(col).strip().lower()
+        if any(p in c for p in exclude_patterns):
+            continue
+        cols.append(col)
+
+    if target_col in features.columns and target_col not in cols:
+        cols.append(target_col)
+
+    selected = features[cols].copy()
+    if target_col in selected.columns:
+        selected[target_col] = pd.to_numeric(selected[target_col], errors='coerce')
+    return selected
+
+
+def compute_causality(
+    features: pd.DataFrame,
+    target_col: str,
+    max_lag: int = 5,
+    *,
+    apply_feature_filters: bool = False
+) -> Dict:
+    analysis_features = _filter_trading_features(features, target_col) if apply_feature_filters else _select_causality_features(features, target_col)
+    logger.info(f"Analyzing causality for {len(analysis_features.columns)} features against {target_col}")
+
+    feature_cols = [col for col in analysis_features.columns if col != target_col]
 
     correlation_results: Dict[str, Dict] = {}
     mutual_info_results: Dict[str, Dict] = {}
@@ -215,7 +258,7 @@ def compute_causality(features: pd.DataFrame, target_col: str, max_lag: int = 5)
     logger.info("Computing correlations...")
     for feature in feature_cols:
         try:
-            df = filtered_features[[feature, target_col]].dropna()
+            df = analysis_features[[feature, target_col]].dropna()
             if len(df) < 10:
                 continue
 
@@ -249,7 +292,7 @@ def compute_causality(features: pd.DataFrame, target_col: str, max_lag: int = 5)
     logger.info("Computing mutual information...")
     for feature in feature_cols:
         try:
-            df = filtered_features[[feature, target_col]].dropna()
+            df = analysis_features[[feature, target_col]].dropna()
             if len(df) < 10:
                 continue
 
@@ -274,7 +317,7 @@ def compute_causality(features: pd.DataFrame, target_col: str, max_lag: int = 5)
     logger.info("Computing lead-lag relationships...")
     for feature in feature_cols:
         try:
-            df = filtered_features[[feature, target_col]].dropna()
+            df = analysis_features[[feature, target_col]].dropna()
             if len(df) < 20:
                 continue
 
@@ -556,13 +599,14 @@ def enhanced_causal_analysis(features: pd.DataFrame, target_col: str = 'close') 
     
     # Add Transfer Entropy analysis
     transfer_entropy_results = {}
-    feature_cols = [col for col in preprocessed_features.columns if col != target_col and col != 'time']
+    te_features_df = _select_causality_features(preprocessed_features, target_col)
+    feature_cols = [col for col in te_features_df.columns if col != target_col]
     
-    target_values = preprocessed_features[target_col].values
+    target_values = te_features_df[target_col].values
     
     for feature in feature_cols:
         try:
-            feature_values = preprocessed_features[feature].values
+            feature_values = te_features_df[feature].values
             
             # Compute Transfer Entropy
             te_source_to_target = compute_transfer_entropy(feature_values, target_values)
@@ -583,10 +627,10 @@ def enhanced_causal_analysis(features: pd.DataFrame, target_col: str = 'close') 
     enhanced_results = original_results.copy()
     enhanced_results['transfer_entropy'] = transfer_entropy_results
     enhanced_results['preprocessing_info'] = preprocessing_info
+    stationarity_items = {k: v for k, v in preprocessing_info.items() if str(k).endswith('_stationarity') and isinstance(v, dict)}
     enhanced_results['stationarity_analysis'] = {
-        'features_checked': len(preprocessing_info),
-        'stationary_features': sum(1 for k, v in preprocessing_info.items() 
-                                 if 'stationarity' in k and v.get('is_stationary', False))
+        'features_checked': len(stationarity_items),
+        'stationary_features': sum(1 for v in stationarity_items.values() if v.get('is_stationary', False))
     }
     
     # Update causal ranking with Transfer Entropy
