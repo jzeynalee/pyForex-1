@@ -69,6 +69,7 @@ class WalkForwardConfig:
     direction_threshold: float = 0.001
     
     # Feature selection
+    key_features_only: bool = False
     key_features: List[str] = None
     
     # Temporal refinement training
@@ -83,12 +84,7 @@ class WalkForwardConfig:
     
     def __post_init__(self):
         if self.key_features is None:
-            self.key_features = [
-                "rsi", "macd", "macd_histogram", "adx", "bb_position",
-                "atr_ratio", "momentum", "trend_strength", "volatility_ratio",
-                "sma_20", "sma_50", "ema_12", "ema_26", "roc", "williams_r",
-                "stoch_k", "stoch_d", "cci", "mfi", "obv_ratio"
-            ]
+            self.key_features = []
 
 
 class WalkForwardMetadataTrainer:
@@ -114,6 +110,37 @@ class WalkForwardMetadataTrainer:
         
         # Results storage
         self.fold_results: List[Dict] = []
+        self.feature_names: List[str] = []
+
+    @staticmethod
+    def _resolve_feature_names(features_df: pd.DataFrame) -> List[str]:
+        if features_df is None or features_df.empty:
+            return []
+
+        exclude_cols = {
+            'time', 'timestamp', 'datetime', 'date',
+            'open', 'high', 'low', 'close',
+            'volume', 'tick_volume', 'spread', 'real_volume'
+        }
+
+        exclude_patterns = (
+            'timestamp', 'datetime', 'date', 'time',
+            'year', 'month', 'day', 'hour', 'minute', 'second',
+            'id', 'idx', 'index',
+            'session', 'bar', 'candle',
+        )
+
+        numeric_cols = [c for c in features_df.select_dtypes(include=[np.number]).columns]
+        out: List[str] = []
+        for c in numeric_cols:
+            cc = str(c).strip()
+            cl = cc.lower()
+            if cl in exclude_cols:
+                continue
+            if any(p in cl for p in exclude_patterns):
+                continue
+            out.append(cc)
+        return out
     
     def load_data(self, path: str) -> pd.DataFrame:
         """Load and prepare OHLCV data."""
@@ -255,10 +282,15 @@ class WalkForwardMetadataTrainer:
         # Generate regime labels
         regime_labels = self.generate_regime_labels(df)
         regime_strings = {0: 'bear', 1: 'neutral', 2: 'bull'}
-        
+
+        if bool(getattr(self.config, 'key_features_only', False)):
+            self.feature_names = [f for f in (self.config.key_features or []) if f in features_df.columns]
+        else:
+            self.feature_names = self._resolve_feature_names(features_df)
+
         all_feature_stats = {feat: {'bull': [], 'bear': [], 'neutral': []} 
-                            for feat in self.config.key_features}
-        all_hit_rates = {feat: [] for feat in self.config.key_features}
+                            for feat in self.feature_names}
+        all_hit_rates = {feat: [] for feat in self.feature_names}
         
         for fold_idx in range(self.config.n_folds):
             logger.info(f"Processing fold {fold_idx + 1}/{self.config.n_folds}")
@@ -282,7 +314,7 @@ class WalkForwardMetadataTrainer:
             test_labels = regime_labels[test_start:test_end]
             
             # Compute feature statistics per regime
-            for feat in self.config.key_features:
+            for feat in self.feature_names:
                 if feat not in train_features.columns:
                     continue
                 
@@ -305,7 +337,7 @@ class WalkForwardMetadataTrainer:
                     all_feature_stats[feat][regime_name].append(quantiles)
             
             # Compute hit rates on test set
-            for feat in self.config.key_features:
+            for feat in self.feature_names:
                 if feat not in test_features.columns:
                     continue
                 
@@ -383,8 +415,8 @@ class WalkForwardMetadataTrainer:
     ):
         """Aggregate statistics across folds and save to metadata store."""
         logger.info("Aggregating feature statistics...")
-        
-        for feat in self.config.key_features:
+
+        for feat in self.feature_names:
             # Aggregate quantiles
             quantiles_bull = self._aggregate_quantiles(all_feature_stats[feat]['bull'])
             quantiles_bear = self._aggregate_quantiles(all_feature_stats[feat]['bear'])
@@ -421,7 +453,7 @@ class WalkForwardMetadataTrainer:
         
         # Save metadata
         self.metadata_store.save()
-        logger.info(f"Saved feature statistics for {len(self.config.key_features)} features")
+        logger.info(f"Saved feature statistics for {len(self.feature_names)} features")
     
     def _aggregate_quantiles(self, quantile_list: List[Dict]) -> Dict:
         """Aggregate quantiles across folds."""
@@ -545,7 +577,7 @@ class WalkForwardMetadataTrainer:
         
         return {
             'n_folds': len(self.fold_results),
-            'n_features': len(self.config.key_features),
+            'n_features': len(self.feature_names),
             'n_prob_sequences': len(self.prob_sequences),
             'temporal_model_trained': temporal_model is not None
         }
