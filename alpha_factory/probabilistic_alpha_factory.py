@@ -53,6 +53,10 @@ class ProbabilisticConfig:
     # Feature Probability Calibration
     calibration_method: str = "logistic"  # "logistic", "kde", "quantile"
     calibration_lookback: int = 500  # Bars for calibration statistics
+
+    # Feature Inclusion (no silent selection)
+    key_features_only: bool = False
+    key_features: Optional[List[str]] = None
     
     # Historical Reliability
     hit_rate_floor: float = 0.4  # Minimum hit rate to consider feature
@@ -74,6 +78,7 @@ class ProbabilisticConfig:
     # Evidence Aggregation
     aggregation_method: str = "noisy_or"  # "noisy_or", "bayesian", "weighted_avg"
     evidence_threshold: float = 0.1  # Minimum evidence to include in aggregation
+    evidence_threshold_enabled: bool = False
     
     # Dynamic Thresholding
     base_threshold: float = 0.55
@@ -95,6 +100,12 @@ class ProbabilisticConfig:
     def __post_init__(self):
         if self.metadata_path is None:
             self.metadata_path = str(Path(__file__).parent / "metadata" / "feature_stats.json")
+
+        if self.key_features is None:
+            self.key_features = [
+                "rsi", "macd", "macd_histogram", "adx", "bb_position",
+                "atr_ratio", "momentum", "trend_strength", "volatility_ratio"
+            ]
 
 
 class RegimeType(Enum):
@@ -910,11 +921,13 @@ class EvidenceAggregator:
         feature_probs: List[FeatureProbability]
     ) -> Tuple[float, float, float]:
         """Noisy-OR aggregation: any strong evidence triggers."""
-        threshold = self.config.evidence_threshold
-        
-        # Filter by threshold
-        bull_probs = [fp.weighted_p_bull for fp in feature_probs if fp.weighted_p_bull > threshold]
-        bear_probs = [fp.weighted_p_bear for fp in feature_probs if fp.weighted_p_bear > threshold]
+        if bool(getattr(self.config, 'evidence_threshold_enabled', False)):
+            threshold = self.config.evidence_threshold
+            bull_probs = [fp.weighted_p_bull for fp in feature_probs if fp.weighted_p_bull > threshold]
+            bear_probs = [fp.weighted_p_bear for fp in feature_probs if fp.weighted_p_bear > threshold]
+        else:
+            bull_probs = [fp.weighted_p_bull for fp in feature_probs]
+            bear_probs = [fp.weighted_p_bear for fp in feature_probs]
         
         # Noisy-OR: P(any) = 1 - ∏(1 - P_i)
         if bull_probs:
@@ -943,11 +956,11 @@ class EvidenceAggregator:
         
         # Update with each feature's likelihood ratio
         for fp in feature_probs:
-            if fp.weighted_p_bull > self.config.evidence_threshold:
+            if (not bool(getattr(self.config, 'evidence_threshold_enabled', False))) or fp.weighted_p_bull > self.config.evidence_threshold:
                 lr_bull = fp.weighted_p_bull / (1 - fp.weighted_p_bull + 1e-10)
                 log_odds_bull += np.log(lr_bull + 1e-10) * 0.5  # Dampen updates
             
-            if fp.weighted_p_bear > self.config.evidence_threshold:
+            if (not bool(getattr(self.config, 'evidence_threshold_enabled', False))) or fp.weighted_p_bear > self.config.evidence_threshold:
                 lr_bear = fp.weighted_p_bear / (1 - fp.weighted_p_bear + 1e-10)
                 log_odds_bear += np.log(lr_bear + 1e-10) * 0.5
         
@@ -1248,30 +1261,49 @@ class ProbabilisticAlphaFactory:
         if features is None or features.empty:
             return []
         
-        feature_probs = []
+        feature_probs: List[FeatureProbability] = []
         row = features.iloc[-1]
-        
-        # Key features to calibrate
-        key_features = [
-            "rsi", "macd", "macd_histogram", "adx", "bb_position",
-            "atr_ratio", "momentum", "trend_strength", "volatility_ratio"
-        ]
-        
-        for feat_name in key_features:
-            if feat_name in features.columns:
+
+        if bool(getattr(self.config, 'key_features_only', False)):
+            feature_names = [f for f in (self.config.key_features or []) if f in features.columns]
+        else:
+            exclude_patterns = (
+                'timestamp', 'datetime', 'date', 'time',
+                'year', 'month', 'day', 'hour', 'minute', 'second',
+                'id', 'idx', 'index',
+                'session', 'bar', 'candle',
+            )
+
+            numeric_cols = [c for c in features.select_dtypes(include=[np.number]).columns]
+            feature_names = []
+            for c in numeric_cols:
+                cc = str(c).strip().lower()
+                if any(p in cc for p in exclude_patterns):
+                    continue
+                feature_names.append(str(c))
+
+        for feat_name in feature_names:
+            try:
                 value = row[feat_name]
-                if pd.notna(value) and np.isfinite(value):
-                    fp = self.feature_calibrator.calibrate_feature(
-                        feat_name, float(value), regime_context
-                    )
-                    
-                    # Add causal confidence
-                    fp.causal_confidence = self.causal_calculator.calculate(
-                        feat_name, causality_results
-                    )
-                    
-                    feature_probs.append(fp)
-        
+            except Exception:
+                continue
+
+            if pd.notna(value) and np.isfinite(value):
+                fp = self.feature_calibrator.calibrate_feature(
+                    feat_name, float(value), regime_context
+                )
+
+                fp.causal_confidence = self.causal_calculator.calculate(
+                    feat_name, causality_results
+                )
+
+                feature_probs.append(fp)
+
+        if bool(getattr(self.config, 'key_features_only', False)):
+            logger.info(f"ProbabilisticAlphaFactory: key_features_only enabled ({len(feature_probs)} features)")
+        else:
+            logger.info(f"ProbabilisticAlphaFactory: calibrating all numeric features ({len(feature_probs)} features)")
+
         return feature_probs
     
     def _calculate_stability(self, df: pd.DataFrame) -> float:
