@@ -184,7 +184,7 @@ def train_timeframe_model(csv_path: Path, style: str, timeframe: str):
             device = "auto"
             profile = style
             features = None
-            skip_feature_selection = False
+            skip_feature_selection = True
             n_features = 25
             hidden_dim = 64
             num_layers = 5
@@ -363,7 +363,7 @@ def auto_retrain_job():
             device="auto",
             profile="INTRADAY",
             features=None,
-            skip_feature_selection=False,
+            skip_feature_selection=True,
             n_features=25,
             hidden_dim=64,
             num_layers=5,
