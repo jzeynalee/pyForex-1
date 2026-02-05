@@ -28,9 +28,9 @@ class Settings(BaseSettings):
     # Model Config
     DEVICE: str = "cuda" if os.environ.get("CUDA_VISIBLE_DEVICES") else "cpu"
     CONFIDENCE_THRESHOLD: float = 0.60
-    ASSETS_DIR: Path = Path("e:/pyProject/pyForex-assets")
-    WEIGHTS_DIR: Path = Path("e:/pyProject/pyForex-assets/models/weights")
-    TREND_MODEL_PATH: Path = Path("e:/pyProject/pyForex-assets/models/trend_classifier.joblib")
+    ASSETS_DIR: Path = Path("E:/pyProject/pyForex-assets")
+    WEIGHTS_DIR: Path = Path("E:/pyProject/pyForex-assets/models/weights")
+    TREND_MODEL_PATH: Path = Path("E:/pyProject/pyForex-assets/models/trend_classifier.joblib")
     
     # Data Config
     SEQUENCE_LENGTH: int = 60
