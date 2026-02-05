@@ -225,6 +225,7 @@ class MarketData:
         
         # Sort by index
         swing_points.sort(key=lambda x: x.index)
+        self.swing_points = swing_points
         logger.info(f"Extracted {len(swing_points)} confirmed swing points (no anticipatory swings)")
         return swing_points
     
