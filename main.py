@@ -998,13 +998,6 @@ def cmd_backtest(args, logger: logging.Logger):
                     rejection_counts[k] = int(rejection_counts.get(k, 0)) + 1
                     if reason and k not in rejection_examples:
                         rejection_examples[k] = str(reason)[:240]
-
-                engine_obj = None
-                if str(getattr(args, 'strategy', '') or '').lower().strip() == 'unified3tf':
-                    try:
-                        engine_obj = strategy._get_engine() if hasattr(strategy, '_get_engine') else None
-                    except Exception:
-                        engine_obj = None
                 for i in range(window_size, len(base_df)):
                     provider.current_idx = i
                     try:
@@ -1027,14 +1020,11 @@ def cmd_backtest(args, logger: logging.Logger):
                     sig = strategy.on_bar(ltf_window)
 
                     if sig is None:
-                        if engine_obj is not None:
-                            try:
-                                stage = str(getattr(engine_obj, 'last_rejection_stage', '') or 'NO_SIGNAL')
-                                reason = str(getattr(engine_obj, 'last_rejection_reason', '') or '')
-                                _bump_rej(stage, reason)
-                            except Exception:
-                                _bump_rej('NO_SIGNAL', '')
-                        else:
+                        try:
+                            stage = str(getattr(strategy, 'last_rejection_stage', '') or 'NO_SIGNAL')
+                            reason = str(getattr(strategy, 'last_rejection_reason', '') or '')
+                            _bump_rej(stage, reason)
+                        except Exception:
                             _bump_rej('NO_SIGNAL', '')
                     try:
                         signals_out.append({'time': ltf_window['time'].iloc[-1], 'close': ltf_window['close'].iloc[-1], 'signal': sig})
