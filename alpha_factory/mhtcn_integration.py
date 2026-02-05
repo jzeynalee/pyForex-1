@@ -52,7 +52,16 @@ class MHTCNPrediction:
     
     @property
     def confidence(self) -> float:
-        """Max probability as confidence."""
+        """Tradeability confidence.
+
+        Prefer outcome-head probabilities (TP-before-SL) when available.
+        This avoids a systematic ~0.33-0.45 ceiling from the 3-class direction head.
+        """
+        try:
+            if self.p_long is not None and self.p_short is not None:
+                return float(max(self.p_long, self.p_short))
+        except Exception:
+            pass
         return float(np.max(self.direction_probs))
     
     @property
@@ -94,6 +103,9 @@ class MHTCNFeatureProvider:
         # Model cache (lazy loaded)
         self._models: Dict[str, Any] = {}
         self._scalers: Dict[str, Any] = {}
+
+        # Optional heavy feature engineer (lazy init)
+        self._feature_engineer = None
         
         # Feature configuration
         self.sequence_length = 60
@@ -225,15 +237,24 @@ class MHTCNFeatureProvider:
     def _find_weight_file(self, timeframe: str) -> Optional[Path]:
         """Find weight file for a timeframe."""
         profile_name = self.profile.type.value.upper()
+        aliases = [profile_name]
+        if profile_name == 'SCALPING':
+            aliases.append('SCALP')
+        elif profile_name == 'SCALP':
+            aliases.append('SCALPING')
         
         # Try different naming conventions
-        candidates = [
-            self.weights_dir / f"multihead_tcn_{profile_name}.pth",
-            self.weights_dir / f"multihead_tcn_{profile_name}_pa_v1.pth",
-            self.weights_dir / f"mhtcn_{profile_name}.pth",
+        candidates = []
+        for name in aliases:
+            candidates.extend([
+                self.weights_dir / f"multihead_tcn_{name}.pth",
+                self.weights_dir / f"multihead_tcn_{name}_pa_v1.pth",
+                self.weights_dir / f"mhtcn_{name}.pth",
+            ])
+        candidates.extend([
             self.weights_dir / f"multihead_tcn_INTRADAY.pth",  # Fallback
             self.weights_dir / f"multihead_tcn_INTRADAY_pa_v1.pth",  # Fallback
-        ]
+        ])
         
         for candidate in candidates:
             if candidate.exists():
@@ -311,89 +332,61 @@ class MHTCNFeatureProvider:
             return None
         
         try:
-            # Use last sequence_length rows
-            df = df.tail(self.sequence_length).copy()
+            df = df.copy()
             df.columns = [c.lower() for c in df.columns]
-            
-            # Basic OHLCV features
-            features = []
-            
-            # Price features (normalized)
-            close = df['close'].values
-            open_p = df['open'].values
-            high = df['high'].values
-            low = df['low'].values
-            
-            # Normalize by first close
-            base_price = close[0] if close[0] != 0 else 1.0
-            
-            features.append((close - base_price) / base_price)  # Normalized close
-            features.append((open_p - base_price) / base_price)  # Normalized open
-            features.append((high - base_price) / base_price)   # Normalized high
-            features.append((low - base_price) / base_price)    # Normalized low
-            
-            # Returns
-            returns = np.diff(close, prepend=close[0]) / (close + 1e-8)
-            features.append(returns)
-            
-            # Volume (if available)
-            if 'volume' in df.columns or 'tick_volume' in df.columns:
-                vol_col = 'volume' if 'volume' in df.columns else 'tick_volume'
-                vol = df[vol_col].values.astype(float)
+
+            if 'volume' not in df.columns:
+                if 'tick_volume' in df.columns:
+                    df['volume'] = df['tick_volume']
+                else:
+                    df['volume'] = 1000
+
+            expected_dim = self._get_expected_input_dim(timeframe)
+
+            # Prefer the same feature engineering approach used during training.
+            featured_df = None
+            try:
+                from alpha_factory.features_engineering import FeatureEngineerOptimized
+                if self._feature_engineer is None:
+                    self._feature_engineer = FeatureEngineerOptimized()
+                featured_df = self._feature_engineer.generate_features(df)
+            except Exception:
+                featured_df = None
+
+            if featured_df is not None and not featured_df.empty:
+                # Preserve column order (to match training) and keep only numeric columns.
+                feature_cols = [
+                    c for c in featured_df.columns
+                    if c not in ['time', 'date', 'datetime']
+                    and featured_df[c].dtype in [np.float64, np.float32, np.int64, np.int32]
+                ]
+                if feature_cols:
+                    if expected_dim and len(feature_cols) > int(expected_dim):
+                        feature_cols = feature_cols[:int(expected_dim)]
+                    featured_df = featured_df[feature_cols].copy()
+                    featured_df = featured_df.fillna(0.0)
+                    featured_df = featured_df.tail(self.sequence_length)
+                    feature_array = featured_df.values.astype(np.float32)
+                else:
+                    featured_df = None
+
+            if featured_df is None:
+                # Fallback: minimal feature set (will be padded/truncated in predict()).
+                df = df.tail(self.sequence_length).copy()
+                close = df['close'].values.astype(float)
+                base_price = close[0] if close[0] != 0 else 1.0
+                returns = np.diff(close, prepend=close[0]) / (close + 1e-8)
+                vol = df['volume'].values.astype(float)
                 vol_norm = vol / (np.mean(vol) + 1e-8)
-                features.append(vol_norm)
-            else:
-                features.append(np.ones(len(close)))
-            
-            # Technical indicators
-            # RSI
-            delta = np.diff(close, prepend=close[0])
-            gain = np.where(delta > 0, delta, 0)
-            loss = np.where(delta < 0, -delta, 0)
-            avg_gain = pd.Series(gain).rolling(14, min_periods=1).mean().values
-            avg_loss = pd.Series(loss).rolling(14, min_periods=1).mean().values
-            rs = avg_gain / (avg_loss + 1e-8)
-            rsi = 100 - (100 / (1 + rs))
-            features.append(rsi / 100)  # Normalize to [0, 1]
-            
-            # MACD
-            ema12 = pd.Series(close).ewm(span=12, adjust=False).mean().values
-            ema26 = pd.Series(close).ewm(span=26, adjust=False).mean().values
-            macd = ema12 - ema26
-            signal = pd.Series(macd).ewm(span=9, adjust=False).mean().values
-            features.append(macd / (base_price + 1e-8))
-            features.append(signal / (base_price + 1e-8))
-            
-            # Bollinger Bands position
-            sma20 = pd.Series(close).rolling(20, min_periods=1).mean().values
-            std20 = pd.Series(close).rolling(20, min_periods=1).std().values
-            bb_upper = sma20 + 2 * std20
-            bb_lower = sma20 - 2 * std20
-            bb_width = bb_upper - bb_lower
-            bb_pos = (close - bb_lower) / (bb_width + 1e-8)
-            features.append(bb_pos)
-            
-            # ATR
-            tr1 = high - low
-            tr2 = np.abs(high - np.roll(close, 1))
-            tr3 = np.abs(low - np.roll(close, 1))
-            tr = np.maximum(np.maximum(tr1, tr2), tr3)
-            atr = pd.Series(tr).rolling(14, min_periods=1).mean().values
-            features.append(atr / (base_price + 1e-8))
-            
-            # ADX (simplified)
-            plus_dm = np.where((high - np.roll(high, 1)) > (np.roll(low, 1) - low), 
-                              np.maximum(high - np.roll(high, 1), 0), 0)
-            minus_dm = np.where((np.roll(low, 1) - low) > (high - np.roll(high, 1)),
-                               np.maximum(np.roll(low, 1) - low, 0), 0)
-            plus_di = 100 * pd.Series(plus_dm).rolling(14, min_periods=1).mean().values / (atr + 1e-8)
-            minus_di = 100 * pd.Series(minus_dm).rolling(14, min_periods=1).mean().values / (atr + 1e-8)
-            dx = 100 * np.abs(plus_di - minus_di) / (plus_di + minus_di + 1e-8)
-            adx = pd.Series(dx).rolling(14, min_periods=1).mean().values
-            features.append(adx / 100)
-            
-            # Stack features: (seq_len, n_features)
-            feature_array = np.stack(features, axis=1)
+
+                feature_array = np.stack([
+                    (df['close'].values - base_price) / base_price,
+                    (df['open'].values - base_price) / base_price,
+                    (df['high'].values - base_price) / base_price,
+                    (df['low'].values - base_price) / base_price,
+                    returns,
+                    vol_norm,
+                ], axis=1).astype(np.float32)
             
             # Apply scaling if available
             scaler = self._scalers.get(timeframe)
