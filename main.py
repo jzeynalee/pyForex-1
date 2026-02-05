@@ -918,12 +918,19 @@ def cmd_backtest(args, logger: logging.Logger):
                     def __init__(self, base_tf: str, data_by_tf: Dict[str, pd.DataFrame]):
                         self.base_tf = str(base_tf).upper()
                         self.data_by_tf = {str(k).upper(): v.copy() for k, v in data_by_tf.items() if v is not None}
+                        self._time_index: Dict[str, Optional[pd.DatetimeIndex]] = {}
                         for k, d0 in list(self.data_by_tf.items()):
                             d0.columns = [str(c).lower().strip() for c in d0.columns]
                             if 'time' in d0.columns:
                                 d0['time'] = pd.to_datetime(d0['time'])
                                 d0.sort_values('time', inplace=True)
                                 d0.reset_index(drop=True, inplace=True)
+                                try:
+                                    self._time_index[k] = pd.DatetimeIndex(d0['time'])
+                                except Exception:
+                                    self._time_index[k] = None
+                            else:
+                                self._time_index[k] = None
                             self.data_by_tf[k] = d0
                         self.current_idx = 0
                         self.current_time: Optional[datetime] = None
@@ -934,20 +941,35 @@ def cmd_backtest(args, logger: logging.Logger):
                         if d0 is None or d0.empty:
                             return pd.DataFrame()
 
-                        d = d0
-                        if self.current_time is not None and 'time' in d.columns:
-                            try:
-                                d = d.loc[d['time'] <= pd.Timestamp(self.current_time)]
-                            except Exception:
-                                d = d0
-                        out = d.tail(int(count)).copy()
+                        if self.current_time is not None and 'time' in d0.columns:
+                            ti = self._time_index.get(tf)
+                            if ti is not None:
+                                try:
+                                    end = int(ti.searchsorted(pd.Timestamp(self.current_time), side='right'))
+                                    end = max(0, min(end, len(d0)))
+                                    start = max(0, end - int(count))
+                                    out = d0.iloc[start:end].copy()
+                                except Exception:
+                                    out = d0.tail(int(count)).copy()
+                            else:
+                                out = d0.tail(int(count)).copy()
+                        else:
+                            out = d0.tail(int(count)).copy()
                         out.columns = [str(c).lower().strip() for c in out.columns]
                         return out
 
                 base_df = data_map.get(base_tf.upper(), df)
                 provider = ThreeTFDataProvider(base_tf=base_tf, data_by_tf=data_map)
                 executor = BacktestExecutor(config=BacktestConfig(initial_balance=args.balance))
-                strategy = strategy_cls(data_provider=provider, executor=executor)
+                if getattr(strategy_cls, '__name__', '') == 'Unified3TFStrategy':
+                    from strategies.unified_3tf_strategy import Unified3TFConfig
+                    strategy = strategy_cls(
+                        config=Unified3TFConfig(profile=profile, symbol=str(getattr(args, 'symbol', 'EURUSD'))),
+                        data_provider=provider,
+                        executor=executor,
+                    )
+                else:
+                    strategy = strategy_cls(data_provider=provider, executor=executor)
                 if hasattr(strategy, 'initialize') and not getattr(strategy, '_initialized', False):
                     try:
                         strategy.initialize(starting_balance=float(args.balance))
@@ -1470,6 +1492,11 @@ Examples:
         type=str,
         default=None,
         help="Optional HTF CSV path (profile higher TF, e.g. H1 for SCALP, H4 for INTRADAY, D1 for SWING)",
+    )
+    bt_parser.add_argument(
+        "--symbol",
+        default="EURUSD",
+        help="Trading symbol (used by strategies)",
     )
     bt_parser.add_argument("--strategy", default="neural", help="Strategy (neural, tcn)")
     bt_parser.add_argument("--balance", type=float, default=10000.0, help="Initial balance")
