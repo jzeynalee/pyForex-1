@@ -1237,6 +1237,69 @@ def cmd_backtest(args, logger: logging.Logger):
             with open(output_path, "w") as f:
                 json.dump(serializable_results, f, indent=2, default=str)
             logger.info(f"Results saved to {output_path}")
+
+        if bool(getattr(args, 'export_csv', False)):
+            try:
+                from utils.config import settings
+            except Exception:
+                settings = None
+
+            try:
+                export_root = None
+                if getattr(args, 'export_dir', None):
+                    export_root = Path(str(args.export_dir))
+                else:
+                    export_root = Path(getattr(settings, 'ASSETS_DIR', Path('.'))) / 'backtests'
+                export_root.mkdir(parents=True, exist_ok=True)
+
+                stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                sym = str(getattr(args, 'symbol', 'EURUSD') or 'EURUSD').upper()
+                prof = str(getattr(args, 'profile', 'INTRADAY') or 'INTRADAY').upper()
+                strat = str(getattr(args, 'strategy', 'strategy') or 'strategy').lower().strip()
+
+                trades = results.get('trades') if isinstance(results, dict) else None
+                if trades:
+                    df_trades = pd.DataFrame(trades)
+                else:
+                    df_trades = pd.DataFrame([])
+
+                if not df_trades.empty:
+                    for col in list(df_trades.columns):
+                        try:
+                            if df_trades[col].dtype == 'datetime64[ns]':
+                                df_trades[col] = df_trades[col].astype(str)
+                        except Exception:
+                            pass
+
+                out_trades = export_root / f"backtest_{strat}_{sym}_{prof}_trades_{stamp}.csv"
+                df_trades.to_csv(out_trades, index=False)
+
+                try:
+                    period_start = df['time'].iloc[0] if isinstance(df, pd.DataFrame) and 'time' in df.columns and len(df) else None
+                    period_end = df['time'].iloc[-1] if isinstance(df, pd.DataFrame) and 'time' in df.columns and len(df) else None
+                except Exception:
+                    period_start, period_end = None, None
+
+                summary = {
+                    'strategy': strat,
+                    'symbol': sym,
+                    'profile': prof,
+                    'period_start': str(period_start) if period_start is not None else '',
+                    'period_end': str(period_end) if period_end is not None else '',
+                    'candles': int(len(df)) if isinstance(df, pd.DataFrame) else 0,
+                    'initial_balance': float(args.balance),
+                    'final_balance': float(results.get('final_balance')) if isinstance(results, dict) else float('nan'),
+                    'pnl': float(pnl),
+                    'pnl_pct': float(pnl_pct),
+                    'total_trades': int(len(trades)) if trades else 0,
+                }
+                out_summary = export_root / f"backtest_{strat}_{sym}_{prof}_summary_{stamp}.csv"
+                pd.DataFrame([summary]).to_csv(out_summary, index=False)
+
+                logger.info(f"CSV export written: {out_trades}")
+                logger.info(f"CSV export written: {out_summary}")
+            except Exception as e:
+                logger.warning(f"CSV export failed: {e}")
         
         return 0
         
@@ -1666,6 +1729,17 @@ Examples:
         help="Optional cooldown in minutes after entry/exit for unified3tf.",
     )
     bt_parser.add_argument("--output", type=str, help="Save results to JSON file")
+    bt_parser.add_argument(
+        "--export-csv",
+        action="store_true",
+        help="Export backtest results to CSV (trade history + summary)",
+    )
+    bt_parser.add_argument(
+        "--export-dir",
+        type=str,
+        default=None,
+        help="Optional directory for CSV export (defaults to settings.ASSETS_DIR/backtests)",
+    )
 
     # -------------------------------------------------------------------------
     # ALPHA FACTORY BACKTEST (SEPARATE)
