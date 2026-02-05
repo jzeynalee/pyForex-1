@@ -49,6 +49,8 @@ class Unified3TFConfig:
     min_ltf_confidence: float = 0.70
     min_stability: float = 0.50
     min_directional_score: float = 0.30
+
+    relaxed_alignment: bool = False
     
     # Risk management - CONSERVATIVE
     base_risk_percent: float = 0.5
@@ -78,6 +80,11 @@ class Unified3TFConfig:
 
         if self.profile.upper() == 'SCALP':
             self.max_lot = 0.3
+            self.relaxed_alignment = True
+            self.min_htf_confidence = 0.52
+            self.min_mtf_confidence = 0.55
+            self.min_ltf_confidence = 0.58
+            self.min_stability = 0.40
 
 
 @dataclass
@@ -246,8 +253,18 @@ class Unified3TFStrategy(Strategy):
         self.last_rejection_stage = ""
         self.last_rejection_reason = ""
         
-        # Reset daily stats if new day
-        self._check_daily_reset()
+        # Get current time
+        current_time = None
+        if df is not None and not df.empty and 'time' in df.columns:
+            try:
+                current_time = pd.to_datetime(df['time'].iloc[-1]).to_pydatetime()
+            except Exception:
+                current_time = datetime.utcnow()
+        else:
+            current_time = datetime.utcnow()
+
+        # Reset daily stats if new day (based on bar time)
+        self._check_daily_reset(current_time)
 
         # Sync open positions from executor before enforcing limits
         self._sync_open_positions()
@@ -255,16 +272,6 @@ class Unified3TFStrategy(Strategy):
         # Check daily limits
         if not self._check_limits():
             return None
-        
-        # Get current time
-        current_time = None
-        if 'time' in df.columns:
-            try:
-                current_time = pd.to_datetime(df['time'].iloc[-1]).to_pydatetime()
-            except Exception:
-                current_time = datetime.utcnow()
-        else:
-            current_time = datetime.utcnow()
         
         # Fetch MTF data
         data_htf, data_mtf, data_ltf = self._fetch_mtf_data(df)
@@ -303,9 +310,10 @@ class Unified3TFStrategy(Strategy):
 
             htf_out = self._evaluate_timeframe(data_htf, timeframe=self.config.htf, equity=balance, signal_id="htf")
             if not self._passes_gate(htf_out, min_conf=self.config.min_htf_confidence, min_stability=self.config.min_stability):
-                self.last_rejection_stage = "HTF"
-                self.last_rejection_reason = "htf gate failed"
-                return None
+                if not bool(getattr(self.config, 'relaxed_alignment', False)):
+                    self.last_rejection_stage = "HTF"
+                    self.last_rejection_reason = "htf gate failed"
+                    return None
 
             mtf_out = self._evaluate_timeframe(data_mtf, timeframe=self.config.mtf, equity=balance, signal_id="mtf")
             if not self._passes_gate(mtf_out, min_conf=self.config.min_mtf_confidence, min_stability=self.config.min_stability):
@@ -313,10 +321,16 @@ class Unified3TFStrategy(Strategy):
                 self.last_rejection_reason = "mtf gate failed"
                 return None
 
-            if str(mtf_out.direction) != str(htf_out.direction):
+            if str(getattr(mtf_out, 'direction', 'HOLD')) == 'HOLD':
                 self.last_rejection_stage = "MTF"
-                self.last_rejection_reason = f"mtf dir {mtf_out.direction} != htf dir {htf_out.direction}"
+                self.last_rejection_reason = "mtf hold"
                 return None
+
+            if not bool(getattr(self.config, 'relaxed_alignment', False)):
+                if str(mtf_out.direction) != str(htf_out.direction):
+                    self.last_rejection_stage = "MTF"
+                    self.last_rejection_reason = f"mtf dir {mtf_out.direction} != htf dir {htf_out.direction}"
+                    return None
 
             ltf_out = self._evaluate_timeframe(data_ltf, timeframe=self.config.ltf, equity=balance, signal_id="ltf")
             if not self._passes_gate(ltf_out, min_conf=self.config.min_ltf_confidence, min_stability=self.config.min_stability):
@@ -324,15 +338,21 @@ class Unified3TFStrategy(Strategy):
                 self.last_rejection_reason = "ltf gate failed"
                 return None
 
-            if str(ltf_out.direction) != str(htf_out.direction):
-                self.last_rejection_stage = "LTF"
-                self.last_rejection_reason = f"ltf dir {ltf_out.direction} != htf dir {htf_out.direction}"
-                return None
-
             if ltf_out.direction == 'HOLD':
                 self.last_rejection_stage = "LTF"
                 self.last_rejection_reason = "ltf hold"
                 return None
+
+            if bool(getattr(self.config, 'relaxed_alignment', False)):
+                if str(ltf_out.direction) != str(mtf_out.direction):
+                    self.last_rejection_stage = "MTF"
+                    self.last_rejection_reason = f"mtf dir {mtf_out.direction} != ltf dir {ltf_out.direction}"
+                    return None
+            else:
+                if str(ltf_out.direction) != str(htf_out.direction):
+                    self.last_rejection_stage = "LTF"
+                    self.last_rejection_reason = f"ltf dir {ltf_out.direction} != htf dir {htf_out.direction}"
+                    return None
 
             direction = 'BUY' if ltf_out.direction == 'LONG' else 'SELL'
 
@@ -647,12 +667,14 @@ class Unified3TFStrategy(Strategy):
         """Check if trading is allowed based on limits."""
         # Check max daily trades
         if self._daily_trades >= self.config.max_daily_trades:
-            logger.debug("Max daily trades reached")
+            self.last_rejection_stage = "LIMIT"
+            self.last_rejection_reason = "max daily trades"
             return False
         
         # Check max open trades
         if len(self._open_positions) >= self.config.max_open_trades:
-            logger.debug("Max open trades reached")
+            self.last_rejection_stage = "LIMIT"
+            self.last_rejection_reason = "max open trades"
             return False
         
         # Check daily loss limit
@@ -663,14 +685,18 @@ class Unified3TFStrategy(Strategy):
             
             max_loss = balance * (self.config.max_daily_loss_pct / 100)
             if self._daily_pnl < -max_loss:
-                logger.debug("Daily loss limit reached")
+                self.last_rejection_stage = "LIMIT"
+                self.last_rejection_reason = "daily loss limit"
                 return False
         
         return True
     
-    def _check_daily_reset(self):
+    def _check_daily_reset(self, current_time: Optional[datetime] = None):
         """Reset daily stats if new day."""
-        today = datetime.utcnow().date()
+        try:
+            today = (current_time or datetime.utcnow()).date()
+        except Exception:
+            today = datetime.utcnow().date()
         
         if self._last_trade_date != today:
             self._daily_trades = 0
