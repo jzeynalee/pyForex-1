@@ -129,10 +129,22 @@ class Unified3TFStrategy(Strategy):
         if self._engine is None:
             try:
                 from alpha_factory.mhtcn_integration import UnifiedThreeTFEngine
+
+                profile_type = str(self.config.profile or 'INTRADAY').upper()
+                if profile_type == 'SCALP':
+                    profile_type = 'SCALPING'
+
+                weights_dir = str(getattr(self.config, 'weights_dir', '') or '')
+                if not weights_dir or weights_dir.replace('\\', '/').lower().startswith('models/weights'):
+                    try:
+                        from utils.config import settings
+                        weights_dir = str(getattr(settings, 'WEIGHTS_DIR', weights_dir) or weights_dir)
+                    except Exception:
+                        pass
                 self._engine = UnifiedThreeTFEngine(
                     symbol=self.config.symbol,
-                    profile_type=self.config.profile,
-                    weights_dir=self.config.weights_dir
+                    profile_type=profile_type,
+                    weights_dir=weights_dir
                 )
                 logger.info("UnifiedThreeTFEngine loaded successfully")
             except Exception as e:
@@ -194,6 +206,18 @@ class Unified3TFStrategy(Strategy):
         data_htf, data_mtf, data_ltf = self._fetch_mtf_data(df)
         
         if any(d is None or len(d) < self.config.sequence_length for d in [data_htf, data_mtf, data_ltf]):
+            try:
+                engine = self._get_engine()
+                if engine is not None:
+                    engine.last_rejection_stage = "DATA"
+                    engine.last_rejection_reason = (
+                        f"insufficient bars htf={0 if data_htf is None else len(data_htf)} "
+                        f"mtf={0 if data_mtf is None else len(data_mtf)} "
+                        f"ltf={0 if data_ltf is None else len(data_ltf)} "
+                        f"need>={int(self.config.sequence_length)}"
+                    )
+            except Exception:
+                pass
             logger.debug("Insufficient MTF data")
             return None
         
@@ -284,10 +308,10 @@ class Unified3TFStrategy(Strategy):
         # Map timeframe to pandas resample rule
         tf_map = {
             'M5': '5T', 'M15': '15T', 'M30': '30T',
-            'H1': '1H', 'H4': '4H', 'D1': '1D',
+            'H1': '1h', 'H4': '4h', 'D1': '1D',
         }
         
-        rule = tf_map.get(target_tf.upper(), '1H')
+        rule = tf_map.get(target_tf.upper(), '1h')
         
         try:
             resampled = df.resample(rule).agg({
