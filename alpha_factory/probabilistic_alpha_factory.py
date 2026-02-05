@@ -1471,13 +1471,17 @@ def create_probabilistic_alpha_factory(
     try:
         from .mhtcn_integration import MHTCNFeatureProvider
         from .trading_profiles import get_profile
-        
-        trading_profile = get_profile(profile)
+
+        profile_key = str(profile or 'INTRADAY').upper().strip()
+        if profile_key == 'SCALP':
+            profile_key = 'SCALPING'
+
+        trading_profile = get_profile(profile_key)
         mhtcn_provider = MHTCNFeatureProvider(
             profile=trading_profile,
             weights_dir=mhtcn_weights_dir
         )
-        logger.info(f"MH-TCN provider initialized for {profile}")
+        logger.info(f"MH-TCN provider initialized for {profile_key}")
     except Exception as e:
         logger.warning(f"Could not initialize MH-TCN provider: {e}")
     
