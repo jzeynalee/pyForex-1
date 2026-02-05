@@ -463,25 +463,16 @@ def cmd_alpha_backtest(args, logger: logging.Logger):
         if 'real_volume' not in df.columns:
             df['real_volume'] = df.get('tick_volume', 100) * 100
 
-        engine = str(getattr(args, 'engine', 'layered') or 'layered').lower().strip()
-        if engine not in {'layered', 'decision'}:
-            engine = 'layered'
+        engine = str(getattr(args, 'engine', 'decision') or 'decision').lower().strip()
+        if engine not in {'decision', 'layered'}:
+            engine = 'decision'
 
         if engine == 'layered':
-            from layered_backtest import LayeredBacktest
-
-            layer = str(getattr(args, 'layer', 'alpha_only') or 'alpha_only')
-            bt = LayeredBacktest(test_layer=layer)
-
-            df['returns'] = df['close'].pct_change()
-            df['atr'] = bt.calculate_atr(df)
-            df['rsi'] = bt.calculate_rsi(df)
-            df['macd'], df['macd_signal'] = bt.calculate_macd(df)
-            df['adx'] = bt.calculate_adx(df)
-            df['volatility'] = df['returns'].rolling(20).std()
-
-            metrics = bt.run_backtest(df.dropna().reset_index(drop=True))
-            rejection_summary = None
+            logger.error(
+                "Layered alpha backtest engine has been removed. "
+                "Use --engine decision to evaluate ProbabilisticAlphaFactory on a rolling window."
+            )
+            return 1
 
         else:
             from alpha_factory.features_engineering import FeatureEngineerOptimized
@@ -1664,6 +1655,12 @@ Examples:
         "backtest",
         help="Run backtest on historical data",
         description="Backtest strategy on historical OHLCV data",
+    )
+    bt_parser.add_argument(
+        "--log-file",
+        type=str,
+        default=None,
+        help="Log to file (can also be passed before the subcommand)",
     )
     bt_parser.add_argument("--data", required=True, help="Path to OHLCV CSV file")
     bt_parser.add_argument(
