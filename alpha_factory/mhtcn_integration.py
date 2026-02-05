@@ -242,11 +242,16 @@ class MHTCNFeatureProvider:
             aliases.append('SCALP')
         elif profile_name == 'SCALP':
             aliases.append('SCALPING')
+
+        tf = str(timeframe or '').upper().strip()
         
         # Try different naming conventions
         candidates = []
         for name in aliases:
             candidates.extend([
+                self.weights_dir / f"multihead_tcn_{name}_{tf}.pth" if tf else None,
+                self.weights_dir / f"multihead_tcn_{name}_{tf}_pa_v1.pth" if tf else None,
+                self.weights_dir / f"mhtcn_{name}_{tf}.pth" if tf else None,
                 self.weights_dir / f"multihead_tcn_{name}.pth",
                 self.weights_dir / f"multihead_tcn_{name}_pa_v1.pth",
                 self.weights_dir / f"mhtcn_{name}.pth",
@@ -256,7 +261,7 @@ class MHTCNFeatureProvider:
             self.weights_dir / f"multihead_tcn_INTRADAY_pa_v1.pth",  # Fallback
         ])
         
-        for candidate in candidates:
+        for candidate in [c for c in candidates if c is not None]:
             if candidate.exists():
                 return candidate
         
