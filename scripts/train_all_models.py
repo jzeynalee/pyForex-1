@@ -88,6 +88,8 @@ def train_multihead_tcn(
     profile: str,
     data_path: str,
     max_rows: int = 1_000_000,
+    max_features: int = 0,
+    select_top_features: bool = False,
     epochs: int = 100,
     batch_size: int = 64,
     seq_len: int = 60,
@@ -143,30 +145,31 @@ def train_multihead_tcn(
     numeric_cols = features_df.select_dtypes(include=[np.number]).columns.tolist()
     feature_cols = [c for c in numeric_cols if c not in exclude_cols]
     
-    # Limit to reasonable number of features
-    if len(feature_cols) > 64:
-        # Use feature importance to select top features
-        logger.info(f"Selecting top 64 features from {len(feature_cols)}...")
-        from sklearn.ensemble import RandomForestClassifier
-        from sklearn.preprocessing import RobustScaler
-        
-        # Create simple labels for feature selection
-        price_change = features_df['close'].pct_change(5).shift(-5)
-        labels = (price_change > 0.001).astype(int) - (price_change < -0.001).astype(int) + 1
-        labels = labels.dropna()
-        
-        # Align data
-        valid_idx = labels.index.intersection(features_df.index)
-        X_sel = features_df.loc[valid_idx, feature_cols].fillna(0)
-        y_sel = labels.loc[valid_idx]
-        
-        # Fit RF for feature importance
-        rf = RandomForestClassifier(n_estimators=50, max_depth=10, n_jobs=-1, random_state=42)
-        rf.fit(X_sel[:50000], y_sel[:50000])  # Use subset for speed
-        
-        importances = pd.Series(rf.feature_importances_, index=feature_cols)
-        feature_cols = importances.nlargest(64).index.tolist()
-        logger.info(f"Selected {len(feature_cols)} features")
+    if int(max_features or 0) > 0 and len(feature_cols) > int(max_features):
+        if bool(select_top_features):
+            logger.info(f"Selecting top {int(max_features)} features from {len(feature_cols)}...")
+            from sklearn.ensemble import RandomForestClassifier
+            
+            # Create simple labels for feature selection
+            price_change = features_df['close'].pct_change(5).shift(-5)
+            labels = (price_change > 0.001).astype(int) - (price_change < -0.001).astype(int) + 1
+            labels = labels.dropna()
+            
+            # Align data
+            valid_idx = labels.index.intersection(features_df.index)
+            X_sel = features_df.loc[valid_idx, feature_cols].fillna(0)
+            y_sel = labels.loc[valid_idx]
+            
+            # Fit RF for feature importance
+            rf = RandomForestClassifier(n_estimators=50, max_depth=10, n_jobs=-1, random_state=42)
+            rf.fit(X_sel[:50000], y_sel[:50000])  # Use subset for speed
+            
+            importances = pd.Series(rf.feature_importances_, index=feature_cols)
+            feature_cols = importances.nlargest(int(max_features)).index.tolist()
+            logger.info(f"Selected {len(feature_cols)} features")
+        else:
+            feature_cols = feature_cols[:int(max_features)]
+            logger.info(f"Capped features to first {len(feature_cols)} columns (max_features={int(max_features)})")
     
     # Prepare features and labels
     logger.info("Preparing features and labels...")
@@ -823,6 +826,10 @@ def main():
                         help='Trading profiles to train')
     parser.add_argument('--data-rows', type=int, default=1_000_000,
                         help='Maximum data rows to use')
+    parser.add_argument('--max-features', type=int, default=0,
+                        help='Maximum number of features to use (0 = no cap)')
+    parser.add_argument('--select-top-features', action='store_true',
+                        help='Explicitly enable RF-based top-N feature selection when --max-features is set')
     parser.add_argument('--epochs', type=int, default=100,
                         help='Training epochs for neural networks')
     parser.add_argument('--batch-size', type=int, default=64,
@@ -893,6 +900,8 @@ def main():
                         profile=profile,
                         data_path=str(data_path),
                         max_rows=args.data_rows,
+                        max_features=args.max_features,
+                        select_top_features=args.select_top_features,
                         epochs=args.epochs,
                         batch_size=args.batch_size,
                         device=args.device
