@@ -1142,6 +1142,7 @@ class ProbabilisticAlphaFactory:
         self,
         df: pd.DataFrame,
         features: pd.DataFrame,
+        timeframe: str = "H1",
         swing_points: Optional[List] = None,
         causality_results: Optional[Dict] = None,
         current_equity: float = 1.0,
@@ -1178,7 +1179,7 @@ class ProbabilisticAlphaFactory:
         # Stage 4: MH-TCN temporal refinement (if available)
         mhtcn_probs = None
         if self.mhtcn_provider is not None:
-            mhtcn_probs = self._get_mhtcn_probs(df)
+            mhtcn_probs = self._get_mhtcn_probs(df, timeframe=timeframe)
             if mhtcn_probs:
                 reasoning.append(f"MH-TCN: bull={mhtcn_probs.get('bull', 0):.2f}")
         
@@ -1300,14 +1301,14 @@ class ProbabilisticAlphaFactory:
         returns = df['close'].pct_change().tail(20).dropna()
         return float(returns.std()) if len(returns) > 0 else 0.01
     
-    def _get_mhtcn_probs(self, df: pd.DataFrame) -> Optional[Dict[str, float]]:
+    def _get_mhtcn_probs(self, df: pd.DataFrame, timeframe: str = "H1") -> Optional[Dict[str, float]]:
         """Get MH-TCN probability predictions."""
         if self.mhtcn_provider is None:
             return None
         
         try:
             # Get prediction from MH-TCN
-            prediction = self.mhtcn_provider.predict(df, "H1")  # Default to H1
+            prediction = self.mhtcn_provider.predict(df, str(timeframe or "H1"))
             if prediction is None:
                 return None
             
