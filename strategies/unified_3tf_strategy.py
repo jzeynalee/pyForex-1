@@ -24,6 +24,10 @@ from pathlib import Path
 
 from strategies.base import Strategy
 
+from alpha_factory.features_engineering import FeatureEngineerOptimized
+from alpha_factory.market_data import MarketData
+from alpha_factory.probabilistic_alpha_factory import create_probabilistic_alpha_factory
+
 logger = logging.getLogger(__name__)
 
 
@@ -112,9 +116,14 @@ class Unified3TFStrategy(Strategy):
         self.executor = executor
         self.name = f"Unified3TF_{self.config.profile}"
         
-        # Initialize 3TF engine
+        # Authoritative decision engine (probabilistic alpha factory)
         self._engine = None
+        self._feature_engineer: Optional[FeatureEngineerOptimized] = None
         self._initialized = False
+
+        # Backtest diagnostics (kept for compatibility with main.py backtest reporting)
+        self.last_rejection_stage: str = ""
+        self.last_rejection_reason: str = ""
         
         # State tracking
         self._daily_trades = 0
@@ -125,31 +134,21 @@ class Unified3TFStrategy(Strategy):
         logger.info(f"Unified3TFStrategy created for {self.config.symbol} ({self.config.profile})")
     
     def _get_engine(self):
-        """Lazy load the 3TF engine."""
+        """Lazy load the authoritative decision engine."""
         if self._engine is None:
-            try:
-                from alpha_factory.mhtcn_integration import UnifiedThreeTFEngine
+            weights_dir = str(getattr(self.config, 'weights_dir', '') or '')
+            if not weights_dir or weights_dir.replace('\\', '/').lower().startswith('models/weights'):
+                try:
+                    from utils.config import settings
+                    weights_dir = str(getattr(settings, 'WEIGHTS_DIR', weights_dir) or weights_dir)
+                except Exception:
+                    pass
 
-                profile_type = str(self.config.profile or 'INTRADAY').upper()
-                if profile_type == 'SCALP':
-                    profile_type = 'SCALPING'
-
-                weights_dir = str(getattr(self.config, 'weights_dir', '') or '')
-                if not weights_dir or weights_dir.replace('\\', '/').lower().startswith('models/weights'):
-                    try:
-                        from utils.config import settings
-                        weights_dir = str(getattr(settings, 'WEIGHTS_DIR', weights_dir) or weights_dir)
-                    except Exception:
-                        pass
-                self._engine = UnifiedThreeTFEngine(
-                    symbol=self.config.symbol,
-                    profile_type=profile_type,
-                    weights_dir=weights_dir
-                )
-                logger.info("UnifiedThreeTFEngine loaded successfully")
-            except Exception as e:
-                logger.error(f"Failed to load UnifiedThreeTFEngine: {e}")
-                self._engine = None
+            self._engine = create_probabilistic_alpha_factory(
+                mhtcn_weights_dir=weights_dir,
+                profile=str(self.config.profile or 'INTRADAY').upper(),
+            )
+            logger.info("ProbabilisticAlphaFactory loaded successfully")
         return self._engine
     
     def initialize(self, starting_balance: float = 10000.0) -> bool:
@@ -159,6 +158,8 @@ class Unified3TFStrategy(Strategy):
             if engine is None:
                 logger.error("Could not initialize 3TF engine")
                 return False
+
+            self._feature_engineer = FeatureEngineerOptimized()
             
             self._initialized = True
             logger.info(f"Unified3TFStrategy initialized with balance: {starting_balance}")
@@ -184,6 +185,9 @@ class Unified3TFStrategy(Strategy):
         if not self._initialized:
             if not self.initialize():
                 return None
+
+        self.last_rejection_stage = ""
+        self.last_rejection_reason = ""
         
         # Reset daily stats if new day
         self._check_daily_reset()
@@ -227,36 +231,116 @@ class Unified3TFStrategy(Strategy):
             return None
         
         try:
-            instruction = engine.evaluate(
-                data_htf=data_htf,
-                data_mtf=data_mtf,
-                data_ltf=data_ltf,
-                current_time=current_time
-            )
-            
-            if instruction is None:
-                return None
-            
-            # Convert instruction to signal
-            direction = 'BUY' if instruction.direction == 'LONG' else 'SELL'
-            
-            # Execute if we have an executor
+            balance = 10000.0
             if self.executor is not None:
-                self._execute_trade(instruction, data_ltf)
-            
-            # Track trade
+                try:
+                    if hasattr(self.executor, 'balance'):
+                        balance = float(self.executor.balance)
+                    elif hasattr(self.executor, 'get_account_balance'):
+                        balance = float(self.executor.get_account_balance())
+                except Exception:
+                    balance = 10000.0
+
+            htf_out = self._evaluate_timeframe(data_htf, timeframe=self.config.htf, equity=balance, signal_id="htf")
+            if not self._passes_gate(htf_out, min_conf=self.config.min_htf_confidence, min_stability=self.config.min_stability):
+                self.last_rejection_stage = "HTF"
+                self.last_rejection_reason = "htf gate failed"
+                return None
+
+            mtf_out = self._evaluate_timeframe(data_mtf, timeframe=self.config.mtf, equity=balance, signal_id="mtf")
+            if not self._passes_gate(mtf_out, min_conf=self.config.min_mtf_confidence, min_stability=self.config.min_stability):
+                self.last_rejection_stage = "MTF"
+                self.last_rejection_reason = "mtf gate failed"
+                return None
+
+            if str(mtf_out.direction) != str(htf_out.direction):
+                self.last_rejection_stage = "MTF"
+                self.last_rejection_reason = f"mtf dir {mtf_out.direction} != htf dir {htf_out.direction}"
+                return None
+
+            ltf_out = self._evaluate_timeframe(data_ltf, timeframe=self.config.ltf, equity=balance, signal_id="ltf")
+            if not self._passes_gate(ltf_out, min_conf=self.config.min_ltf_confidence, min_stability=self.config.min_stability):
+                self.last_rejection_stage = "LTF"
+                self.last_rejection_reason = "ltf gate failed"
+                return None
+
+            if str(ltf_out.direction) != str(htf_out.direction):
+                self.last_rejection_stage = "LTF"
+                self.last_rejection_reason = f"ltf dir {ltf_out.direction} != htf dir {htf_out.direction}"
+                return None
+
+            if ltf_out.direction == 'HOLD':
+                self.last_rejection_stage = "LTF"
+                self.last_rejection_reason = "ltf hold"
+                return None
+
+            direction = 'BUY' if ltf_out.direction == 'LONG' else 'SELL'
+
+            if self.executor is not None:
+                self._execute_trade_probabilistic(direction, ltf_out, data_ltf)
+
             self._daily_trades += 1
-            
+
             logger.info(
                 f"Trade signal: {direction} {self.config.symbol} "
-                f"(conf={instruction.confidence:.2f})"
+                f"(conf={ltf_out.confidence:.2f})"
             )
-            
+
             return direction
-            
+
         except Exception as e:
-            logger.error(f"3TF evaluation error: {e}")
+            logger.error(f"Probabilistic 3TF evaluation error: {e}")
+            self.last_rejection_stage = "ERROR"
+            self.last_rejection_reason = str(e)[:240]
             return None
+
+    def _evaluate_timeframe(self, df: pd.DataFrame, timeframe: str, equity: float, signal_id: str):
+        if df is None or df.empty:
+            raise ValueError("empty dataframe")
+        if self._feature_engineer is None:
+            self._feature_engineer = FeatureEngineerOptimized()
+
+        d0 = df.copy()
+        d0.columns = [str(c).lower().strip() for c in d0.columns]
+        if 'volume' not in d0.columns:
+            if 'tick_volume' in d0.columns:
+                d0['volume'] = d0['tick_volume']
+            else:
+                d0['volume'] = 0.0
+
+        feats = self._feature_engineer.generate_features(d0, batch_processing=False)
+
+        swing_points = None
+        try:
+            md = MarketData(d0, handle_splits=False)
+            swing_points = md.extract_swings(lookback=5, strength_threshold=0.3)
+        except Exception:
+            swing_points = None
+
+        engine = self._get_engine()
+        out = engine.evaluate(
+            df=d0,
+            features=feats,
+            timeframe=str(timeframe or "H1").upper(),
+            swing_points=swing_points,
+            causality_results=None,
+            current_equity=float(equity or 1.0),
+            signal_id=str(signal_id or "default"),
+        )
+        return out
+
+    @staticmethod
+    def _passes_gate(out, min_conf: float, min_stability: float) -> bool:
+        try:
+            if out is None:
+                return False
+            if float(out.confidence) < float(min_conf):
+                return False
+            if float(getattr(out, 'stability_score', 1.0)) < float(min_stability):
+                return False
+            return True
+        except Exception:
+            return False
     
     def _fetch_mtf_data(self, ltf_df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         """Fetch data for all timeframes."""
@@ -333,34 +417,21 @@ class Unified3TFStrategy(Strategy):
             logger.warning(f"Resample failed: {e}")
             return df.reset_index()
     
-    def _execute_trade(self, instruction, df: pd.DataFrame):
-        """Execute trade based on instruction."""
+    def _execute_trade_probabilistic(self, direction: str, decision_out, df: pd.DataFrame):
+        """Execute trade based on probabilistic decision output."""
         if self.executor is None:
             return
         
         try:
             entry_price = float(df['close'].iloc[-1])
-            
-            # Get SL/TP from engine
-            engine = self._get_engine()
-            if engine is not None:
-                # Get prediction for SL/TP calculation
-                prediction = engine.feature_provider.predict(df, self.config.ltf)
-                if prediction is not None:
-                    sl, tp = engine.get_sltp_from_quantiles(
-                        prediction, entry_price, instruction.direction
-                    )
-                else:
-                    sl, tp = self._fallback_sltp(entry_price, instruction.direction)
-            else:
-                sl, tp = self._fallback_sltp(entry_price, instruction.direction)
+
+            sl, tp = self._atr_sltp(df, entry_price, direction)
             
             # Calculate position size
-            volume = self._calculate_position_size(entry_price, sl, instruction.size_multiplier)
+            size_mult = float(getattr(decision_out, 'size_multiplier', 1.0) or 1.0)
+            volume = self._calculate_position_size(entry_price, sl, size_mult)
             
             # Execute
-            direction = 'BUY' if instruction.direction == 'LONG' else 'SELL'
-            
             if hasattr(self.executor, 'entry'):
                 self.executor.entry(
                     signal=direction,
@@ -378,6 +449,33 @@ class Unified3TFStrategy(Strategy):
                 
         except Exception as e:
             logger.error(f"Trade execution failed: {e}")
+
+    def _atr_sltp(self, df: pd.DataFrame, entry_price: float, direction: str) -> Tuple[float, float]:
+        try:
+            d0 = df.copy()
+            d0.columns = [str(c).lower().strip() for c in d0.columns]
+            high = d0['high']
+            low = d0['low']
+            close = d0['close']
+            prev_close = close.shift(1)
+            tr = pd.concat([
+                (high - low),
+                (high - prev_close).abs(),
+                (low - prev_close).abs(),
+            ], axis=1).max(axis=1)
+            atr = float(tr.rolling(14, min_periods=1).mean().iloc[-1])
+            if not np.isfinite(atr) or atr <= 0:
+                return self._fallback_sltp(entry_price, 'LONG' if direction == 'BUY' else 'SHORT')
+
+            sl_mult = 1.5
+            sl_dist = atr * sl_mult
+            rr = float(getattr(self.config, 'min_risk_reward', 2.0) or 2.0)
+            tp_dist = sl_dist * rr
+            if direction == 'BUY':
+                return entry_price - sl_dist, entry_price + tp_dist
+            return entry_price + sl_dist, entry_price - tp_dist
+        except Exception:
+            return self._fallback_sltp(entry_price, 'LONG' if direction == 'BUY' else 'SHORT')
     
     def _fallback_sltp(self, entry_price: float, direction: str) -> Tuple[float, float]:
         """Fallback SL/TP calculation."""
