@@ -483,68 +483,23 @@ def cmd_alpha_backtest(args, logger: logging.Logger):
             rejection_summary = None
 
         else:
-            from alpha_factory.decision_making import decision_function, DecisionConfig
-            from alpha_factory.signal_quality_optimizer import SignalQualityOptimizer
+            from alpha_factory.features_engineering import FeatureEngineerOptimized
+            from alpha_factory.market_data import MarketData
+            from alpha_factory.probabilistic_alpha_factory import create_probabilistic_alpha_factory
 
             window = int(getattr(args, 'window', 300) or 300)
-            disable_quality = bool(getattr(args, 'disable_signal_quality', False))
+            _ = bool(getattr(args, 'disable_signal_quality', False))
 
             df = df.dropna().reset_index(drop=True)
             if window < 50:
                 window = 50
 
-            def _calc_atr(d0: pd.DataFrame, period: int = 14) -> pd.Series:
-                high = d0['high']
-                low = d0['low']
-                close = d0['close']
-                prev_close = close.shift(1)
-                tr = pd.concat([
-                    (high - low),
-                    (high - prev_close).abs(),
-                    (low - prev_close).abs(),
-                ], axis=1).max(axis=1)
-                return tr.rolling(period, min_periods=1).mean()
-
-            def _calc_rsi(d0: pd.DataFrame, period: int = 14) -> pd.Series:
-                delta = d0['close'].diff()
-                gain = delta.where(delta > 0, 0.0)
-                loss = (-delta.where(delta < 0, 0.0))
-                avg_gain = gain.rolling(period, min_periods=1).mean()
-                avg_loss = loss.rolling(period, min_periods=1).mean()
-                rs = avg_gain / (avg_loss + 1e-12)
-                return 100 - (100 / (1 + rs))
-
-            def _calc_macd(d0: pd.DataFrame, fast: int = 12, slow: int = 26, signal: int = 9) -> Tuple[pd.Series, pd.Series]:
-                ema_fast = d0['close'].ewm(span=fast, adjust=False).mean()
-                ema_slow = d0['close'].ewm(span=slow, adjust=False).mean()
-                macd = ema_fast - ema_slow
-                macd_signal = macd.ewm(span=signal, adjust=False).mean()
-                return macd, macd_signal
-
-            def _calc_adx(d0: pd.DataFrame, period: int = 14) -> pd.Series:
-                high = d0['high']
-                low = d0['low']
-                close = d0['close']
-
-                up_move = high.diff()
-                down_move = (-low.diff())
-
-                plus_dm = up_move.where((up_move > down_move) & (up_move > 0), 0.0)
-                minus_dm = down_move.where((down_move > up_move) & (down_move > 0), 0.0)
-
-                atr = _calc_atr(d0, period=period)
-                plus_di = 100 * (plus_dm.rolling(period, min_periods=1).mean() / (atr + 1e-12))
-                minus_di = 100 * (minus_dm.rolling(period, min_periods=1).mean() / (atr + 1e-12))
-
-                dx = 100 * (plus_di - minus_di).abs() / ((plus_di + minus_di) + 1e-12)
-                return dx.rolling(period, min_periods=1).mean()
-
             rejection_counts: Dict[str, int] = {}
             def _bump(key: str):
                 rejection_counts[key] = int(rejection_counts.get(key, 0)) + 1
 
-            cfg = DecisionConfig()
-            optimizer = None if disable_quality else SignalQualityOptimizer()
+            feat_engineer = FeatureEngineerOptimized()
+            engine = create_probabilistic_alpha_factory(profile='INTRADAY')
 
             buys = 0
             sells = 0
@@ -557,36 +512,40 @@ def cmd_alpha_backtest(args, logger: logging.Logger):
                 if 'time' not in w.columns:
                     w['time'] = pd.NaT
 
-                w['atr'] = _calc_atr(w)
-                w['rsi'] = _calc_rsi(w)
-                macd, macd_signal = _calc_macd(w)
-                w['macd'] = macd
-                w['macd_signal'] = macd_signal
-                w['adx'] = _calc_adx(w)
-                w['sma_20'] = w['close'].rolling(20, min_periods=1).mean()
-                w['sma_50'] = w['close'].rolling(50, min_periods=1).mean()
-                sma20 = w['sma_20']
-                std20 = w['close'].rolling(20, min_periods=1).std()
-                w['bb_upper'] = sma20 + 2.0 * std20
-                w['bb_lower'] = sma20 - 2.0 * std20
+                w.columns = [str(c).lower().strip() for c in w.columns]
+                if 'volume' not in w.columns:
+                    if 'tick_volume' in w.columns:
+                        w['volume'] = w['tick_volume']
+                    else:
+                        w['volume'] = 0.0
 
-                decision = decision_function(
-                    swing_points=[],
-                    features=w,
-                    causality_results={},
-                    config=cfg,
-                    market_structure=None,
-                    signal_optimizer=optimizer,
+                feats = feat_engineer.generate_features(w, batch_processing=False)
+
+                swing_points = None
+                try:
+                    md = MarketData(w, handle_splits=False)
+                    swing_points = md.extract_swings(lookback=5, strength_threshold=0.3)
+                except Exception:
+                    swing_points = None
+
+                out = engine.evaluate(
+                    df=w,
+                    features=feats,
+                    timeframe='H1',
+                    swing_points=swing_points,
+                    causality_results=None,
+                    current_equity=float(getattr(args, 'balance', 10000.0) or 10000.0),
+                    signal_id="alpha_backtest",
                 )
                 evaluated += 1
 
-                if decision.decision.value == 'BUY':
+                if str(out.direction) == 'LONG':
                     buys += 1
-                elif decision.decision.value == 'SELL':
+                elif str(out.direction) == 'SHORT':
                     sells += 1
                 else:
                     holds += 1
-                    reasons = ' | '.join([str(r) for r in (decision.reasoning or [])])
+                    reasons = ' | '.join([str(r) for r in (getattr(out, 'reasoning', None) or [])])
                     reasons_l = reasons.lower()
                     if 'confidence gate' in reasons_l:
                         _bump('CONFIDENCE_GATE')
@@ -727,6 +686,17 @@ def cmd_live(args, logger: logging.Logger):
         from utils.config import settings
         from trading.bot import TradingBot, BotConfig
         from strategies.neural_hybrid import NeuralHybridStrategy
+        strategy_map = {
+            "neural": NeuralHybridStrategy,
+            "tcn": NeuralHybridStrategy,
+            "unified3tf": None,
+        }
+
+        try:
+            from strategies.unified_3tf_strategy import Unified3TFStrategy
+            strategy_map["unified3tf"] = Unified3TFStrategy
+        except Exception as e:
+            logger.warning(f"Could not import Unified3TFStrategy: {e}")
         
         # Override settings from CLI
         config = BotConfig(
@@ -736,18 +706,60 @@ def cmd_live(args, logger: logging.Logger):
             use_mock=args.mock,
         )
         
-        strategy_map = {
-            "neural": NeuralHybridStrategy,
-        }
-        
-        strategy_cls = strategy_map.get(args.strategy, NeuralHybridStrategy)
+        strategy_cls = strategy_map.get(str(getattr(args, 'strategy', '') or '').lower().strip(), NeuralHybridStrategy)
 
         if bool(getattr(settings, 'ENFORCE_AUTHORITATIVE_PIPELINE', True)):
-            if strategy_cls is not NeuralHybridStrategy:
-                logger.error("Authoritative pipeline enforced: only NeuralHybridStrategy is allowed")
+            allow = False
+            try:
+                allow = (strategy_cls is NeuralHybridStrategy)
+            except Exception:
+                allow = False
+            if not allow:
+                try:
+                    allow = (strategy_cls.__name__ == 'Unified3TFStrategy')
+                except Exception:
+                    allow = False
+            if not allow:
+                logger.error("Authoritative pipeline enforced: only NeuralHybridStrategy or Unified3TFStrategy is allowed")
                 return 1
         
-        bot = TradingBot(config=config, strategy_class=strategy_cls)
+        if getattr(strategy_cls, '__name__', '') == 'Unified3TFStrategy':
+            from trading.mt5_connector import MT5Connector
+            from strategies.unified_3tf_strategy import Unified3TFConfig
+            connector = MT5Connector(
+                account=int(getattr(settings, 'MT5_ACCOUNT', 0) or 0),
+                password=str(getattr(settings, 'MT5_PASSWORD', '') or ''),
+                server=str(getattr(settings, 'MT5_SERVER', '') or ''),
+                path=str(getattr(settings, 'MT5_PATH', '') or ''),
+                symbol=str(args.symbol).upper(),
+                timeframe=str(args.timeframe).upper(),
+                magic_number=int(getattr(settings, 'MAGIC_NUMBER', 123456) or 123456),
+            )
+            class UnifiedProvider:
+                def __init__(self, conn: MT5Connector):
+                    self.conn = conn
+                def get_ohlcv(self, symbol: str, timeframe: str = "", count: int = 200):
+                    return self.conn.get_data(n=int(count), symbol=str(symbol).upper(), timeframe=str(timeframe).upper())
+                def connect(self):
+                    return self.conn.connect()
+                def disconnect(self):
+                    return self.conn.disconnect()
+                def get_account_info(self):
+                    return self.conn.get_account_info()
+                def entry(self, signal: str, volume: float, sl: float, tp: float):
+                    return self.conn.entry(signal, volume, sl, tp)
+                @property
+                def balance(self):
+                    info = self.conn.get_account_info()
+                    return float(getattr(info, 'balance', 10000.0) or 10000.0)
+            provider = UnifiedProvider(connector)
+            bot = TradingBot(config=config, strategy_class=lambda **kw: Unified3TFStrategy(
+                config=Unified3TFConfig(profile=str(getattr(settings, 'PROFILE', 'INTRADAY') or 'INTRADAY').upper(), symbol=str(args.symbol).upper()),
+                data_provider=provider,
+                executor=provider,
+            ), connector=connector)
+        else:
+            bot = TradingBot(config=config, strategy_class=strategy_cls)
         bot.run()
         
         return 0
