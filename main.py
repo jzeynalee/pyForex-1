@@ -42,6 +42,7 @@ import argparse
 import logging
 import sys
 import os
+import math
 from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict, Any, Tuple, List
@@ -613,6 +614,27 @@ def cmd_fetch_data(args, logger: logging.Logger):
         timeframes = [tf.strip().upper() for tf in tfs.split(',') if tf.strip()]
         n_bars = int(getattr(args, 'bars', 50000) or 50000)
 
+        def _tf_to_minutes(tf: str) -> Optional[int]:
+            tf = str(tf or '').upper().strip()
+            if not tf:
+                return None
+            if tf.startswith('M') and tf[1:].isdigit():
+                return int(tf[1:])
+            if tf.startswith('H') and tf[1:].isdigit():
+                return int(tf[1:]) * 60
+            if tf in ('D1', '1D'):
+                return 24 * 60
+            if tf in ('W1', '1W'):
+                return 7 * 24 * 60
+            if tf in ('MN1', '1MN', 'MO1', '1MO'):
+                return 30 * 24 * 60
+            return None
+
+        base_tf = timeframes[0] if timeframes else 'H1'
+        base_minutes = _tf_to_minutes(base_tf)
+        if base_minutes is None:
+            logger.warning(f"Could not infer minutes for base timeframe {base_tf}; will fetch {n_bars} bars for each timeframe")
+
         out_root = (settings.ASSETS_DIR / 'data' / 'mt5' / symbol)
         out_root.mkdir(parents=True, exist_ok=True)
 
@@ -630,8 +652,20 @@ def cmd_fetch_data(args, logger: logging.Logger):
             return 1
 
         written = []
+        stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         for tf in timeframes:
-            df = connector.get_data(n=n_bars, timeframe=tf)
+            tf_minutes = _tf_to_minutes(tf)
+            n_fetch = n_bars
+            if base_minutes is not None and tf_minutes is not None and tf_minutes > 0:
+                # Preserve aligned time-span: bars * minutes ~= constant across TFs.
+                # Example: base=M5 (5m). For M15: N*5/15 = N/3. For H1: N*5/60 = N/12.
+                n_fetch = int(max(1, math.ceil(n_bars * (base_minutes / float(tf_minutes)))))
+            elif base_minutes is not None and tf_minutes is None:
+                logger.warning(f"Could not infer minutes for timeframe {tf}; fetching {n_bars} bars")
+
+            logger.info(f"Fetching {symbol} {tf}: {n_fetch} bars (base={base_tf}:{n_bars})")
+
+            df = connector.get_data(n=n_fetch, timeframe=tf)
             if df is None or df.empty:
                 logger.error(f"No data fetched for {symbol} {tf}")
                 continue
@@ -641,7 +675,6 @@ def cmd_fetch_data(args, logger: logging.Logger):
             if 'time' in df.columns:
                 df['time'] = pd.to_datetime(df['time'])
 
-            stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             out_path = out_root / f"{symbol}_{tf}_{stamp}.csv"
             df.to_csv(out_path, index=False)
             written.append(str(out_path))
@@ -820,6 +853,17 @@ def cmd_backtest(args, logger: logging.Logger):
         logger.info(f"Loading data from {args.data}")
         df = _load_csv(args.data)
 
+        try:
+            if 'time' in df.columns and len(df) > 2:
+                t0 = pd.to_datetime(df['time'].iloc[0])
+                t1 = pd.to_datetime(df['time'].iloc[-1])
+                span_days = (t1 - t0).days
+                if span_days < 365:
+                    logger.error(f"Backtest data span too short: {span_days} days (<365). Provide at least 1 year of data.")
+                    return 1
+        except Exception:
+            pass
+
         mtf_df = None
         htf_df = None
         if getattr(args, 'data_mtf', None):
@@ -870,6 +914,12 @@ def cmd_backtest(args, logger: logging.Logger):
             strategy_map["unified3tf"] = Unified3TFStrategy
         except Exception as e:
             logger.warning(f"Could not import Unified3TFStrategy: {e}")
+
+        try:
+            from strategies.unified_3tf_strategy_riskmanaged import RiskManagedUnified3TFStrategy
+            strategy_map["unified3tf"] = RiskManagedUnified3TFStrategy
+        except Exception as e:
+            logger.warning(f"Could not import RiskManagedUnified3TFStrategy: {e}")
         strategy_cls = strategy_map.get(args.strategy, NeuralHybridStrategy)
 
         if bool(getattr(settings, 'ENFORCE_AUTHORITATIVE_PIPELINE', True)):
@@ -880,7 +930,7 @@ def cmd_backtest(args, logger: logging.Logger):
                 allow = False
             if not allow:
                 try:
-                    allow = (strategy_cls.__name__ == 'Unified3TFStrategy')
+                    allow = (strategy_cls.__name__ in ('Unified3TFStrategy', 'RiskManagedUnified3TFStrategy'))
                 except Exception:
                     allow = False
             if not allow:
@@ -915,6 +965,67 @@ def cmd_backtest(args, logger: logging.Logger):
                 ltf_tf = str(prof.lower_tf.value).upper()
                 primary_tf = str(prof.primary_tf.value).upper()
                 higher_tf = str(prof.higher_tf.value).upper()
+
+                def _prep_time_df(d0: pd.DataFrame) -> pd.DataFrame:
+                    d0 = d0.copy()
+                    d0.columns = [str(c).lower().strip() for c in d0.columns]
+                    if 'time' in d0.columns:
+                        d0['time'] = pd.to_datetime(d0['time'])
+                        d0.sort_values('time', inplace=True)
+                        try:
+                            d0.drop_duplicates(subset=['time'], keep='last', inplace=True)
+                        except Exception:
+                            pass
+                        d0.reset_index(drop=True, inplace=True)
+                    return d0
+
+                def _log_span(tag: str, d0: pd.DataFrame):
+                    try:
+                        if d0 is None or d0.empty or 'time' not in d0.columns:
+                            return
+                        t0 = pd.to_datetime(d0['time'].iloc[0])
+                        t1 = pd.to_datetime(d0['time'].iloc[-1])
+                        logger.info(f"{tag}: rows={len(d0)} span_days={(t1 - t0).days} start={t0} end={t1}")
+                    except Exception:
+                        pass
+
+                df = _prep_time_df(df)
+                if mtf_df is not None:
+                    mtf_df = _prep_time_df(mtf_df)
+                if htf_df is not None:
+                    htf_df = _prep_time_df(htf_df)
+
+                # Enforce strict 3TF alignment by trimming all TFs to the overlapping time window.
+                dfs_for_window = [d for d in [df, mtf_df, htf_df] if d is not None and not d.empty and 'time' in d.columns]
+                if len(dfs_for_window) >= 2:
+                    starts = [pd.to_datetime(d['time'].iloc[0]) for d in dfs_for_window]
+                    ends = [pd.to_datetime(d['time'].iloc[-1]) for d in dfs_for_window]
+                    overlap_start = max(starts)
+                    overlap_end = min(ends)
+
+                    if overlap_end <= overlap_start:
+                        logger.error(f"3TF alignment failed: no overlapping time window (start={overlap_start}, end={overlap_end})")
+                        return 1
+
+                    logger.info(
+                        f"3TF alignment window: start={overlap_start} end={overlap_end} days={(overlap_end - overlap_start).days}"
+                    )
+
+                    def _trim(d0: Optional[pd.DataFrame]) -> Optional[pd.DataFrame]:
+                        if d0 is None or d0.empty or 'time' not in d0.columns:
+                            return d0
+                        mask = (d0['time'] >= overlap_start) & (d0['time'] <= overlap_end)
+                        return d0.loc[mask].reset_index(drop=True)
+
+                    df = _trim(df)
+                    mtf_df = _trim(mtf_df)
+                    htf_df = _trim(htf_df)
+
+                    _log_span(f"Aligned {ltf_tf}", df)
+                    if mtf_df is not None:
+                        _log_span(f"Aligned {primary_tf}", mtf_df)
+                    if htf_df is not None:
+                        _log_span(f"Aligned {higher_tf}", htf_df)
 
                 data_map = {
                     ltf_tf: df,
@@ -979,6 +1090,15 @@ def cmd_backtest(args, logger: logging.Logger):
                         config=Unified3TFConfig(profile=profile, symbol=str(getattr(args, 'symbol', 'EURUSD'))),
                         data_provider=provider,
                         executor=executor,
+                    )
+                elif getattr(strategy_cls, '__name__', '') == 'RiskManagedUnified3TFStrategy':
+                    from strategies.unified_3tf_strategy import Unified3TFConfig
+                    strategy = strategy_cls(
+                        config=Unified3TFConfig(profile=profile, symbol=str(getattr(args, 'symbol', 'EURUSD'))),
+                        data_provider=provider,
+                        executor=executor,
+                        risk_percent=getattr(args, 'risk_percent', None),
+                        cooldown_minutes=getattr(args, 'cooldown_minutes', None),
                     )
                 else:
                     strategy = strategy_cls(data_provider=provider, executor=executor)
@@ -1532,6 +1652,18 @@ Examples:
         type=float,
         default=None,
         help="Minimum multi-timeframe alignment (0-1). If omitted, uses strategy profile default.",
+    )
+    bt_parser.add_argument(
+        "--risk-percent",
+        type=float,
+        default=None,
+        help="Optional risk per trade (% of balance) override for unified3tf.",
+    )
+    bt_parser.add_argument(
+        "--cooldown-minutes",
+        type=float,
+        default=None,
+        help="Optional cooldown in minutes after entry/exit for unified3tf.",
     )
     bt_parser.add_argument("--output", type=str, help="Save results to JSON file")
 
