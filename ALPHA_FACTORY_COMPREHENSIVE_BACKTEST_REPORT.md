@@ -113,5 +113,5 @@ The Alpha Factory system demonstrated moderate performance during the backtest p
 4. **EV Calibration**: Further calibration of expected value calculations could improve accuracy.
 
 ---
-*Report generated on 2026-01-04 23:23:58*
+*Report generated on 2026-02-04 23:10:54*
 *Alpha Factory Comprehensive Backtest System*
