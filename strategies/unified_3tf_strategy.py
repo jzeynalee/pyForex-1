@@ -81,10 +81,13 @@ class Unified3TFConfig:
         if self.profile.upper() == 'SCALP':
             self.max_lot = 0.3
             self.relaxed_alignment = True
-            self.min_htf_confidence = 0.52
-            self.min_mtf_confidence = 0.55
-            self.min_ltf_confidence = 0.58
-            self.min_stability = 0.40
+            self.max_open_trades = 1
+            self.max_daily_trades = 2
+            self.min_htf_confidence = 0.56
+            self.min_mtf_confidence = 0.62
+            self.min_ltf_confidence = 0.66
+            self.min_stability = 0.45
+            self.min_directional_score = 0.18
 
 
 @dataclass
@@ -232,6 +235,17 @@ class Unified3TFStrategy(Strategy):
         except Exception as e:
             logger.error(f"Initialization failed: {e}")
             return False
+
+    def _directional_score_ok(self, out) -> bool:
+        try:
+            if out is None:
+                return False
+            pb = float(getattr(out, 'final_p_bull', 0.0) or 0.0)
+            pr = float(getattr(out, 'final_p_bear', 0.0) or 0.0)
+            score = abs(pb - pr)
+            return score >= float(getattr(self.config, 'min_directional_score', 0.0) or 0.0)
+        except Exception:
+            return True
     
     def on_bar(self, df: pd.DataFrame) -> Optional[str]:
         """
@@ -309,11 +323,11 @@ class Unified3TFStrategy(Strategy):
                     balance = 10000.0
 
             htf_out = self._evaluate_timeframe(data_htf, timeframe=self.config.htf, equity=balance, signal_id="htf")
-            if not self._passes_gate(htf_out, min_conf=self.config.min_htf_confidence, min_stability=self.config.min_stability):
-                if not bool(getattr(self.config, 'relaxed_alignment', False)):
-                    self.last_rejection_stage = "HTF"
-                    self.last_rejection_reason = "htf gate failed"
-                    return None
+            htf_pass = self._passes_gate(htf_out, min_conf=self.config.min_htf_confidence, min_stability=self.config.min_stability)
+            if (not htf_pass) and (not bool(getattr(self.config, 'relaxed_alignment', False))):
+                self.last_rejection_stage = "HTF"
+                self.last_rejection_reason = "htf gate failed"
+                return None
 
             mtf_out = self._evaluate_timeframe(data_mtf, timeframe=self.config.mtf, equity=balance, signal_id="mtf")
             if not self._passes_gate(mtf_out, min_conf=self.config.min_mtf_confidence, min_stability=self.config.min_stability):
@@ -324,6 +338,11 @@ class Unified3TFStrategy(Strategy):
             if str(getattr(mtf_out, 'direction', 'HOLD')) == 'HOLD':
                 self.last_rejection_stage = "MTF"
                 self.last_rejection_reason = "mtf hold"
+                return None
+
+            if not self._directional_score_ok(mtf_out):
+                self.last_rejection_stage = "MTF"
+                self.last_rejection_reason = "mtf directional score"
                 return None
 
             if not bool(getattr(self.config, 'relaxed_alignment', False)):
@@ -343,11 +362,26 @@ class Unified3TFStrategy(Strategy):
                 self.last_rejection_reason = "ltf hold"
                 return None
 
+            if not self._directional_score_ok(ltf_out):
+                self.last_rejection_stage = "LTF"
+                self.last_rejection_reason = "ltf directional score"
+                return None
+
             if bool(getattr(self.config, 'relaxed_alignment', False)):
                 if str(ltf_out.direction) != str(mtf_out.direction):
                     self.last_rejection_stage = "MTF"
                     self.last_rejection_reason = f"mtf dir {mtf_out.direction} != ltf dir {ltf_out.direction}"
                     return None
+
+                # HTF is optional in relaxed mode, but when HTF is confident, it may veto opposite direction.
+                if htf_pass:
+                    try:
+                        if str(getattr(htf_out, 'direction', 'HOLD')) != 'HOLD' and str(htf_out.direction) != str(ltf_out.direction):
+                            self.last_rejection_stage = "HTF"
+                            self.last_rejection_reason = f"htf dir {htf_out.direction} != ltf dir {ltf_out.direction}"
+                            return None
+                    except Exception:
+                        pass
             else:
                 if str(ltf_out.direction) != str(htf_out.direction):
                     self.last_rejection_stage = "LTF"
