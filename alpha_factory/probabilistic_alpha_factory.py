@@ -1300,9 +1300,9 @@ class ProbabilisticAlphaFactory:
                 feature_probs.append(fp)
 
         if bool(getattr(self.config, 'key_features_only', False)):
-            logger.info(f"ProbabilisticAlphaFactory: key_features_only enabled ({len(feature_probs)} features)")
+            logger.debug(f"ProbabilisticAlphaFactory: key_features_only enabled ({len(feature_probs)} features)")
         else:
-            logger.info(f"ProbabilisticAlphaFactory: calibrating all numeric features ({len(feature_probs)} features)")
+            logger.debug(f"ProbabilisticAlphaFactory: calibrating all numeric features ({len(feature_probs)} features)")
 
         return feature_probs
     
