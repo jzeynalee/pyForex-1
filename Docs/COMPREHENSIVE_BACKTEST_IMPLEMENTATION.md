@@ -318,9 +318,9 @@ Before going live, ensure:
 ## Next Steps
 
 ### Immediate
-1. Run example backtest: `python examples/comprehensive_backtest_example.py`
-2. Review generated HTML report
-3. Validate acceptance gate results
+1. Run Alpha Factory backtest (probabilistic engine): `python main.py alpha-backtest --data "<PATH_TO_OHLCV_CSV>" --engine decision --window 300 --balance 10000`
+2. Review printed summary metrics and rejection reasons
+3. Adjust window/thresholding settings and re-run
 
 ### Integration
 1. Connect to your data sources
@@ -362,7 +362,7 @@ Before going live, ensure:
 ## Documentation
 
 - **README.md**: Comprehensive usage guide
-- **Example**: `examples/comprehensive_backtest_example.py`
+- **Alpha backtest CLI**: `python main.py alpha-backtest --help`
 - **API Docs**: Inline docstrings for all components
 - **This Document**: Implementation summary
 
