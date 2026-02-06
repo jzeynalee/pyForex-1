@@ -194,6 +194,10 @@ class BacktestExecutor:
             pips = (pos.entry_price - exit_price) / 0.0001
         
         pnl = pips * self.config.pip_value * pos.volume
+        # Commission is deducted from balance at entry, so the net P&L of the trade
+        # (to match balance change) must include that commission.
+        commission = float(self.config.commission_per_lot) * float(pos.volume)
+        pnl_net = pnl - commission
         self.balance += pnl
         
         # Record trade
@@ -207,7 +211,7 @@ class BacktestExecutor:
             exit_price=exit_price,
             sl=pos.sl,
             tp=pos.tp,
-            pnl=pnl,
+            pnl=pnl_net,
             status=reason,
         )
         self.trade_history.append(trade)
@@ -217,7 +221,7 @@ class BacktestExecutor:
         
         logger.info(
             f"[BACKTEST] Closed {pos.direction} @ {exit_price:.5f} "
-            f"({reason}) P&L: {pnl:.2f}"
+            f"({reason}) P&L: {pnl_net:.2f}"
         )
     
     def _update_equity(self):
