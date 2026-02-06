@@ -77,16 +77,10 @@ Copy-Item "models\weights\walk_forward\fold_16_INTRADAY.pth" "E:\pyProject\pyFor
 python main.py backtest --data "E:\pyProject\pyForex-assets\data\mt5\EURUSD\EURUSD_H1_*.csv" --strategy neural --balance 10000
 ```
 
-### Option 2: Layered Backtest (with Alpha Factory)
+### Option 2: Alpha Factory Backtest (Probabilistic Engine)
 
 ```powershell
-python layered_backtest.py --symbol EURUSD --profile INTRADAY --balance 10000
-```
-
-### Option 3: Research Backtest (detailed analysis)
-
-```powershell
-python research_backtest.py --symbol EURUSD --profile INTRADAY
+python main.py alpha-backtest --data "E:\pyProject\pyForex-assets\data\mt5\EURUSD\EURUSD_H1_*.csv" --engine decision --window 300 --balance 10000
 ```
 
 ---
