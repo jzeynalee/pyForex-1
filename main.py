@@ -1077,15 +1077,21 @@ def cmd_backtest(args, logger: logging.Logger):
                 executor = BacktestExecutor(config=BacktestConfig(initial_balance=args.balance))
                 if getattr(strategy_cls, '__name__', '') == 'Unified3TFStrategy':
                     from strategies.unified_3tf_strategy import Unified3TFConfig
+                    fast_bt = bool(getattr(args, 'fast_backtest', False))
+                    if str(getattr(args, 'strategy', '') or '').lower().strip() == 'unified3tf':
+                        fast_bt = True if fast_bt is False else fast_bt
                     strategy = strategy_cls(
-                        config=Unified3TFConfig(profile=profile, symbol=str(getattr(args, 'symbol', 'EURUSD'))),
+                        config=Unified3TFConfig(profile=profile, symbol=str(getattr(args, 'symbol', 'EURUSD')), fast_backtest=fast_bt),
                         data_provider=provider,
                         executor=executor,
                     )
                 elif getattr(strategy_cls, '__name__', '') == 'RiskManagedUnified3TFStrategy':
                     from strategies.unified_3tf_strategy import Unified3TFConfig
+                    fast_bt = bool(getattr(args, 'fast_backtest', False))
+                    if str(getattr(args, 'strategy', '') or '').lower().strip() == 'unified3tf':
+                        fast_bt = True if fast_bt is False else fast_bt
                     strategy = strategy_cls(
-                        config=Unified3TFConfig(profile=profile, symbol=str(getattr(args, 'symbol', 'EURUSD'))),
+                        config=Unified3TFConfig(profile=profile, symbol=str(getattr(args, 'symbol', 'EURUSD')), fast_backtest=fast_bt),
                         data_provider=provider,
                         executor=executor,
                         risk_percent=getattr(args, 'risk_percent', None),
@@ -1674,6 +1680,11 @@ Examples:
         type=str,
         default=None,
         help="Optional HTF CSV path (profile higher TF, e.g. H1 for SCALP, H4 for INTRADAY, D1 for SWING)",
+    )
+    bt_parser.add_argument(
+        "--fast-backtest",
+        action="store_true",
+        help="Speed up backtest (unified3tf): cache HTF/MTF evals, use key features only, and skip swing extraction.",
     )
     bt_parser.add_argument(
         "--symbol",
