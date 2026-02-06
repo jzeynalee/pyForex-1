@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Optional
 
 from strategies.unified_3tf_strategy import Unified3TFStrategy, Unified3TFConfig
+from utils.config import settings
 
 
 class RiskManagedUnified3TFStrategy(Unified3TFStrategy):
@@ -17,24 +18,27 @@ class RiskManagedUnified3TFStrategy(Unified3TFStrategy):
         **kwargs,
     ):
         super().__init__(config=config, data_provider=data_provider, executor=executor, **kwargs)
-        self._cooldown_minutes = cooldown_minutes
+        
+        p = self.config.profile.upper()
+        
+        if p == 'SCALP':
+            cd_def = settings.SCALP_COOLDOWN
+            risk_def = settings.SCALP_BASE_RISK
+        elif p == 'SWING':
+            cd_def = settings.SWING_COOLDOWN
+            risk_def = settings.SWING_BASE_RISK
+        else:
+            cd_def = settings.INTRADAY_COOLDOWN
+            risk_def = settings.INTRADAY_BASE_RISK
+
+        self._cooldown_minutes = cooldown_minutes if cooldown_minutes is not None else cd_def
         self._risk_percent_override = risk_percent
         self._last_exit_time: Optional[datetime] = None
 
-        try:
-            if self.config.profile.upper() == "SCALP":
-                if self._risk_percent_override is None and float(self.config.base_risk_percent) >= 0.5:
-                    self.config.base_risk_percent = 0.25
-                if self._cooldown_minutes is None:
-                    self._cooldown_minutes = 15.0
-        except Exception:
-            pass
-
-        try:
-            if self._risk_percent_override is not None:
-                self.config.base_risk_percent = float(self._risk_percent_override)
-        except Exception:
-            pass
+        if self._risk_percent_override is not None:
+            self.config.base_risk_percent = float(self._risk_percent_override)
+        else:
+            self.config.base_risk_percent = risk_def
 
     def _infer_last_exit_time(self):
         try:
@@ -155,20 +159,41 @@ class RiskManagedUnified3TFStrategy(Unified3TFStrategy):
             from risk_management.phase2_risk_calc.sl_tp_calculator import (
                 SLTPConfig,
                 calculate_sl_tp_from_predictions,
+                MarketRegime
             )
             from risk_management.phase2_risk_calc.position_sizing import (
                 PositionSizingCalculator,
                 PositionSizingConfig,
             )
 
-            engine = self._get_engine()
-            pred = None
+            # Use the pre-fetched prediction if available from the decision engine
+            pred = getattr(decision_out, 'mhtcn_prediction', None)
+            
+            # Map Decision engine regime to Risk Management regime
+            regime_map = {
+                'bull': MarketRegime.TRENDING_WEAK,
+                'bear': MarketRegime.TRENDING_WEAK,
+                'neutral': MarketRegime.RANGING,
+                'volatile': MarketRegime.VOLATILE
+            }
+            
+            engine_regime = 'neutral'
             try:
-                provider = getattr(engine, "mhtcn_provider", None)
-                if provider is not None and hasattr(provider, "predict"):
-                    pred = provider.predict(df.copy(), str(self.config.ltf).upper())
+                if decision_out and hasattr(decision_out, 'regime_probs'):
+                    engine_regime = decision_out.regime_probs.dominant_regime
             except Exception:
-                pred = None
+                pass
+            
+            target_regime = regime_map.get(engine_regime, MarketRegime.RANGING)
+            
+            # Refine regime if trending
+            if engine_regime in ['bull', 'bear']:
+                try:
+                    ds = float(getattr(decision_out, 'final_p_bull', 0.5) - getattr(decision_out, 'final_p_bear', 0.5))
+                    if abs(ds) > 0.4:
+                        target_regime = MarketRegime.TRENDING_STRONG
+                except Exception:
+                    pass
 
             predictions = None
             if pred is not None:
@@ -181,12 +206,18 @@ class RiskManagedUnified3TFStrategy(Unified3TFStrategy):
             atr = self._atr(df)
 
             if predictions is not None:
-                sltp_cfg = SLTPConfig(min_risk_reward=float(getattr(self.config, "min_risk_reward", 2.0) or 2.0))
+                # Map strategy constants to SLTPConfig
+                sltp_cfg = SLTPConfig(
+                    min_risk_reward=float(getattr(self.config, "min_risk_reward", 1.5) or 1.5),
+                    min_sl_atr_multiple=float(getattr(self.config, "atr_sl_mult", 2.0) or 2.0),
+                    target_risk_reward=float(getattr(self.config, "min_risk_reward", 1.5) or 1.5) + 0.5
+                )
+                
                 sltp = calculate_sl_tp_from_predictions(
                     entry_price=float(entry_price),
                     direction=str(direction).upper(),
                     predictions=predictions,
-                    regime=None,
+                    regime=target_regime.value if hasattr(target_regime, 'value') else str(target_regime),
                     atr=atr,
                     config=sltp_cfg,
                 )
@@ -226,7 +257,11 @@ class RiskManagedUnified3TFStrategy(Unified3TFStrategy):
             except Exception:
                 vol = None
 
-            ps_cfg = PositionSizingConfig(base_risk_percent=float(getattr(self.config, "base_risk_percent", 0.5) or 0.5))
+            ps_cfg = PositionSizingConfig(
+                base_risk_percent=float(getattr(self.config, "base_risk_percent", 0.25) or 0.25),
+                max_risk_percent=float(getattr(self.config, "max_daily_loss_pct", 1.5) or 1.5),
+                lot_size_precision=2
+            )
             ps_calc = PositionSizingCalculator(ps_cfg)
             ps = ps_calc.calculate(
                 account_balance=float(balance),
