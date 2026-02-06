@@ -1744,14 +1744,14 @@ Examples:
     ab_parser = subparsers.add_parser(
         "alpha-backtest",
         help="Run Alpha Factory backtest on historical data",
-        description="Run the Alpha Factory layered backtest separately from the ML strategy backtest",
+        description="Run Alpha Factory decision engine backtest separately from the ML strategy backtest",
     )
     ab_parser.add_argument("--data", required=True, help="Path to OHLCV CSV file")
     ab_parser.add_argument(
         "--engine",
         type=str,
-        default="layered",
-        help="Alpha backtest engine (layered, decision)",
+        default="decision",
+        help="Alpha backtest engine (decision)",
     )
     ab_parser.add_argument(
         "--layer",
