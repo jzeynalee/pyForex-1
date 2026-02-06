@@ -202,6 +202,7 @@ class DecisionOutput:
     reasoning: List[str]
     feature_contributions: Dict[str, float]
     mhtcn_contribution: Optional[Dict[str, float]] = None
+    mhtcn_prediction: Optional[Any] = None  # Full prediction object for efficiency
     stability_score: float = 1.0
     alpha_decay_applied: float = 1.0
 
@@ -866,9 +867,11 @@ class EvidenceAggregator:
         Returns:
             (p_bull_final, p_bear_final, p_neutral_final, contributions_dict)
         """
-        if self.config.aggregation_method == "noisy_or":
+        method = str(getattr(self.config, 'aggregation_method', 'weighted_avg')).lower()
+        
+        if method == "noisy_or":
             p_bull, p_bear, p_neutral = self._noisy_or_aggregation(feature_probs)
-        elif self.config.aggregation_method == "bayesian":
+        elif method == "bayesian":
             p_bull, p_bear, p_neutral = self._bayesian_aggregation(regime_prior, feature_probs)
         else:
             p_bull, p_bear, p_neutral = self._weighted_avg_aggregation(feature_probs)
@@ -876,7 +879,7 @@ class EvidenceAggregator:
         # Incorporate MH-TCN if available
         contributions = {}
         if mhtcn_probs is not None:
-            mhtcn_weight = self.config.mhtcn_weight
+            mhtcn_weight = float(getattr(self.config, 'mhtcn_weight', 0.4))
             classical_weight = 1.0 - mhtcn_weight
             
             p_bull = classical_weight * p_bull + mhtcn_weight * mhtcn_probs.get("bull", 0.33)
@@ -885,16 +888,20 @@ class EvidenceAggregator:
             
             contributions["mhtcn"] = mhtcn_weight
         
-        # Apply regime prior
+        # Apply regime prior (Bayesian update style)
+        # We treat the prior as a bias that shifts the aggregated evidence
         p_bull *= regime_prior.p_bull
         p_bear *= regime_prior.p_bear
         p_neutral *= regime_prior.p_neutral
         
-        # Apply stability score
-        p_bull *= stability_score
-        p_bear *= stability_score
+        # Apply stability score (Reduce directional probabilities in unstable markets)
+        stability_weight = float(getattr(self.config, 'stability_weight', 0.2))
+        stability_factor = 1.0 - (stability_weight * (1.0 - stability_score))
+        
+        p_bull *= stability_factor
+        p_bear *= stability_factor
         # Neutral increases when stability is low
-        p_neutral = p_neutral + (1 - stability_score) * 0.3
+        p_neutral = p_neutral + (1.0 - stability_factor) * 0.5
         
         # Normalize
         total = p_bull + p_bear + p_neutral
@@ -1191,9 +1198,16 @@ class ProbabilisticAlphaFactory:
         
         # Stage 4: MH-TCN temporal refinement (if available)
         mhtcn_probs = None
+        mhtcn_prediction = None
         if self.mhtcn_provider is not None:
-            mhtcn_probs = self._get_mhtcn_probs(df, timeframe=timeframe)
-            if mhtcn_probs:
+            mhtcn_prediction = self.mhtcn_provider.predict(df, str(timeframe or "H1"))
+            if mhtcn_prediction:
+                direction_probs = mhtcn_prediction.direction_probs
+                mhtcn_probs = {
+                    "bear": float(direction_probs[0]),
+                    "neutral": float(direction_probs[1]),
+                    "bull": float(direction_probs[2])
+                }
                 reasoning.append(f"MH-TCN: bull={mhtcn_probs.get('bull', 0):.2f}")
         
         # Stage 5: Evidence aggregation
@@ -1247,6 +1261,7 @@ class ProbabilisticAlphaFactory:
             reasoning=reasoning,
             feature_contributions=contributions,
             mhtcn_contribution=mhtcn_probs,
+            mhtcn_prediction=mhtcn_prediction,
             stability_score=stability_score,
             alpha_decay_applied=decayed_confidence / (confidence + 1e-10)
         )
@@ -1308,10 +1323,11 @@ class ProbabilisticAlphaFactory:
     
     def _calculate_stability(self, df: pd.DataFrame) -> float:
         """Calculate market stability score."""
-        if df is None or len(df) < self.config.stability_lookback:
+        lookback = int(getattr(self.config, 'stability_lookback', 20))
+        if df is None or len(df) < lookback:
             return 0.5
         
-        recent = df.tail(self.config.stability_lookback)
+        recent = df.tail(lookback)
         returns = recent['close'].pct_change().dropna()
         
         if len(returns) < 5:
@@ -1319,10 +1335,18 @@ class ProbabilisticAlphaFactory:
         
         # Stability = inverse of volatility (normalized)
         vol = float(returns.std())
-        # Typical forex vol is 0.001-0.02
-        normalized_vol = np.clip(vol / 0.01, 0, 2)
-        stability = 1.0 - normalized_vol / 2
         
+        # Adaptive volatility normalization based on typical ranges
+        # For M5/M15, 0.01 is a reasonable high-vol threshold.
+        high_vol_threshold = 0.01
+        
+        normalized_vol = np.clip(vol / high_vol_threshold, 0, 2)
+        stability = 1.0 - (normalized_vol / 2.0)
+        
+        # Apply stability weight from config if present
+        stability_weight = float(getattr(self.config, 'stability_weight', 0.2))
+        
+        # Ensure it doesn't drop too low unless volatility is extreme
         return float(np.clip(stability, 0.2, 1.0))
     
     def _get_current_volatility(self, df: pd.DataFrame) -> float:
