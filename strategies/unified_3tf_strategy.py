@@ -26,7 +26,7 @@ from strategies.base import Strategy
 
 from alpha_factory.features_engineering import FeatureEngineerOptimized
 from alpha_factory.market_data import MarketData
-from alpha_factory.probabilistic_alpha_factory import create_probabilistic_alpha_factory
+from alpha_factory.probabilistic_alpha_factory import create_probabilistic_alpha_factory, ProbabilisticConfig
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +66,8 @@ class Unified3TFConfig:
     
     # Sequence length for MH-TCN
     sequence_length: int = 60
+
+    fast_backtest: bool = False
     
     def __post_init__(self):
         """Set timeframes based on profile."""
@@ -135,6 +137,8 @@ class Unified3TFStrategy(Strategy):
         self._engine = None
         self._feature_engineer: Optional[FeatureEngineerOptimized] = None
         self._initialized = False
+
+        self._tf_eval_cache: Dict[str, Dict[str, object]] = {}
 
         # Backtest diagnostics (kept for compatibility with main.py backtest reporting)
         self.last_rejection_stage: str = ""
@@ -211,7 +215,15 @@ class Unified3TFStrategy(Strategy):
                 except Exception:
                     pass
 
+            cfg = None
+            if bool(getattr(self.config, 'fast_backtest', False)):
+                try:
+                    cfg = ProbabilisticConfig(key_features_only=True)
+                except Exception:
+                    cfg = None
+
             self._engine = create_probabilistic_alpha_factory(
+                config=cfg,
                 mhtcn_weights_dir=weights_dir,
                 profile=str(self.config.profile or 'INTRADAY').upper(),
             )
@@ -425,8 +437,19 @@ class Unified3TFStrategy(Strategy):
     def _evaluate_timeframe(self, df: pd.DataFrame, timeframe: str, equity: float, signal_id: str):
         if df is None or df.empty:
             raise ValueError("empty dataframe")
-        if self._feature_engineer is None:
-            self._feature_engineer = FeatureEngineerOptimized()
+
+        tf_key = str(timeframe or '').upper()
+        cache_key = None
+        try:
+            if 'time' in df.columns:
+                cache_key = str(pd.to_datetime(df['time'].iloc[-1]))
+        except Exception:
+            cache_key = None
+
+        if cache_key is not None:
+            cached = self._tf_eval_cache.get(tf_key)
+            if cached and str(cached.get('t')) == str(cache_key):
+                return cached.get('out')
 
         d0 = df.copy()
         d0.columns = [str(c).lower().strip() for c in d0.columns]
@@ -436,56 +459,62 @@ class Unified3TFStrategy(Strategy):
             else:
                 d0['volume'] = 0.0
 
-        feats = self._feature_engineer.generate_features(d0, batch_processing=False)
+        if bool(getattr(self.config, 'fast_backtest', False)):
+            feats = self._generate_fast_features(d0)
+        else:
+            if self._feature_engineer is None:
+                self._feature_engineer = FeatureEngineerOptimized()
+            feats = self._feature_engineer.generate_features(d0, batch_processing=False)
 
         swing_points = None
-        try:
-            if feats is not None and not feats.empty and 'swing_high' in feats.columns and 'swing_low' in feats.columns:
-                from alpha_factory.market_data import SwingPoint
+        if not bool(getattr(self.config, 'fast_backtest', False)):
+            try:
+                if feats is not None and not feats.empty and 'swing_high' in feats.columns and 'swing_low' in feats.columns:
+                    from alpha_factory.market_data import SwingPoint
 
-                base = d0.reset_index(drop=True)
-                f0 = feats.reset_index(drop=True)
+                    base = d0.reset_index(drop=True)
+                    f0 = feats.reset_index(drop=True)
 
-                if 'time' in base.columns:
-                    times = pd.to_datetime(base['time'], errors='coerce')
+                    if 'time' in base.columns:
+                        times = pd.to_datetime(base['time'], errors='coerce')
+                    else:
+                        times = pd.Series([pd.NaT] * len(base))
+
+                    sh = f0['swing_high'].fillna(0).astype(int)
+                    sl = f0['swing_low'].fillna(0).astype(int)
+
+                    swing_points = []
+                    for i in range(len(base)):
+                        if int(sh.iloc[i]) == 1:
+                            t = times.iloc[i]
+                            swing_points.append(SwingPoint(
+                                index=int(i),
+                                time=t.to_pydatetime() if hasattr(t, 'to_pydatetime') else t,
+                                price=float(base['high'].iloc[i]),
+                                point_type='high',
+                                strength=0.5,
+                                confirmed=True,
+                                confidence=1.0,
+                            ))
+                        elif int(sl.iloc[i]) == 1:
+                            t = times.iloc[i]
+                            swing_points.append(SwingPoint(
+                                index=int(i),
+                                time=t.to_pydatetime() if hasattr(t, 'to_pydatetime') else t,
+                                price=float(base['low'].iloc[i]),
+                                point_type='low',
+                                strength=0.5,
+                                confirmed=True,
+                                confidence=1.0,
+                            ))
+
+                    if len(swing_points) > 200:
+                        swing_points = swing_points[-200:]
                 else:
-                    times = pd.Series([pd.NaT] * len(base))
-
-                sh = f0['swing_high'].fillna(0).astype(int)
-                sl = f0['swing_low'].fillna(0).astype(int)
-
-                swing_points = []
-                for i in range(len(base)):
-                    if int(sh.iloc[i]) == 1:
-                        t = times.iloc[i]
-                        swing_points.append(SwingPoint(
-                            index=int(i),
-                            time=t.to_pydatetime() if hasattr(t, 'to_pydatetime') else t,
-                            price=float(base['high'].iloc[i]),
-                            point_type='high',
-                            strength=0.5,
-                            confirmed=True,
-                            confidence=1.0,
-                        ))
-                    elif int(sl.iloc[i]) == 1:
-                        t = times.iloc[i]
-                        swing_points.append(SwingPoint(
-                            index=int(i),
-                            time=t.to_pydatetime() if hasattr(t, 'to_pydatetime') else t,
-                            price=float(base['low'].iloc[i]),
-                            point_type='low',
-                            strength=0.5,
-                            confirmed=True,
-                            confidence=1.0,
-                        ))
-
-                if len(swing_points) > 200:
-                    swing_points = swing_points[-200:]
-            else:
-                md = MarketData(d0, handle_splits=False)
-                swing_points = md.extract_swings(lookback=5, strength_threshold=0.3)
-        except Exception:
-            swing_points = None
+                    md = MarketData(d0, handle_splits=False)
+                    swing_points = md.extract_swings(lookback=5, strength_threshold=0.3)
+            except Exception:
+                swing_points = None
 
         engine = self._get_engine()
         out = engine.evaluate(
@@ -497,6 +526,81 @@ class Unified3TFStrategy(Strategy):
             current_equity=float(equity or 1.0),
             signal_id=str(signal_id or "default"),
         )
+
+        if cache_key is not None:
+            self._tf_eval_cache[tf_key] = {'t': cache_key, 'out': out}
+        return out
+
+    @staticmethod
+    def _ema(s: pd.Series, span: int) -> pd.Series:
+        return s.ewm(span=int(span), adjust=False, min_periods=int(span)).mean()
+
+    def _generate_fast_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        d0 = df.copy()
+        d0.columns = [str(c).lower().strip() for c in d0.columns]
+        close = pd.to_numeric(d0.get('close'), errors='coerce')
+        high = pd.to_numeric(d0.get('high'), errors='coerce')
+        low = pd.to_numeric(d0.get('low'), errors='coerce')
+
+        delta = close.diff()
+        gain = delta.clip(lower=0)
+        loss = (-delta).clip(lower=0)
+        avg_gain = gain.rolling(14, min_periods=14).mean()
+        avg_loss = loss.rolling(14, min_periods=14).mean()
+        rs = avg_gain / (avg_loss + 1e-12)
+        rsi = 100 - (100 / (1 + rs))
+
+        ema12 = self._ema(close, 12)
+        ema26 = self._ema(close, 26)
+        macd = ema12 - ema26
+        macd_signal = self._ema(macd, 9)
+        macd_hist = macd - macd_signal
+
+        ma20 = close.rolling(20, min_periods=20).mean()
+        sd20 = close.rolling(20, min_periods=20).std()
+        bb_upper = ma20 + 2.0 * sd20
+        bb_lower = ma20 - 2.0 * sd20
+        bb_pos = (close - bb_lower) / ((bb_upper - bb_lower) + 1e-12)
+
+        prev_close = close.shift(1)
+        tr = pd.concat([
+            (high - low),
+            (high - prev_close).abs(),
+            (low - prev_close).abs(),
+        ], axis=1).max(axis=1)
+        atr = tr.rolling(14, min_periods=14).mean()
+        atr_ratio = atr / (close.abs() + 1e-12)
+
+        up_move = high.diff()
+        down_move = (-low.diff())
+        plus_dm = up_move.where((up_move > down_move) & (up_move > 0), 0.0)
+        minus_dm = down_move.where((down_move > up_move) & (down_move > 0), 0.0)
+
+        tr14 = tr.rolling(14, min_periods=14).sum()
+        plus_di = 100.0 * (plus_dm.rolling(14, min_periods=14).sum() / (tr14 + 1e-12))
+        minus_di = 100.0 * (minus_dm.rolling(14, min_periods=14).sum() / (tr14 + 1e-12))
+        dx = ((plus_di - minus_di).abs() / ((plus_di + minus_di) + 1e-12)) * 100.0
+        adx = dx.rolling(14, min_periods=14).mean()
+
+        momentum = close.pct_change(10)
+        vol20 = close.pct_change().rolling(20, min_periods=20).std()
+        vol100 = close.pct_change().rolling(100, min_periods=100).std()
+        volatility_ratio = vol20 / (vol100 + 1e-12)
+
+        ema20 = self._ema(close, 20)
+        ema50 = self._ema(close, 50)
+        trend_strength = ((ema20 - ema50).abs() / (atr + 1e-12)).clip(0, 10)
+
+        out = pd.DataFrame(index=d0.index)
+        out['rsi'] = rsi
+        out['macd'] = macd
+        out['macd_histogram'] = macd_hist
+        out['adx'] = adx
+        out['bb_position'] = bb_pos
+        out['atr_ratio'] = atr_ratio
+        out['momentum'] = momentum
+        out['trend_strength'] = trend_strength
+        out['volatility_ratio'] = volatility_ratio
         return out
 
     @staticmethod
