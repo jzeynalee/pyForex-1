@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class FeaturePruningConfig:
     """Configuration for feature pruning."""
+    enabled: bool = False
     # Pruning thresholds
     min_contribution_threshold: float = 0.05  # 5% minimum contribution
     max_correlation_threshold: float = 0.8   # 80% max correlation
@@ -253,6 +254,19 @@ class FeaturePruner:
         Returns:
             Tuple of pruned features DataFrame and pruning report
         """
+        if not bool(getattr(self.config, 'enabled', False)):
+            report = {
+                'original_features': len(features.columns),
+                'pruned_features': [],
+                'kept_features': list(features.columns),
+                'feature_analysis': {},
+                'redundant_pairs': [],
+                'pruning_reasons': {},
+                'final_features': len(features.columns)
+            }
+            logger.info("Feature pruning disabled; returning full feature set")
+            return features.copy(), report
+
         logger.info("Starting feature pruning analysis")
         
         # Initialize pruning report
