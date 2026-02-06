@@ -23,6 +23,7 @@ from datetime import datetime
 from pathlib import Path
 
 from strategies.base import Strategy
+from utils.config import settings
 
 from alpha_factory.features_engineering import FeatureEngineerOptimized
 from alpha_factory.market_data import MarketData
@@ -43,23 +44,25 @@ class Unified3TFConfig:
     mtf: str = 'H1'
     ltf: str = 'M15'
     
-    # Confidence thresholds - HIGH for quality trades
-    min_htf_confidence: float = 0.60
-    min_mtf_confidence: float = 0.65
-    min_ltf_confidence: float = 0.70
-    min_stability: float = 0.50
-    min_directional_score: float = 0.30
+    # Confidence thresholds
+    min_htf_confidence: float = 0.62
+    min_mtf_confidence: float = 0.66
+    min_ltf_confidence: float = 0.72
+    min_stability: float = 0.55
+    min_directional_score: float = 0.32
 
     relaxed_alignment: bool = False
     
-    # Risk management - CONSERVATIVE
+    # Risk management
     base_risk_percent: float = 0.5
     min_risk_reward: float = 2.0
     max_open_trades: int = 2
     max_daily_trades: int = 5
     max_daily_loss_pct: float = 2.0
-    min_sl_pips: float = 8.0
+    min_sl_pips: float = 10.0
     max_lot: float = 1.0
+    atr_sl_mult: float = 2.0
+    atr_period: int = 14
     
     # Model paths
     weights_dir: str = 'models/weights'
@@ -70,26 +73,75 @@ class Unified3TFConfig:
     fast_backtest: bool = False
     
     def __post_init__(self):
-        """Set timeframes based on profile."""
-        profile_tfs = {
-            'SCALP': ('H1', 'M15', 'M5'),
-            'INTRADAY': ('H4', 'H1', 'M15'),
-            'SWING': ('D1', 'H4', 'H1'),
-        }
+        """Set parameters based on profile from settings."""
+        p = self.profile.upper()
         
-        if self.profile.upper() in profile_tfs:
-            self.htf, self.mtf, self.ltf = profile_tfs[self.profile.upper()]
-
-        if self.profile.upper() == 'SCALP':
-            self.max_lot = 0.3
-            self.relaxed_alignment = True
-            self.max_open_trades = 1
-            self.max_daily_trades = 2
-            self.min_htf_confidence = 0.56
-            self.min_mtf_confidence = 0.62
-            self.min_ltf_confidence = 0.66
-            self.min_stability = 0.45
-            self.min_directional_score = 0.18
+        # Load profile-specific settings from centralized config
+        if p == 'SCALP':
+            self.htf = settings.SCALP_HTF
+            self.mtf = settings.SCALP_MTF
+            self.ltf = settings.SCALP_LTF
+            
+            self.min_htf_confidence = settings.SCALP_MIN_HTF_CONF
+            self.min_mtf_confidence = settings.SCALP_MIN_MTF_CONF
+            self.min_ltf_confidence = settings.SCALP_MIN_LTF_CONF
+            self.min_stability = settings.SCALP_MIN_STABILITY
+            self.min_directional_score = settings.SCALP_MIN_DIR_SCORE
+            self.relaxed_alignment = settings.SCALP_RELAXED
+            
+            self.base_risk_percent = settings.SCALP_BASE_RISK
+            self.min_risk_reward = settings.SCALP_MIN_RR
+            self.max_open_trades = settings.SCALP_MAX_OPEN
+            self.max_daily_trades = settings.SCALP_MAX_DAILY
+            self.max_daily_loss_pct = settings.SCALP_MAX_LOSS
+            self.min_sl_pips = settings.SCALP_MIN_SL_PIPS
+            self.max_lot = settings.SCALP_MAX_LOT
+            self.atr_sl_mult = settings.SCALP_ATR_SL_MULT
+            self.atr_period = settings.SCALP_ATR_PERIOD
+            
+        elif p == 'SWING':
+            self.htf = settings.SWING_HTF
+            self.mtf = settings.SWING_MTF
+            self.ltf = settings.SWING_LTF
+            
+            self.min_htf_confidence = settings.SWING_MIN_HTF_CONF
+            self.min_mtf_confidence = settings.SWING_MIN_MTF_CONF
+            self.min_ltf_confidence = settings.SWING_MIN_LTF_CONF
+            self.min_stability = settings.SWING_MIN_STABILITY
+            self.min_directional_score = settings.SWING_MIN_DIR_SCORE
+            self.relaxed_alignment = settings.SWING_RELAXED
+            
+            self.base_risk_percent = settings.SWING_BASE_RISK
+            self.min_risk_reward = settings.SWING_MIN_RR
+            self.max_open_trades = settings.SWING_MAX_OPEN
+            self.max_daily_trades = settings.SWING_MAX_DAILY
+            self.max_daily_loss_pct = settings.SWING_MAX_LOSS
+            self.min_sl_pips = settings.SWING_MIN_SL_PIPS
+            self.max_lot = settings.SWING_MAX_LOT
+            self.atr_sl_mult = settings.SWING_ATR_SL_MULT
+            self.atr_period = settings.SWING_ATR_PERIOD
+            
+        else: # Default to INTRADAY
+            self.htf = settings.INTRADAY_HTF
+            self.mtf = settings.INTRADAY_MTF
+            self.ltf = settings.INTRADAY_LTF
+            
+            self.min_htf_confidence = settings.INTRADAY_MIN_HTF_CONF
+            self.min_mtf_confidence = settings.INTRADAY_MIN_MTF_CONF
+            self.min_ltf_confidence = settings.INTRADAY_MIN_LTF_CONF
+            self.min_stability = settings.INTRADAY_MIN_STABILITY
+            self.min_directional_score = settings.INTRADAY_MIN_DIR_SCORE
+            self.relaxed_alignment = settings.INTRADAY_RELAXED
+            
+            self.base_risk_percent = settings.INTRADAY_BASE_RISK
+            self.min_risk_reward = settings.INTRADAY_MIN_RR
+            self.max_open_trades = settings.INTRADAY_MAX_OPEN
+            self.max_daily_trades = settings.INTRADAY_MAX_DAILY
+            self.max_daily_loss_pct = settings.INTRADAY_MAX_LOSS
+            self.min_sl_pips = settings.INTRADAY_MIN_SL_PIPS
+            self.max_lot = settings.INTRADAY_MAX_LOT
+            self.atr_sl_mult = settings.INTRADAY_ATR_SL_MULT
+            self.atr_period = settings.INTRADAY_ATR_PERIOD
 
 
 @dataclass
@@ -150,6 +202,15 @@ class Unified3TFStrategy(Strategy):
         self._last_trade_date = None
         self._open_positions: Dict[str, dict] = {}
         self._last_entry_time: Optional[datetime] = None
+        self._current_time: Optional[datetime] = None
+        
+        # Trend stability tracking
+        self._tf_direction_history: Dict[str, List[str]] = {
+            self.config.htf: [],
+            self.config.mtf: [],
+            self.config.ltf: []
+        }
+        self._max_history = 5
         
         logger.info(f"Unified3TFStrategy created for {self.config.symbol} ({self.config.profile})")
 
@@ -158,6 +219,27 @@ class Unified3TFStrategy(Strategy):
         self._open_positions = {}
         if self.executor is None:
             return
+        
+        # Update daily PnL from closed trades if in backtest/sim mode
+        try:
+            th = getattr(self.executor, 'trade_history', [])
+            if th:
+                today = (self._current_time or datetime.utcnow()).date()
+                if self._last_trade_date:
+                    today = self._last_trade_date
+                
+                daily_pnl = 0.0
+                for trade in th:
+                    exit_time = getattr(trade, 'exit_time', None)
+                    if exit_time:
+                        if isinstance(exit_time, str):
+                            exit_time = pd.to_datetime(exit_time)
+                        if hasattr(exit_time, 'date') and exit_time.date() == today:
+                            daily_pnl += float(getattr(trade, 'pnl', 0.0))
+                self._daily_pnl = daily_pnl
+        except Exception as e:
+            logger.debug(f"Could not sync daily PnL: {e}")
+
         try:
             if hasattr(self.executor, 'get_open_positions'):
                 try:
@@ -216,11 +298,51 @@ class Unified3TFStrategy(Strategy):
                     pass
 
             cfg = None
-            if bool(getattr(self.config, 'fast_backtest', False)):
-                try:
-                    cfg = ProbabilisticConfig(key_features_only=True)
-                except Exception:
-                    cfg = None
+            try:
+                p = str(self.config.profile or 'INTRADAY').upper()
+                
+                # Extract decision params based on profile
+                if p == 'SCALP':
+                    agg = settings.SCALP_AGG_METHOD
+                    mhtcn_w = settings.SCALP_MHTCN_WEIGHT
+                    stab_w = settings.SCALP_STABILITY_WEIGHT
+                    reg_scale = settings.SCALP_REGIME_SCALE
+                    ent_w = settings.SCALP_ENTROPY_WEIGHT
+                    calib = settings.SCALP_CALIB_METHOD
+                    decay = settings.SCALP_DECAY_RATE
+                    key_only = settings.SCALP_KEY_FEATS_ONLY
+                elif p == 'SWING':
+                    agg = settings.SWING_AGG_METHOD
+                    mhtcn_w = settings.SWING_MHTCN_WEIGHT
+                    stab_w = settings.SWING_STABILITY_WEIGHT
+                    reg_scale = settings.SWING_REGIME_SCALE
+                    ent_w = settings.SWING_ENTROPY_WEIGHT
+                    calib = settings.SWING_CALIB_METHOD
+                    decay = settings.SWING_DECAY_RATE
+                    key_only = settings.SWING_KEY_FEATS_ONLY
+                else:
+                    agg = settings.INTRADAY_AGG_METHOD
+                    mhtcn_w = settings.INTRADAY_MHTCN_WEIGHT
+                    stab_w = settings.INTRADAY_STABILITY_WEIGHT
+                    reg_scale = settings.INTRADAY_REGIME_SCALE
+                    ent_w = settings.INTRADAY_ENTROPY_WEIGHT
+                    calib = settings.INTRADAY_CALIB_METHOD
+                    decay = settings.INTRADAY_DECAY_RATE
+                    key_only = settings.INTRADAY_KEY_FEATS_ONLY
+
+                cfg = ProbabilisticConfig(
+                    key_features_only=key_only or bool(getattr(self.config, 'fast_backtest', False)),
+                    aggregation_method=agg,
+                    mhtcn_weight=mhtcn_w,
+                    stability_weight=stab_w,
+                    regime_scale_factor=reg_scale,
+                    entropy_weight=ent_w,
+                    calibration_method=calib,
+                    alpha_decay_rate=decay
+                )
+            except Exception as e:
+                logger.warning(f"Could not initialize custom ProbabilisticConfig for profile {p}: {e}")
+                cfg = None
 
             self._engine = create_probabilistic_alpha_factory(
                 config=cfg,
@@ -259,6 +381,30 @@ class Unified3TFStrategy(Strategy):
         except Exception:
             return True
     
+    def _update_direction_history(self, timeframe: str, direction: str):
+        """Update historical directions for stability checks."""
+        tf = str(timeframe).upper()
+        if tf not in self._tf_direction_history:
+            self._tf_direction_history[tf] = []
+        
+        self._tf_direction_history[tf].append(str(direction).upper())
+        if len(self._tf_direction_history[tf]) > self._max_history:
+            self._tf_direction_history[tf].pop(0)
+
+    def _is_trend_stable(self, timeframe: str, required_bars: int = 2) -> bool:
+        """Check if the trend has been stable for the required number of bars."""
+        tf = str(timeframe).upper()
+        history = self._tf_direction_history.get(tf, [])
+        if len(history) < required_bars:
+            return False
+        
+        recent = history[-required_bars:]
+        # Check if all recent bars have the same non-HOLD direction
+        first = recent[0]
+        if first == 'HOLD':
+            return False
+        return all(d == first for d in recent)
+
     def on_bar(self, df: pd.DataFrame) -> Optional[str]:
         """
         Process a new bar and generate trading signal.
@@ -288,6 +434,8 @@ class Unified3TFStrategy(Strategy):
                 current_time = datetime.utcnow()
         else:
             current_time = datetime.utcnow()
+        
+        self._current_time = current_time
 
         # Reset daily stats if new day (based on bar time)
         self._check_daily_reset(current_time)
@@ -334,71 +482,90 @@ class Unified3TFStrategy(Strategy):
                 except Exception:
                     balance = 10000.0
 
+            # HTF Evaluation (The Governor)
             htf_out = self._evaluate_timeframe(data_htf, timeframe=self.config.htf, equity=balance, signal_id="htf")
             htf_pass = self._passes_gate(htf_out, min_conf=self.config.min_htf_confidence, min_stability=self.config.min_stability)
-            if (not htf_pass) and (not bool(getattr(self.config, 'relaxed_alignment', False))):
-                self.last_rejection_stage = "HTF"
-                self.last_rejection_reason = "htf gate failed"
-                return None
-
+            
+            # MTF Evaluation (The Validator)
             mtf_out = self._evaluate_timeframe(data_mtf, timeframe=self.config.mtf, equity=balance, signal_id="mtf")
-            if not self._passes_gate(mtf_out, min_conf=self.config.min_mtf_confidence, min_stability=self.config.min_stability):
-                self.last_rejection_stage = "MTF"
-                self.last_rejection_reason = "mtf gate failed"
-                return None
+            mtf_pass = self._passes_gate(mtf_out, min_conf=self.config.min_mtf_confidence, min_stability=self.config.min_stability)
+            
+            # LTF Evaluation (The Trigger)
+            ltf_out = self._evaluate_timeframe(data_ltf, timeframe=self.config.ltf, equity=balance, signal_id="ltf")
+            ltf_pass = self._passes_gate(ltf_out, min_conf=self.config.min_ltf_confidence, min_stability=self.config.min_stability)
 
-            if str(getattr(mtf_out, 'direction', 'HOLD')) == 'HOLD':
-                self.last_rejection_stage = "MTF"
-                self.last_rejection_reason = "mtf hold"
-                return None
+            # Update direction histories
+            self._update_direction_history(self.config.htf, htf_out.direction)
+            self._update_direction_history(self.config.mtf, mtf_out.direction)
+            self._update_direction_history(self.config.ltf, ltf_out.direction)
 
-            if not self._directional_score_ok(mtf_out):
-                self.last_rejection_stage = "MTF"
-                self.last_rejection_reason = "mtf directional score"
-                return None
-
-            if not bool(getattr(self.config, 'relaxed_alignment', False)):
-                if str(mtf_out.direction) != str(htf_out.direction):
+            # Alignment logic based on profile
+            if bool(getattr(self.config, 'relaxed_alignment', False)):
+                # Relaxed: MTF + LTF must agree. HTF is optional but cannot oppose.
+                if not mtf_pass:
                     self.last_rejection_stage = "MTF"
-                    self.last_rejection_reason = f"mtf dir {mtf_out.direction} != htf dir {htf_out.direction}"
+                    self.last_rejection_reason = "mtf gate failed"
+                    return None
+                
+                if mtf_out.direction == 'HOLD':
+                    self.last_rejection_stage = "MTF"
+                    self.last_rejection_reason = "mtf hold"
                     return None
 
-            ltf_out = self._evaluate_timeframe(data_ltf, timeframe=self.config.ltf, equity=balance, signal_id="ltf")
-            if not self._passes_gate(ltf_out, min_conf=self.config.min_ltf_confidence, min_stability=self.config.min_stability):
-                self.last_rejection_stage = "LTF"
-                self.last_rejection_reason = "ltf gate failed"
-                return None
+                if not ltf_pass:
+                    self.last_rejection_stage = "LTF"
+                    self.last_rejection_reason = "ltf gate failed"
+                    return None
 
-            if ltf_out.direction == 'HOLD':
-                self.last_rejection_stage = "LTF"
-                self.last_rejection_reason = "ltf hold"
-                return None
+                if ltf_out.direction == 'HOLD':
+                    self.last_rejection_stage = "LTF"
+                    self.last_rejection_reason = "ltf hold"
+                    return None
 
-            if not self._directional_score_ok(ltf_out):
-                self.last_rejection_stage = "LTF"
-                self.last_rejection_reason = "ltf directional score"
-                return None
-
-            if bool(getattr(self.config, 'relaxed_alignment', False)):
                 if str(ltf_out.direction) != str(mtf_out.direction):
-                    self.last_rejection_stage = "MTF"
+                    self.last_rejection_stage = "ALIGN"
                     self.last_rejection_reason = f"mtf dir {mtf_out.direction} != ltf dir {ltf_out.direction}"
                     return None
 
-                # HTF is optional in relaxed mode, but when HTF is confident, it may veto opposite direction.
-                if htf_pass:
-                    try:
-                        if str(getattr(htf_out, 'direction', 'HOLD')) != 'HOLD' and str(htf_out.direction) != str(ltf_out.direction):
-                            self.last_rejection_stage = "HTF"
-                            self.last_rejection_reason = f"htf dir {htf_out.direction} != ltf dir {ltf_out.direction}"
-                            return None
-                    except Exception:
-                        pass
-            else:
-                if str(ltf_out.direction) != str(htf_out.direction):
-                    self.last_rejection_stage = "LTF"
-                    self.last_rejection_reason = f"ltf dir {ltf_out.direction} != htf dir {htf_out.direction}"
+                # Trend Stability Check (SCALP specific)
+                # Ensure MTF trend is stable for at least 2 bars
+                if not self._is_trend_stable(self.config.mtf, required_bars=2):
+                    self.last_rejection_stage = "STABILITY"
+                    self.last_rejection_reason = f"mtf trend unstable: {self._tf_direction_history.get(self.config.mtf)}"
                     return None
+
+                # HTF Veto: If HTF is confident, it must not oppose LTF
+                if htf_pass and htf_out.direction != 'HOLD' and str(htf_out.direction) != str(ltf_out.direction):
+                    self.last_rejection_stage = "ALIGN"
+                    self.last_rejection_reason = f"htf dir {htf_out.direction} opposes ltf dir {ltf_out.direction}"
+                    return None
+            else:
+                # Strict: All 3 TFs must agree and pass gates
+                if not htf_pass or htf_out.direction == 'HOLD':
+                    self.last_rejection_stage = "HTF"
+                    self.last_rejection_reason = "htf gate failed or hold"
+                    return None
+                
+                if not mtf_pass or mtf_out.direction == 'HOLD':
+                    self.last_rejection_stage = "MTF"
+                    self.last_rejection_reason = "mtf gate failed or hold"
+                    return None
+                
+                if not ltf_pass or ltf_out.direction == 'HOLD':
+                    self.last_rejection_stage = "LTF"
+                    self.last_rejection_reason = "ltf gate failed or hold"
+                    return None
+
+                if not (str(htf_out.direction) == str(mtf_out.direction) == str(ltf_out.direction)):
+                    self.last_rejection_stage = "ALIGN"
+                    self.last_rejection_reason = f"3TF mismatch: h={htf_out.direction}, m={mtf_out.direction}, l={ltf_out.direction}"
+                    return None
+
+            # Directional Score Check
+            if not self._directional_score_ok(ltf_out):
+                self.last_rejection_stage = "LTF"
+                self.last_rejection_reason = "ltf directional score too low"
+                return None
 
             direction = 'BUY' if ltf_out.direction == 'LONG' else 'SELL'
 
@@ -737,11 +904,12 @@ class Unified3TFStrategy(Strategy):
                 (high - prev_close).abs(),
                 (low - prev_close).abs(),
             ], axis=1).max(axis=1)
-            atr = float(tr.rolling(14, min_periods=1).mean().iloc[-1])
+            atr_period = int(getattr(self.config, 'atr_period', 14))
+            atr = float(tr.rolling(atr_period, min_periods=1).mean().iloc[-1])
             if not np.isfinite(atr) or atr <= 0:
                 return self._fallback_sltp(entry_price, 'LONG' if direction == 'BUY' else 'SHORT')
 
-            sl_mult = 1.5
+            sl_mult = float(getattr(self.config, 'atr_sl_mult', 1.5))
             sl_dist = atr * sl_mult
             rr = float(getattr(self.config, 'min_risk_reward', 2.0) or 2.0)
             tp_dist = sl_dist * rr
