@@ -1,0 +1,110 @@
+2026-02-07 13:58:18 | INFO     | pyforex              | ============================================================
+2026-02-07 13:58:18 | INFO     | pyforex              |   pyForex - Multi-Modal Forex Trading System
+2026-02-07 13:58:18 | INFO     | pyforex              | ============================================================
+2026-02-07 13:58:18 | INFO     | pyforex              | 📊 Starting Backtest Mode
+2026-02-07 13:58:24 | INFO     | pyforex              | Loading data from E:\pyProject\pyForex-assets\data\mt5\EURUSD\EURUSD_M5_20260205_110724.csv
+2026-02-07 13:58:24 | INFO     | pyforex              | Loading MTF data from E:\pyProject\pyForex-assets\data\mt5\EURUSD\EURUSD_M15_20260205_110724.csv
+2026-02-07 13:58:24 | INFO     | pyforex              | Loading HTF data from E:\pyProject\pyForex-assets\data\mt5\EURUSD\EURUSD_H1_20260205_110724.csv
+2026-02-07 13:58:24 | INFO     | pyforex              | Loaded 10000 candles
+2026-02-07 13:58:26 | INFO     | pyforex              | 3TF alignment window: start=2025-12-16 17:35:00 end=2026-02-05 13:00:00 days=50
+2026-02-07 13:58:26 | INFO     | pyforex              | Aligned M5: rows=9999 span_days=50 start=2025-12-16 17:35:00 end=2026-02-05 13:00:00
+2026-02-07 13:58:26 | INFO     | pyforex              | Aligned M15: rows=3340 span_days=50 start=2025-12-16 17:45:00 end=2026-02-05 13:00:00
+2026-02-07 13:58:26 | INFO     | pyforex              | Aligned H1: rows=836 span_days=50 start=2025-12-16 18:00:00 end=2026-02-05 13:00:00
+2026-02-07 13:58:26 | INFO     | pyforex              | 3TF backtest enabled: LTF=M5, MTF=M15, HTF=H1
+2026-02-07 13:58:26 | INFO     | strategies.unified_3tf_strategy | Unified3TFStrategy created for EURUSD (SCALP)
+2026-02-07 13:58:26 | INFO     | alpha_factory.mhtcn_integration | MHTCNFeatureProvider initialized for SCALPING
+2026-02-07 13:58:26 | INFO     | alpha_factory.probabilistic_alpha_factory | MH-TCN provider initialized for SCALPING
+2026-02-07 13:58:26 | INFO     | alpha_factory.probabilistic_alpha_factory | ProbabilisticAlphaFactory initialized
+2026-02-07 13:58:26 | INFO     | strategies.unified_3tf_strategy | ProbabilisticAlphaFactory loaded successfully
+2026-02-07 13:58:27 | INFO     | strategies.unified_3tf_strategy | Unified3TFStrategy initialized with balance: 10000.0
+2026-02-07 13:58:28 | INFO     | alpha_factory.mhtcn_integration | Loaded MH-TCN weights for H1 from E:\pyProject\pyForex-assets\models\weights\multihead_tcn_SCALP.pth
+2026-02-07 13:58:29 | INFO     | alpha_factory.probabilistic_alpha_factory | [htf] p_bull=0.2376 p_bear=0.3032 p_neut=0.4591 thresh=0.3512 conf=0.3032 vol=0.000785
+2026-02-07 13:58:29 | INFO     | alpha_factory.mhtcn_integration | Loaded MH-TCN weights for M15 from E:\pyProject\pyForex-assets\models\weights\multihead_tcn_SCALP.pth
+2026-02-07 13:58:29 | INFO     | alpha_factory.probabilistic_alpha_factory | [mtf] p_bull=0.2922 p_bear=0.2902 p_neut=0.4176 thresh=0.3502 conf=0.3000 vol=0.000167
+2026-02-07 13:58:29 | INFO     | alpha_factory.mhtcn_integration | Loaded MH-TCN weights for M5 from E:\pyProject\pyForex-assets\models\weights\multihead_tcn_SCALP.pth
+2026-02-07 13:58:29 | INFO     | alpha_factory.probabilistic_alpha_factory | [ltf] p_bull=0.4524 p_bear=0.2176 p_neut=0.3300 thresh=0.3502 conf=0.4524 vol=0.000130
+2026-02-07 13:58:30 | INFO     | alpha_factory.probabilistic_alpha_factory | [ltf] p_bull=0.4610 p_bear=0.2115 p_neut=0.3274 thresh=0.3502 conf=0.4610 vol=0.000114
+2026-02-07 13:58:30 | INFO     | alpha_factory.probabilistic_alpha_factory | [ltf] p_bull=0.4498 p_bear=0.2259 p_neut=0.3243 thresh=0.3502 conf=0.4498 vol=0.000105
+2026-02-07 13:58:30 | INFO     | alpha_factory.probabilistic_alpha_factory | [mtf] p_bull=0.2801 p_bear=0.2915 p_neut=0.4284 thresh=0.3503 conf=0.3000 vol=0.000169
+2026-02-07 13:58:30 | INFO     | alpha_factory.probabilistic_alpha_factory | [ltf] p_bull=0.4638 p_bear=0.2235 p_neut=0.3127 thresh=0.3502 conf=0.4638 vol=0.000102
+2026-02-07 13:58:30 | INFO     | alpha_factory.probabilistic_alpha_factory | [ltf] p_bull=0.4567 p_bear=0.2327 p_neut=0.3105 thresh=0.3502 conf=0.4567 vol=0.000107
+2026-02-07 13:58:31 | INFO     | alpha_factory.probabilistic_alpha_factory | [ltf] p_bull=0.4781 p_bear=0.2333 p_neut=0.2886 thresh=0.3502 conf=0.4781 vol=0.000105
+2026-02-07 13:58:31 | INFO     | alpha_factory.probabilistic_alpha_factory | [mtf] p_bull=0.2685 p_bear=0.2950 p_neut=0.4365 thresh=0.3503 conf=0.3000 vol=0.000179
+2026-02-07 14:00:20 | INFO     | alpha_factory.probabilistic_alpha_factory | [ltf] p_bull=0.5405 p_bear=0.2192 p_neut=0.2403 thresh=0.3503 conf=0.5405 vol=0.000182
+2026-02-07 14:00:23 | INFO     | trading.backtest     | [BACKTEST] Opened BUY 0.08 @ 1.17352 (SL: 1.17247, TP: 1.17491)
+2026-02-07 14:00:23 | INFO     | strategies.unified_3tf_strategy | Trade signal: BUY EURUSD (conf=0.53)
+2026-02-07 14:00:36 | INFO     | trading.backtest     | [BACKTEST] Closed BUY @ 1.17491 (CLOSED_TP) P&L: 10.58
+2026-02-07 14:00:42 | INFO     | trading.backtest     | [BACKTEST] Opened BUY 0.06 @ 1.17614 (SL: 1.17490, TP: 1.17783)
+2026-02-07 14:00:42 | INFO     | strategies.unified_3tf_strategy | Trade signal: BUY EURUSD (conf=0.47)
+2026-02-07 14:01:38 | INFO     | trading.backtest     | [BACKTEST] Closed BUY @ 1.17783 (CLOSED_TP) P&L: 9.69
+2026-02-07 14:02:44 | INFO     | alpha_factory.probabilistic_alpha_factory | [ltf] p_bull=0.3719 p_bear=0.2774 p_neut=0.3507 thresh=0.3504 conf=0.3719 vol=0.000277
+2026-02-07 14:05:11 | INFO     | alpha_factory.probabilistic_alpha_factory | [mtf] p_bull=0.2797 p_bear=0.2774 p_neut=0.4429 thresh=0.3503 conf=0.3000 vol=0.000167
+2026-02-07 14:07:30 | INFO     | alpha_factory.probabilistic_alpha_factory | [ltf] p_bull=0.3895 p_bear=0.3060 p_neut=0.3045 thresh=0.3501 conf=0.3895 vol=0.000095
+2026-02-07 14:09:22 | INFO     | alpha_factory.probabilistic_alpha_factory | [ltf] p_bull=0.4718 p_bear=0.2482 p_neut=0.2800 thresh=0.3503 conf=0.4718 vol=0.000220
+2026-02-07 14:11:05 | INFO     | trading.backtest     | [BACKTEST] Opened BUY 0.06 @ 1.17456 (SL: 1.17354, TP: 1.17591)
+2026-02-07 14:11:05 | INFO     | strategies.unified_3tf_strategy | Trade signal: BUY EURUSD (conf=0.43)
+2026-02-07 14:11:13 | INFO     | alpha_factory.probabilistic_alpha_factory | [ltf] p_bull=0.4050 p_bear=0.2794 p_neut=0.3156 thresh=0.3504 conf=0.4050 vol=0.000256
+2026-02-07 14:11:14 | INFO     | trading.backtest     | [BACKTEST] Closed BUY @ 1.17354 (CLOSED_SL) P&L: -6.56
+2026-02-07 14:13:08 | INFO     | alpha_factory.probabilistic_alpha_factory | [ltf] p_bull=0.4384 p_bear=0.2687 p_neut=0.2929 thresh=0.3506 conf=0.4384 vol=0.000169
+2026-02-07 14:14:31 | INFO     | trading.backtest     | [BACKTEST] Opened BUY 0.04 @ 1.17166 (SL: 1.17024, TP: 1.17363)
+2026-02-07 14:14:31 | INFO     | strategies.unified_3tf_strategy | Trade signal: BUY EURUSD (conf=0.44)
+2026-02-07 14:15:06 | INFO     | alpha_factory.probabilistic_alpha_factory | [ltf] p_bull=0.3773 p_bear=0.2348 p_neut=0.3879 thresh=0.3506 conf=0.3773 vol=0.000164
+2026-02-07 14:15:10 | INFO     | trading.backtest     | [BACKTEST] Closed BUY @ 1.17363 (CLOSED_TP) P&L: 7.62
+2026-02-07 14:17:04 | INFO     | alpha_factory.probabilistic_alpha_factory | [mtf] p_bull=0.2905 p_bear=0.3144 p_neut=0.3951 thresh=0.3503 conf=0.3144 vol=0.000225
+2026-02-07 14:19:02 | INFO     | alpha_factory.probabilistic_alpha_factory | [ltf] p_bull=0.3639 p_bear=0.2993 p_neut=0.3369 thresh=0.3502 conf=0.3639 vol=0.000153
+2026-02-07 14:21:00 | INFO     | alpha_factory.probabilistic_alpha_factory | [ltf] p_bull=0.5749 p_bear=0.1806 p_neut=0.2445 thresh=0.3502 conf=0.5749 vol=0.000149
+2026-02-07 14:22:58 | INFO     | alpha_factory.probabilistic_alpha_factory | [htf] p_bull=0.2984 p_bear=0.3417 p_neut=0.3599 thresh=0.3510 conf=0.3417 vol=0.000651
+2026-02-07 14:24:54 | INFO     | alpha_factory.probabilistic_alpha_factory | [ltf] p_bull=0.3853 p_bear=0.2823 p_neut=0.3324 thresh=0.3501 conf=0.3853 vol=0.000073
+2026-02-07 14:25:12 | INFO     | trading.backtest     | [BACKTEST] Opened BUY 0.05 @ 1.16538 (SL: 1.16435, TP: 1.16674)
+2026-02-07 14:25:12 | INFO     | strategies.unified_3tf_strategy | Trade signal: BUY EURUSD (conf=0.41)
+2026-02-07 14:25:43 | INFO     | trading.backtest     | [BACKTEST] Closed BUY @ 1.16435 (CLOSED_SL) P&L: -5.50
+2026-02-07 14:26:48 | INFO     | alpha_factory.probabilistic_alpha_factory | [ltf] p_bull=0.3789 p_bear=0.2514 p_neut=0.3697 thresh=0.3505 conf=0.3789 vol=0.000151
+2026-02-07 14:28:09 | INFO     | trading.backtest     | [BACKTEST] Opened BUY 0.05 @ 1.16146 (SL: 1.16051, TP: 1.16270)
+2026-02-07 14:28:09 | INFO     | strategies.unified_3tf_strategy | Trade signal: BUY EURUSD (conf=0.40)
+2026-02-07 14:28:31 | INFO     | trading.backtest     | [BACKTEST] Closed BUY @ 1.16051 (CLOSED_SL) P&L: -5.10
+2026-02-07 14:28:38 | INFO     | alpha_factory.probabilistic_alpha_factory | [ltf] p_bull=0.4094 p_bear=0.2380 p_neut=0.3527 thresh=0.3509 conf=0.4094 vol=0.000216
+2026-02-07 14:30:29 | INFO     | alpha_factory.probabilistic_alpha_factory | [mtf] p_bull=0.2716 p_bear=0.2993 p_neut=0.4291 thresh=0.3508 conf=0.3000 vol=0.000152
+2026-02-07 14:30:51 | INFO     | trading.backtest     | [BACKTEST] Opened BUY 0.15 @ 1.16671 (SL: 1.16593, TP: 1.16835)
+2026-02-07 14:30:51 | INFO     | strategies.unified_3tf_strategy | Trade signal: BUY EURUSD (conf=0.64)
+2026-02-07 14:30:58 | INFO     | trading.backtest     | [BACKTEST] Closed BUY @ 1.16835 (CLOSED_TP) P&L: 23.53
+2026-02-07 14:30:59 | INFO     | trading.backtest     | [BACKTEST] Opened BUY 0.06 @ 1.16931 (SL: 1.16775, TP: 1.17150)
+2026-02-07 14:30:59 | INFO     | strategies.unified_3tf_strategy | Trade signal: BUY EURUSD (conf=0.59)
+2026-02-07 14:31:00 | INFO     | trading.backtest     | [BACKTEST] Closed BUY @ 1.17150 (CLOSED_TP) P&L: 12.73
+2026-02-07 14:31:01 | INFO     | trading.backtest     | [BACKTEST] Opened BUY 0.05 @ 1.17226 (SL: 1.17022, TP: 1.17674)
+2026-02-07 14:31:01 | INFO     | strategies.unified_3tf_strategy | Trade signal: BUY EURUSD (conf=0.61)
+2026-02-07 14:32:23 | INFO     | alpha_factory.probabilistic_alpha_factory | [ltf] p_bull=0.3808 p_bear=0.2282 p_neut=0.3910 thresh=0.3502 conf=0.3808 vol=0.000092
+2026-02-07 14:32:59 | INFO     | trading.backtest     | [BACKTEST] Closed BUY @ 1.17022 (CLOSED_SL) P&L: -10.56
+2026-02-07 14:34:20 | INFO     | alpha_factory.probabilistic_alpha_factory | [ltf] p_bull=0.4538 p_bear=0.2391 p_neut=0.3071 thresh=0.3508 conf=0.4538 vol=0.000188
+2026-02-07 14:34:29 | INFO     | trading.backtest     | [BACKTEST] Opened BUY 0.06 @ 1.17150 (SL: 1.16998, TP: 1.17363)
+2026-02-07 14:34:29 | INFO     | strategies.unified_3tf_strategy | Trade signal: BUY EURUSD (conf=0.54)
+2026-02-07 14:34:32 | INFO     | trading.backtest     | [BACKTEST] Closed BUY @ 1.17363 (CLOSED_TP) P&L: 12.35
+2026-02-07 14:34:33 | INFO     | trading.backtest     | [BACKTEST] Opened BUY 0.06 @ 1.17433 (SL: 1.17261, TP: 1.17834)
+2026-02-07 14:34:33 | INFO     | strategies.unified_3tf_strategy | Trade signal: BUY EURUSD (conf=0.63)
+2026-02-07 14:36:10 | INFO     | trading.backtest     | [BACKTEST] Closed BUY @ 1.17834 (CLOSED_TP) P&L: 23.66
+2026-02-07 14:36:10 | INFO     | trading.backtest     | [BACKTEST] Opened BUY 0.05 @ 1.17946 (SL: 1.17726, TP: 1.18470)
+2026-02-07 14:36:10 | INFO     | strategies.unified_3tf_strategy | Trade signal: BUY EURUSD (conf=0.63)
+2026-02-07 14:36:17 | INFO     | alpha_factory.probabilistic_alpha_factory | [ltf] p_bull=0.5594 p_bear=0.2342 p_neut=0.2064 thresh=0.3505 conf=0.5594 vol=0.000311
+2026-02-07 14:36:25 | INFO     | trading.backtest     | [BACKTEST] Closed BUY @ 1.18470 (CLOSED_TP) P&L: 25.87
+2026-02-07 14:36:26 | INFO     | trading.backtest     | [BACKTEST] Opened BUY 0.05 @ 1.18665 (SL: 1.18460, TP: 1.18962)
+2026-02-07 14:36:26 | INFO     | strategies.unified_3tf_strategy | Trade signal: BUY EURUSD (conf=0.63)
+2026-02-07 14:37:01 | INFO     | trading.backtest     | [BACKTEST] Closed BUY @ 1.18460 (CLOSED_SL) P&L: -10.61
+2026-02-07 14:37:31 | INFO     | trading.backtest     | [BACKTEST] Opened BUY 0.05 @ 1.18928 (SL: 1.18771, TP: 1.19265)
+2026-02-07 14:37:31 | INFO     | strategies.unified_3tf_strategy | Trade signal: BUY EURUSD (conf=0.50)
+2026-02-07 14:37:42 | INFO     | trading.backtest     | [BACKTEST] Closed BUY @ 1.18771 (CLOSED_SL) P&L: -8.21
+2026-02-07 14:38:14 | INFO     | alpha_factory.probabilistic_alpha_factory | [ltf] p_bull=0.4527 p_bear=0.2501 p_neut=0.2972 thresh=0.3512 conf=0.4527 vol=0.000206
+2026-02-07 14:38:51 | INFO     | trading.backtest     | [BACKTEST] Opened BUY 0.05 @ 1.19171 (SL: 1.18987, TP: 1.19571)
+2026-02-07 14:38:51 | INFO     | strategies.unified_3tf_strategy | Trade signal: BUY EURUSD (conf=0.55)
+2026-02-07 14:38:59 | INFO     | trading.backtest     | [BACKTEST] Closed BUY @ 1.19571 (CLOSED_TP) P&L: 19.63
+2026-02-07 14:39:22 | INFO     | trading.backtest     | [BACKTEST] Opened BUY 0.02 @ 1.20295 (SL: 1.19824, TP: 1.20976)
+2026-02-07 14:39:22 | INFO     | strategies.unified_3tf_strategy | Trade signal: BUY EURUSD (conf=0.56)
+2026-02-07 14:39:53 | INFO     | trading.backtest     | [BACKTEST] Closed BUY @ 1.19824 (CLOSED_SL) P&L: -9.55
+2026-02-07 14:40:11 | INFO     | alpha_factory.probabilistic_alpha_factory | [mtf] p_bull=0.2596 p_bear=0.3108 p_neut=0.4296 thresh=0.3516 conf=0.3108 vol=0.000766
+2026-02-07 14:41:06 | INFO     | trading.backtest     | [BACKTEST] Opened BUY 0.04 @ 1.19709 (SL: 1.19578, TP: 1.19889)
+2026-02-07 14:41:06 | INFO     | strategies.unified_3tf_strategy | Trade signal: BUY EURUSD (conf=0.43)
+2026-02-07 14:41:13 | INFO     | trading.backtest     | [BACKTEST] Closed BUY @ 1.19578 (CLOSED_SL) P&L: -5.50
+2026-02-07 14:42:09 | INFO     | alpha_factory.probabilistic_alpha_factory | [ltf] p_bull=0.3976 p_bear=0.4223 p_neut=0.1801 thresh=0.3519 conf=0.4223 vol=0.000766
+2026-02-07 14:44:07 | INFO     | alpha_factory.probabilistic_alpha_factory | [ltf] p_bull=0.5819 p_bear=0.2349 p_neut=0.1831 thresh=0.3511 conf=0.5819 vol=0.000213
+2026-02-07 14:46:04 | INFO     | alpha_factory.probabilistic_alpha_factory | [mtf] p_bull=0.3384 p_bear=0.3016 p_neut=0.3601 thresh=0.3511 conf=0.3384 vol=0.000218
+2026-02-07 14:48:02 | INFO     | alpha_factory.probabilistic_alpha_factory | [ltf] p_bull=0.4823 p_bear=0.2061 p_neut=0.3116 thresh=0.3511 conf=0.4823 vol=0.000249
+2026-02-07 14:49:48 | INFO     | pyforex              | CSV export written: E:\pyProject\pyForex-assets\backtests\backtest_unified3tf_EURUSD_SCALP_trades_20260207_144948.csv
+2026-02-07 14:49:48 | INFO     | pyforex              | CSV export written: E:\pyProject\pyForex-assets\backtests\backtest_unified3tf_EURUSD_SCALP_summary_20260207_144948.csv
