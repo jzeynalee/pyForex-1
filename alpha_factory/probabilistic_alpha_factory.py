@@ -1278,7 +1278,7 @@ class ProbabilisticAlphaFactory:
             self._eval_count = 0
         self._eval_count += 1
         if self._eval_count <= 10 or self._eval_count % 500 == 0:
-            logger.info(
+            logger.debug(
                 f"[{signal_id}] p_bull={p_bull:.4f} p_bear={p_bear:.4f} p_neut={p_neutral:.4f} "
                 f"thresh={threshold:.4f} conf={decayed_confidence:.4f} vol={current_vol:.6f}"
             )

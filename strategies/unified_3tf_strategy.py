@@ -609,7 +609,7 @@ class Unified3TFStrategy(Strategy):
 
             self._daily_trades += 1
 
-            logger.info(
+            logger.debug(
                 f"Trade signal: {direction} {self.config.symbol} "
                 f"(conf={ltf_out.confidence:.2f})"
             )

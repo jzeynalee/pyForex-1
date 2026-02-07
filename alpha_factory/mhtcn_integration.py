@@ -670,7 +670,7 @@ class UnifiedThreeTFEngine:
                 self.last_rejection_reason = ""
             
             if instruction is not None:
-                logger.info(
+                logger.debug(
                     f"Trade instruction generated: {instruction.direction} {self.symbol} "
                     f"(conf={instruction.confidence:.2f}, size_mult={instruction.size_multiplier:.2f})"
                 )
