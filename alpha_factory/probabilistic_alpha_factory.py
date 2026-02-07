@@ -81,9 +81,9 @@ class ProbabilisticConfig:
     evidence_threshold_enabled: bool = False
     
     # Dynamic Thresholding
-    base_threshold: float = 0.55
-    vol_factor: float = 5.0  # Threshold increase per unit volatility
-    drawdown_penalty: float = 0.1  # Threshold increase per 10% drawdown
+    base_threshold: float = 0.35
+    vol_factor: float = 1.5  # Threshold increase per unit volatility
+    drawdown_penalty: float = 0.05  # Threshold increase per 10% drawdown
     
     # Alpha Decay
     alpha_decay_enabled: bool = True
@@ -103,8 +103,8 @@ class ProbabilisticConfig:
 
         if self.key_features is None:
             self.key_features = [
-                "rsi", "macd", "macd_histogram", "adx", "bb_position",
-                "atr_ratio", "momentum", "trend_strength", "volatility_ratio"
+                "rsi", "macd", "macd_histogram", "adx",
+                "atr_ratio", "momentum", "trend_strength"
             ]
 
 
@@ -179,14 +179,28 @@ class FeatureProbability:
     decay_factor: float = 1.0
     
     @property
+    def reliability_weight(self) -> float:
+        """Combined reliability weight for this feature.
+        
+        Uses a blended score instead of pure multiplication which would
+        collapse to ~0 when any factor (especially specificity) is near-zero.
+        """
+        # Weighted blend of reliability factors
+        w = (0.4 * self.hit_rate
+             + 0.2 * self.specificity
+             + 0.3 * self.causal_confidence
+             + 0.1 * self.decay_factor)
+        return float(np.clip(w, 0.05, 1.0))
+    
+    @property
     def weighted_p_bull(self) -> float:
-        """Probability weighted by reliability and causality."""
-        return self.p_bull * self.hit_rate * self.specificity * self.causal_confidence * self.decay_factor
+        """Probability weighted by reliability."""
+        return self.p_bull * self.reliability_weight
     
     @property
     def weighted_p_bear(self) -> float:
-        """Probability weighted by reliability and causality."""
-        return self.p_bear * self.hit_rate * self.specificity * self.causal_confidence * self.decay_factor
+        """Probability weighted by reliability."""
+        return self.p_bear * self.reliability_weight
 
 
 @dataclass
@@ -436,8 +450,8 @@ class FeatureProbabilityCalibrator:
         """Default calibration parameters for common features."""
         return {
             "rsi": {
-                "bull_zone": (30, 50),  # RSI range that supports bullish
-                "bear_zone": (50, 70),  # RSI range that supports bearish
+                "bull_zone": (50, 70),  # RSI above 50 supports bullish trend
+                "bear_zone": (30, 50),  # RSI below 50 supports bearish trend
                 "scale": 20.0,
                 "type": "oscillator"
             },
@@ -541,24 +555,27 @@ class FeatureProbabilityCalibrator:
         scale = default_config.get("scale", 1.0)
         
         if feature_type == "oscillator":
-            # RSI-like: oversold = bullish, overbought = bearish
-            bull_zone = default_config.get("bull_zone", (30, 50))
-            bear_zone = default_config.get("bear_zone", (50, 70))
+            # RSI-like: trend-following interpretation
+            # High values (>70) = strong bullish momentum
+            # Low values (<30) = strong bearish momentum
+            # 40-60 = neutral/indeterminate zone
+            bull_zone = default_config.get("bull_zone", (50, 70))
+            bear_zone = default_config.get("bear_zone", (30, 50))
             
-            # Distance from zones
-            if value < bull_zone[0]:  # Oversold
-                p_bull = self._sigmoid((bull_zone[0] - value) / scale)
-                p_bear = 0.2
-            elif value > bear_zone[1]:  # Overbought
-                p_bear = self._sigmoid((value - bear_zone[1]) / scale)
-                p_bull = 0.2
+            midpoint = 50.0
+            if value > bull_zone[1]:  # Strong bullish (e.g. RSI > 70)
+                p_bull = self._sigmoid((value - bull_zone[1]) / scale)
+                p_bear = 0.1
+            elif value < bear_zone[0]:  # Strong bearish (e.g. RSI < 30)
+                p_bear = self._sigmoid((bear_zone[0] - value) / scale)
+                p_bull = 0.1
             else:
-                # In neutral zone
-                mid = (bull_zone[1] + bear_zone[0]) / 2
-                p_bull = 0.5 - (value - mid) / (scale * 2)
-                p_bear = 0.5 + (value - mid) / (scale * 2)
+                # Interpolate: above midpoint favors bull, below favors bear
+                normalized = (value - midpoint) / (scale + 1e-10)
+                p_bull = self._sigmoid(normalized)
+                p_bear = self._sigmoid(-normalized)
             
-            p_neutral = 1.0 - max(p_bull, p_bear)
+            p_neutral = float(np.clip(1.0 - abs(p_bull - p_bear), 0.1, 0.5))
             
         elif feature_type == "momentum":
             # MACD-like: positive = bullish, negative = bearish
@@ -880,6 +897,17 @@ class EvidenceAggregator:
         contributions = {}
         if mhtcn_probs is not None:
             mhtcn_weight = float(getattr(self.config, 'mhtcn_weight', 0.4))
+            
+            # Detect degenerate MH-TCN output: if one class dominates (>0.90),
+            # the model has no useful directional info (softmax saturation).
+            # Scale down MH-TCN weight proportionally to avoid killing classical signals.
+            max_mhtcn_prob = max(mhtcn_probs.get("bull", 0), mhtcn_probs.get("bear", 0), mhtcn_probs.get("neutral", 0))
+            if max_mhtcn_prob > 0.90:
+                # Linearly reduce weight: at 0.90 keep full weight, at 1.0 use 0
+                degenerate_factor = max(0.0, (1.0 - max_mhtcn_prob) / 0.10)
+                mhtcn_weight *= degenerate_factor
+                logger.debug(f"MH-TCN degenerate: max_prob={max_mhtcn_prob:.3f}, effective_weight={mhtcn_weight:.3f}")
+            
             classical_weight = 1.0 - mhtcn_weight
             
             p_bull = classical_weight * p_bull + mhtcn_weight * mhtcn_probs.get("bull", 0.33)
@@ -888,20 +916,21 @@ class EvidenceAggregator:
             
             contributions["mhtcn"] = mhtcn_weight
         
-        # Apply regime prior (Bayesian update style)
-        # We treat the prior as a bias that shifts the aggregated evidence
-        p_bull *= regime_prior.p_bull
-        p_bear *= regime_prior.p_bear
-        p_neutral *= regime_prior.p_neutral
+        # Apply regime prior as soft directional bias (additive blend, NOT multiplicative)
+        # Multiplicative regime_prior * evidence compresses everything to ~0.06 then
+        # normalisation produces ~0.33/0.33/0.33 regardless of evidence – defeating
+        # the entire pipeline.  Instead, blend a small fraction of the prior to nudge
+        # the aggregated evidence toward the dominant regime.
+        prior_blend = 0.10  # 10 % prior influence
+        p_bull  = (1.0 - prior_blend) * p_bull  + prior_blend * regime_prior.p_bull
+        p_bear  = (1.0 - prior_blend) * p_bear  + prior_blend * regime_prior.p_bear
+        p_neutral = (1.0 - prior_blend) * p_neutral + prior_blend * regime_prior.p_neutral
         
-        # Apply stability score (Reduce directional probabilities in unstable markets)
-        stability_weight = float(getattr(self.config, 'stability_weight', 0.2))
-        stability_factor = 1.0 - (stability_weight * (1.0 - stability_score))
-        
-        p_bull *= stability_factor
-        p_bear *= stability_factor
-        # Neutral increases when stability is low
-        p_neutral = p_neutral + (1.0 - stability_factor) * 0.5
+        # Stability score: used only as a confidence quality metric.
+        # We do NOT penalise directional probabilities in volatile markets –
+        # for scalping, volatility is opportunity.  Stability is still tracked
+        # and reported so the gate logic can use it, but it no longer distorts
+        # the probability distribution here.
         
         # Normalize
         total = p_bull + p_bear + p_neutral
@@ -927,29 +956,44 @@ class EvidenceAggregator:
         self,
         feature_probs: List[FeatureProbability]
     ) -> Tuple[float, float, float]:
-        """Noisy-OR aggregation: any strong evidence triggers."""
+        """Noisy-OR aggregation with anti-saturation measures.
+        
+        Fixes: When N correlated features all produce ~0.33, classic Noisy-OR
+        gives 1-(1-0.33)^N ≈ 0.97 for BOTH bull AND bear, making the result
+        random. We fix this by:
+        1. Using only the top-K most directional features (avoids correlated flooding)
+        2. Dampening each probability contribution (sqrt) to reduce saturation
+        """
+        max_features = 4  # Limit to top-K to avoid independence violation
+        
+        # Sort features by directional strength (max of bull, bear prob)
+        ranked = sorted(feature_probs, key=lambda fp: abs(fp.p_bull - fp.p_bear), reverse=True)
+        top_features = ranked[:max_features]
+        
         if bool(getattr(self.config, 'evidence_threshold_enabled', False)):
             threshold = self.config.evidence_threshold
-            bull_probs = [fp.weighted_p_bull for fp in feature_probs if fp.weighted_p_bull > threshold]
-            bear_probs = [fp.weighted_p_bear for fp in feature_probs if fp.weighted_p_bear > threshold]
+            bull_probs = [fp.weighted_p_bull for fp in top_features if fp.weighted_p_bull > threshold]
+            bear_probs = [fp.weighted_p_bear for fp in top_features if fp.weighted_p_bear > threshold]
         else:
-            bull_probs = [fp.weighted_p_bull for fp in feature_probs]
-            bear_probs = [fp.weighted_p_bear for fp in feature_probs]
+            bull_probs = [fp.weighted_p_bull for fp in top_features]
+            bear_probs = [fp.weighted_p_bear for fp in top_features]
         
-        # Noisy-OR: P(any) = 1 - ∏(1 - P_i)
+        # Dampened Noisy-OR: use sqrt(p) to reduce saturation speed
         if bull_probs:
-            p_bull = 1.0 - np.prod([1.0 - p for p in bull_probs])
+            dampened = [np.sqrt(p) * 0.5 for p in bull_probs]  # dampen
+            p_bull = 1.0 - np.prod([1.0 - d for d in dampened])
         else:
             p_bull = 0.2
         
         if bear_probs:
-            p_bear = 1.0 - np.prod([1.0 - p for p in bear_probs])
+            dampened = [np.sqrt(p) * 0.5 for p in bear_probs]
+            p_bear = 1.0 - np.prod([1.0 - d for d in dampened])
         else:
             p_bear = 0.2
         
-        p_neutral = 1.0 - max(p_bull, p_bear)
+        p_neutral = float(np.clip(1.0 - max(p_bull, p_bear), 0.1, 0.6))
         
-        return float(p_bull), float(p_bear), float(np.clip(p_neutral, 0.1, 0.8))
+        return float(p_bull), float(p_bear), p_neutral
     
     def _bayesian_aggregation(
         self,
@@ -992,7 +1036,7 @@ class EvidenceAggregator:
         sum_neutral = 0.0
         
         for fp in feature_probs:
-            weight = fp.hit_rate * fp.specificity * fp.decay_factor
+            weight = fp.reliability_weight
             sum_bull += fp.p_bull * weight
             sum_bear += fp.p_bear * weight
             sum_neutral += fp.p_neutral * weight
@@ -1049,7 +1093,7 @@ class DynamicThresholdCalculator:
         
         threshold = base + vol_adjustment + dd_adjustment
         
-        return float(np.clip(threshold, 0.4, 0.9))
+        return float(np.clip(threshold, 0.34, 0.8))
     
     def update_drawdown(self, current_equity: float):
         """Update drawdown tracking."""
@@ -1229,14 +1273,30 @@ class ProbabilisticAlphaFactory:
         confidence = max(p_bull, p_bear)
         decayed_confidence = self.alpha_decay.apply_decay(signal_id, confidence, bars_since)
         
-        # Decision
-        if p_bull > threshold and p_bull > p_bear:
+        # Decision (sampled diagnostic logging)
+        if not hasattr(self, '_eval_count'):
+            self._eval_count = 0
+        self._eval_count += 1
+        if self._eval_count <= 10 or self._eval_count % 500 == 0:
+            logger.info(
+                f"[{signal_id}] p_bull={p_bull:.4f} p_bear={p_bear:.4f} p_neut={p_neutral:.4f} "
+                f"thresh={threshold:.4f} conf={decayed_confidence:.4f} vol={current_vol:.6f}"
+            )
+        # Require minimum directional edge: |p_bull - p_bear| must exceed
+        # min_edge to confirm the signal is not ambiguous noise.
+        min_edge = 0.06
+        directional_edge = abs(p_bull - p_bear)
+        
+        if p_bull > threshold and p_bull > p_bear and directional_edge >= min_edge:
             direction = "LONG"
-            size_mult = (p_bull - threshold) / (1 - threshold)  # Scale by excess
+            # Dampened size scaling: sqrt prevents oversizing on noisy confidence
+            raw_excess = (p_bull - threshold) / (1 - threshold + 1e-10)
+            size_mult = min(np.sqrt(raw_excess) * 0.6, 0.7)
             self.alpha_decay.refresh_signal(signal_id)
-        elif p_bear > threshold and p_bear > p_bull:
+        elif p_bear > threshold and p_bear > p_bull and directional_edge >= min_edge:
             direction = "SHORT"
-            size_mult = (p_bear - threshold) / (1 - threshold)
+            raw_excess = (p_bear - threshold) / (1 - threshold + 1e-10)
+            size_mult = min(np.sqrt(raw_excess) * 0.6, 0.7)
             self.alpha_decay.refresh_signal(signal_id)
         else:
             direction = "HOLD"
