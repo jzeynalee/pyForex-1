@@ -57,11 +57,11 @@ class Settings(BaseSettings):
     SWING_LTF: str = "H1"
 
     # Thresholds
-    SCALP_MIN_HTF_CONF: float = 0.58
-    SCALP_MIN_MTF_CONF: float = 0.64
-    SCALP_MIN_LTF_CONF: float = 0.68
-    SCALP_MIN_STABILITY: float = 0.48
-    SCALP_MIN_DIR_SCORE: float = 0.22
+    SCALP_MIN_HTF_CONF: float = 0.38
+    SCALP_MIN_MTF_CONF: float = 0.40
+    SCALP_MIN_LTF_CONF: float = 0.40
+    SCALP_MIN_STABILITY: float = 0.30
+    SCALP_MIN_DIR_SCORE: float = 0.10
     SCALP_RELAXED: bool = True
 
     INTRADAY_MIN_HTF_CONF: float = 0.62
@@ -82,12 +82,12 @@ class Settings(BaseSettings):
     SCALP_BASE_RISK: float = 0.25
     SCALP_MIN_RR: float = 1.5
     SCALP_MAX_OPEN: int = 1
-    SCALP_MAX_DAILY: int = 3
+    SCALP_MAX_DAILY: int = 10
     SCALP_MAX_LOSS: float = 1.5
     SCALP_MIN_SL_PIPS: float = 6.0
     SCALP_MAX_LOT: float = 0.3
-    SCALP_COOLDOWN: float = 15.0
-    SCALP_ATR_SL_MULT: float = 2.0
+    SCALP_COOLDOWN: float = 30.0
+    SCALP_ATR_SL_MULT: float = 2.8
     SCALP_ATR_PERIOD: int = 20
 
     INTRADAY_BASE_RISK: float = 0.5
@@ -114,12 +114,12 @@ class Settings(BaseSettings):
 
     # Decision Engine
     SCALP_AGG_METHOD: str = "weighted_avg"
-    SCALP_MHTCN_WEIGHT: float = 0.5
-    SCALP_STABILITY_WEIGHT: float = 0.3
-    SCALP_REGIME_SCALE: float = 2.0
-    SCALP_ENTROPY_WEIGHT: float = 0.5
+    SCALP_MHTCN_WEIGHT: float = 0.55
+    SCALP_STABILITY_WEIGHT: float = 0.05
+    SCALP_REGIME_SCALE: float = 1.0
+    SCALP_ENTROPY_WEIGHT: float = 0.15
     SCALP_CALIB_METHOD: str = "logistic"
-    SCALP_DECAY_RATE: float = 0.04
+    SCALP_DECAY_RATE: float = 0.06
     SCALP_KEY_FEATS_ONLY: bool = True
 
     INTRADAY_AGG_METHOD: str = "weighted_avg"
