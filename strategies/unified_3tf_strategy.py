@@ -29,6 +29,17 @@ from alpha_factory.features_engineering import FeatureEngineerOptimized
 from alpha_factory.market_data import MarketData
 from alpha_factory.probabilistic_alpha_factory import create_probabilistic_alpha_factory, ProbabilisticConfig
 
+try:
+    from risk_management.phase2_risk_calc.sl_tp_calculator import (
+        SLTPCalculator, SLTPConfig, TradeDirection,
+    )
+    from risk_management.phase2_risk_calc.position_sizing import (
+        PositionSizingCalculator, PositionSizingConfig,
+    )
+    _PHASE2_AVAILABLE = True
+except ImportError:
+    _PHASE2_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -61,6 +72,7 @@ class Unified3TFConfig:
     max_daily_loss_pct: float = 2.0
     min_sl_pips: float = 10.0
     max_lot: float = 1.0
+    cooldown: float = 30.0  # Minutes between trades
     atr_sl_mult: float = 2.0
     atr_period: int = 14
     
@@ -96,6 +108,7 @@ class Unified3TFConfig:
             self.max_daily_loss_pct = settings.SCALP_MAX_LOSS
             self.min_sl_pips = settings.SCALP_MIN_SL_PIPS
             self.max_lot = settings.SCALP_MAX_LOT
+            self.cooldown = settings.SCALP_COOLDOWN
             self.atr_sl_mult = settings.SCALP_ATR_SL_MULT
             self.atr_period = settings.SCALP_ATR_PERIOD
             
@@ -118,6 +131,7 @@ class Unified3TFConfig:
             self.max_daily_loss_pct = settings.SWING_MAX_LOSS
             self.min_sl_pips = settings.SWING_MIN_SL_PIPS
             self.max_lot = settings.SWING_MAX_LOT
+            self.cooldown = settings.SWING_COOLDOWN
             self.atr_sl_mult = settings.SWING_ATR_SL_MULT
             self.atr_period = settings.SWING_ATR_PERIOD
             
@@ -140,6 +154,7 @@ class Unified3TFConfig:
             self.max_daily_loss_pct = settings.INTRADAY_MAX_LOSS
             self.min_sl_pips = settings.INTRADAY_MIN_SL_PIPS
             self.max_lot = settings.INTRADAY_MAX_LOT
+            self.cooldown = settings.INTRADAY_COOLDOWN
             self.atr_sl_mult = settings.INTRADAY_ATR_SL_MULT
             self.atr_period = settings.INTRADAY_ATR_PERIOD
 
@@ -504,7 +519,13 @@ class Unified3TFStrategy(Strategy):
                 # Relaxed: MTF + LTF must agree. HTF is optional but cannot oppose.
                 if not mtf_pass:
                     self.last_rejection_stage = "MTF"
-                    self.last_rejection_reason = "mtf gate failed"
+                    mtf_conf = float(getattr(mtf_out, 'confidence', 0))
+                    mtf_stab = float(getattr(mtf_out, 'stability_score', 0))
+                    self.last_rejection_reason = (
+                        f"mtf gate failed conf={mtf_conf:.3f}<{self.config.min_mtf_confidence:.2f} "
+                        f"stab={mtf_stab:.3f}<{self.config.min_stability:.2f} "
+                        f"dir={getattr(mtf_out, 'direction', '?')}"
+                    )
                     return None
                 
                 if mtf_out.direction == 'HOLD':
@@ -683,13 +704,16 @@ class Unified3TFStrategy(Strategy):
             except Exception:
                 swing_points = None
 
+        # Compute lightweight causality: rolling feature-return correlations
+        causality_results = self._compute_fast_causality(d0, feats)
+
         engine = self._get_engine()
         out = engine.evaluate(
             df=d0,
             features=feats,
             timeframe=str(timeframe or "H1").upper(),
             swing_points=swing_points,
-            causality_results=None,
+            causality_results=causality_results,
             current_equity=float(equity or 1.0),
             signal_id=str(signal_id or "default"),
         )
@@ -697,6 +721,76 @@ class Unified3TFStrategy(Strategy):
         if cache_key is not None:
             self._tf_eval_cache[tf_key] = {'t': cache_key, 'out': out}
         return out
+
+    @staticmethod
+    def _compute_fast_causality(df: pd.DataFrame, feats: pd.DataFrame) -> dict:
+        """Compute lightweight feature-return correlations as fast causality proxy.
+        
+        Instead of full Granger/Transfer-Entropy analysis (too expensive per-bar),
+        compute rolling correlation between each feature and forward returns.
+        Returns a dict compatible with CausalConfidenceCalculator.
+        """
+        try:
+            if feats is None or feats.empty or df is None or len(df) < 30:
+                return None
+            
+            close = df['close'] if 'close' in df.columns else None
+            if close is None or len(close) < 30:
+                return None
+            
+            # Forward returns (1-bar and 3-bar)
+            fwd_ret_1 = close.pct_change().shift(-1)
+            fwd_ret_3 = close.pct_change(3).shift(-3)
+            
+            correlations = {}
+            causal_ranking = {}
+            
+            lookback = min(100, len(feats) - 5)
+            if lookback < 20:
+                return None
+            
+            for col in feats.columns:
+                try:
+                    feat_vals = feats[col].iloc[-lookback:]
+                    ret1 = fwd_ret_1.iloc[-lookback:]
+                    ret3 = fwd_ret_3.iloc[-lookback:]
+                    
+                    # Drop NaN pairs
+                    mask1 = feat_vals.notna() & ret1.notna()
+                    mask3 = feat_vals.notna() & ret3.notna()
+                    
+                    if mask1.sum() < 15 or mask3.sum() < 15:
+                        continue
+                    
+                    corr1 = float(feat_vals[mask1].corr(ret1[mask1]))
+                    corr3 = float(feat_vals[mask3].corr(ret3[mask3]))
+                    
+                    if not np.isfinite(corr1):
+                        corr1 = 0.0
+                    if not np.isfinite(corr3):
+                        corr3 = 0.0
+                    
+                    # Combined score: blend of 1-bar and 3-bar correlations
+                    combined = abs(corr1) * 0.4 + abs(corr3) * 0.6
+                    
+                    correlations[col] = combined
+                    causal_ranking[col] = {
+                        'combined_score': float(combined),
+                        'p_value': max(0.01, 1.0 - combined * 2),  # Approximate
+                        'f_statistic': float(combined * 10),
+                    }
+                except Exception:
+                    continue
+            
+            if not correlations:
+                return None
+            
+            return {
+                'causal_ranking': causal_ranking,
+                'correlations': correlations,
+            }
+        except Exception:
+            return None
 
     @staticmethod
     def _ema(s: pd.Series, span: int) -> pd.Series:
@@ -859,33 +953,76 @@ class Unified3TFStrategy(Strategy):
             return df.reset_index()
     
     def _execute_trade_probabilistic(self, direction: str, decision_out, df: pd.DataFrame):
-        """Execute trade based on probabilistic decision output."""
+        """Execute trade using Phase 2 risk management with MH-TCN quantile predictions."""
         if self.executor is None:
             return
         
         try:
             entry_price = float(df['close'].iloc[-1])
-
-            sl, tp = self._atr_sltp(df, entry_price, direction)
-            
-            # Calculate position size
+            atr = self._compute_atr(df)
+            confidence = float(getattr(decision_out, 'confidence', 0.5) or 0.5)
             size_mult = float(getattr(decision_out, 'size_multiplier', 1.0) or 1.0)
-            volume = self._calculate_position_size(entry_price, sl, size_mult)
+            
+            # Extract MH-TCN quantiles and volatility from prediction
+            quantiles_5 = None
+            model_volatility = None
+            mhtcn_pred = getattr(decision_out, 'mhtcn_prediction', None)
+            if mhtcn_pred is not None:
+                raw_q = getattr(mhtcn_pred, 'quantiles', None)
+                if raw_q is not None and len(raw_q) >= 5:
+                    quantiles_5 = self._map_quantiles_to_5(raw_q)
+                    if quantiles_5 is not None:
+                        if not all(quantiles_5[i] <= quantiles_5[i + 1] for i in range(4)):
+                            quantiles_5 = None
+                        elif np.max(np.abs(quantiles_5)) > 0.05:
+                            quantiles_5 = None
+                mv = getattr(mhtcn_pred, 'volatility', None)
+                if mv is not None:
+                    mv = float(mv)
+                    if 0.00005 < mv < 0.01:
+                        model_volatility = mv
+            
+            volatility = model_volatility if model_volatility is not None else atr
+            
+            # Phase 2: Calculate SL/TP using SLTPCalculator
+            sl, tp = self._atr_sltp(df, entry_price, direction)  # fallback
+            if _PHASE2_AVAILABLE:
+                try:
+                    trade_dir = TradeDirection.BUY if direction == 'BUY' else TradeDirection.SELL
+                    sl_mult = float(getattr(self.config, 'atr_sl_mult', 2.0) or 2.0)
+                    sltp_config = SLTPConfig(
+                        min_risk_reward=float(getattr(self.config, 'min_risk_reward', 1.5) or 1.5),
+                        min_sl_atr_multiple=max(1.0, sl_mult * 0.6),
+                        max_sl_atr_multiple=sl_mult * 1.5,
+                        min_tp_atr_multiple=1.5,
+                        max_tp_atr_multiple=sl_mult * 3.0,
+                    )
+                    sltp_calc = SLTPCalculator(sltp_config)
+                    sltp_result = sltp_calc.calculate(
+                        entry_price=entry_price,
+                        direction=trade_dir,
+                        quantiles=quantiles_5,
+                        volatility=volatility,
+                        regime=None,
+                        direction_confidence=confidence,
+                        atr=atr,
+                    )
+                    sl = sltp_result.stop_loss
+                    tp = sltp_result.take_profit
+                except Exception as e:
+                    logger.debug(f"Phase 2 SL/TP failed ({e}), using ATR fallback")
+            
+            # Phase 2: Calculate position size
+            volume = self._calculate_position_size_v2(
+                entry_price, sl, confidence, volatility, size_mult
+            )
             
             # Execute
             if hasattr(self.executor, 'entry'):
-                self.executor.entry(
-                    signal=direction,
-                    volume=volume,
-                    sl=sl,
-                    tp=tp
-                )
+                self.executor.entry(signal=direction, volume=volume, sl=sl, tp=tp)
             elif hasattr(self.executor, 'open_position'):
                 self.executor.open_position(
-                    direction=direction,
-                    volume=volume,
-                    stop_loss=sl,
-                    take_profit=tp
+                    direction=direction, volume=volume, stop_loss=sl, take_profit=tp
                 )
                 
         except Exception as e:
@@ -969,8 +1106,115 @@ class Unified3TFStrategy(Strategy):
         
         return round(lots, 2)
     
+    def _compute_atr(self, df: pd.DataFrame) -> float:
+        """Compute ATR from OHLCV data, returns raw ATR value."""
+        try:
+            d0 = df.copy()
+            d0.columns = [str(c).lower().strip() for c in d0.columns]
+            high, low, close = d0['high'], d0['low'], d0['close']
+            prev_close = close.shift(1)
+            tr = pd.concat([
+                (high - low),
+                (high - prev_close).abs(),
+                (low - prev_close).abs(),
+            ], axis=1).max(axis=1)
+            atr_period = int(getattr(self.config, 'atr_period', 14))
+            atr = float(tr.rolling(atr_period, min_periods=1).mean().iloc[-1])
+            if np.isfinite(atr) and atr > 0:
+                return atr
+        except Exception:
+            pass
+        return 0.002  # fallback ~20 pips
+    
+    @staticmethod
+    def _map_quantiles_to_5(raw_quantiles) -> Optional[np.ndarray]:
+        """Map raw MH-TCN quantiles to [Q5, Q25, Q50, Q75, Q95] format."""
+        try:
+            raw = np.asarray(raw_quantiles, dtype=float).flatten()
+            n = len(raw)
+            if n == 5:
+                return raw
+            elif n == 7:
+                # [Q5, Q10, Q25, Q50, Q75, Q90, Q95] → [Q5, Q25, Q50, Q75, Q95]
+                return np.array([raw[0], raw[2], raw[3], raw[4], raw[6]])
+            elif n >= 5:
+                indices = [0, n // 4, n // 2, 3 * n // 4, n - 1]
+                return raw[indices]
+        except Exception:
+            pass
+        return None
+    
+    def _calculate_position_size_v2(
+        self,
+        entry_price: float,
+        stop_loss: float,
+        confidence: float,
+        volatility: float,
+        size_multiplier: float = 1.0,
+    ) -> float:
+        """Calculate position size using Phase 2 PositionSizingCalculator."""
+        balance = 10000.0
+        if self.executor is not None:
+            if hasattr(self.executor, 'balance'):
+                balance = float(self.executor.balance)
+            elif hasattr(self.executor, 'get_account_balance'):
+                balance = float(self.executor.get_account_balance())
+        
+        max_lot = float(getattr(self.config, 'max_lot', 1.0) or 1.0)
+        base_risk = float(self.config.base_risk_percent)
+        
+        if _PHASE2_AVAILABLE:
+            try:
+                ps_config = PositionSizingConfig(
+                    base_risk_percent=base_risk * max(size_multiplier, 0.1),
+                    max_risk_percent=base_risk * 2.0,
+                    min_risk_percent=0.05,
+                    confidence_scaling=True,
+                    min_confidence_for_full_size=0.6,
+                    low_confidence_risk_reduction=0.5,
+                    volatility_scaling=True,
+                    high_vol_risk_reduction=0.6,
+                    low_vol_risk_increase=1.1,
+                    use_streak_adjustment=False,
+                    use_kelly=False,
+                )
+                ps_calc = PositionSizingCalculator(ps_config)
+                result = ps_calc.calculate(
+                    account_balance=balance,
+                    entry_price=entry_price,
+                    stop_loss=stop_loss,
+                    pair=self.config.symbol,
+                    direction_confidence=confidence,
+                    volatility=volatility,
+                )
+                lots = result.position_size
+                lots = max(0.01, min(lots, max_lot))
+                return round(lots, 2)
+            except Exception as e:
+                logger.debug(f"Phase 2 position sizing failed ({e}), using fallback")
+        
+        # Fallback: simple risk-based calculation
+        risk_amount = balance * (base_risk / 100) * size_multiplier
+        sl_distance = abs(entry_price - stop_loss)
+        pip_value = 0.0001 if 'JPY' not in self.config.symbol else 0.01
+        sl_pips = sl_distance / pip_value
+        min_sl_pips = float(getattr(self.config, 'min_sl_pips', 8.0) or 8.0)
+        effective_sl_pips = max(float(sl_pips), float(min_sl_pips))
+        lots = risk_amount / (effective_sl_pips * 10.0) if effective_sl_pips > 0 else 0.01
+        lots = max(0.01, min(lots, max_lot))
+        return round(lots, 2)
+    
     def _check_limits(self) -> bool:
         """Check if trading is allowed based on limits."""
+        # Check cooldown between trades
+        cooldown_minutes = float(getattr(self.config, 'cooldown', 30.0) or 30.0)
+        if self._last_entry_time is not None and self._current_time is not None:
+            elapsed = (self._current_time - self._last_entry_time).total_seconds() / 60.0
+            if elapsed < cooldown_minutes:
+                self.last_rejection_stage = "COOLDOWN"
+                self.last_rejection_reason = f"cooldown {elapsed:.1f}m<{cooldown_minutes:.1f}m"
+                return False
+
         # Check max daily trades
         if self._daily_trades >= self.config.max_daily_trades:
             self.last_rejection_stage = "LIMIT"
