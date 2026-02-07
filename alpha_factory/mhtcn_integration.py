@@ -304,6 +304,17 @@ class MHTCNFeatureProvider:
             volatility = float(outputs['volatility'].cpu().numpy().item())
             quantiles = outputs['quantiles'].cpu().numpy()[0]
             
+            # Validate quantiles: enforce monotonicity and realistic range
+            if quantiles is not None and len(quantiles) >= 2:
+                max_abs = float(np.max(np.abs(quantiles)))
+                is_monotonic = all(quantiles[i] <= quantiles[i + 1] for i in range(len(quantiles) - 1))
+                if not is_monotonic:
+                    # Force monotonicity via sorting
+                    quantiles = np.sort(quantiles)
+                if max_abs > 0.1:
+                    # Unrealistic quantiles (>1000 pips), clamp to safe range
+                    quantiles = np.clip(quantiles, -0.05, 0.05)
+            
             p_long = None
             p_short = None
             if 'p_long' in outputs:
