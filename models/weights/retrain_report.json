@@ -1,0 +1,83 @@
+[
+  {
+    "profile": "SCALP",
+    "input_dim": 280,
+    "data_rows": 105120,
+    "epochs_run": 27,
+    "best_val_loss": 4.529160274722712,
+    "test_metrics": {
+      "direction_accuracy": 0.3016647398471832,
+      "direction_accuracy_bear": 1.0,
+      "direction_accuracy_sideways": 0.0,
+      "direction_accuracy_bull": 0.0,
+      "volatility_mae": 0.00018890532373916358,
+      "volatility_mape": 0.9999287724494934,
+      "quantile_coverage_q5": 0.048890162259340286,
+      "quantile_coverage_q25": 0.3806926906108856,
+      "quantile_coverage_q50": 0.7292383909225464,
+      "quantile_coverage_q75": 0.9022196531295776,
+      "quantile_coverage_q95": 0.9852659702301025,
+      "prediction_interval_width": 0.003068062476813793,
+      "outcome_bce": 0.6250311136245728,
+      "outcome_accuracy_long": 0.6812093257904053,
+      "outcome_accuracy_short": 0.6839839220046997,
+      "outcome_accuracy_mean": 0.6825966238975525
+    },
+    "model_path": "E:\\pyProject\\pyForex-1\\models\\weights\\multihead_tcn_SCALP.pth",
+    "train_time_s": 1577.3771212100983
+  },
+  {
+    "profile": "INTRADAY",
+    "input_dim": 280,
+    "data_rows": 35040,
+    "epochs_run": 22,
+    "best_val_loss": 9.46411725951404,
+    "test_metrics": {
+      "direction_accuracy": 0.2889082431793213,
+      "direction_accuracy_bear": 1.0,
+      "direction_accuracy_sideways": 0.0,
+      "direction_accuracy_bull": 0.0,
+      "volatility_mae": 0.0003230581933166832,
+      "volatility_mape": 0.9999596476554871,
+      "quantile_coverage_q5": 0.014227641746401787,
+      "quantile_coverage_q25": 0.16434378921985626,
+      "quantile_coverage_q50": 0.4474448263645172,
+      "quantile_coverage_q75": 0.7894889712333679,
+      "quantile_coverage_q95": 0.9700928926467896,
+      "prediction_interval_width": 0.00463473703712225,
+      "outcome_bce": 3.9332494735717773,
+      "outcome_accuracy_long": 0.7276422381401062,
+      "outcome_accuracy_short": 0.7029616832733154,
+      "outcome_accuracy_mean": 0.7153019607067108
+    },
+    "model_path": "E:\\pyProject\\pyForex-1\\models\\weights\\multihead_tcn_INTRADAY.pth",
+    "train_time_s": 452.5390501022339
+  },
+  {
+    "profile": "SWING",
+    "input_dim": 280,
+    "data_rows": 8760,
+    "epochs_run": 23,
+    "best_val_loss": 7.331109023094177,
+    "test_metrics": {
+      "direction_accuracy": 0.2450980544090271,
+      "direction_accuracy_bear": 1.0,
+      "direction_accuracy_sideways": 0.0,
+      "direction_accuracy_bull": 0.0,
+      "volatility_mae": 0.0006512013496831059,
+      "volatility_mape": 0.9999811053276062,
+      "quantile_coverage_q5": 0.023284314200282097,
+      "quantile_coverage_q25": 0.15563726425170898,
+      "quantile_coverage_q50": 0.7438725829124451,
+      "quantile_coverage_q75": 0.9448529481887817,
+      "quantile_coverage_q95": 0.9963235855102539,
+      "prediction_interval_width": 0.0291303563863039,
+      "outcome_bce": 2.3533782958984375,
+      "outcome_accuracy_long": 0.8504902124404907,
+      "outcome_accuracy_short": 0.8088235855102539,
+      "outcome_accuracy_mean": 0.8296568989753723
+    },
+    "model_path": "E:\\pyProject\\pyForex-1\\models\\weights\\multihead_tcn_SWING.pth",
+    "train_time_s": 144.88414573669434
+  }
+]
