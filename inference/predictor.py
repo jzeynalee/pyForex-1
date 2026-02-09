@@ -273,7 +273,7 @@ class RiskAwareTCNPredictor:
                 # Multi-head TCN outputs
                 outputs = self.model(x, mode='all')
                 
-                direction_probs = outputs['direction'].cpu().numpy()[0]
+                direction_probs = torch.softmax(outputs['direction'], dim=-1).cpu().numpy()[0]
                 volatility = outputs['volatility'].cpu().numpy().item()
                 quantiles = outputs['quantiles'].cpu().numpy()[0]
                 # Disable p_long/p_short as they are not currently trained
@@ -356,7 +356,7 @@ class RiskAwareTCNPredictor:
             if self._use_risk_heads:
                 outputs = self.model(x, mode='all')
                 return {
-                    'direction_probs': outputs['direction'].cpu().numpy(),
+                    'direction_probs': torch.softmax(outputs['direction'], dim=-1).cpu().numpy(),
                     'volatility': outputs['volatility'].cpu().numpy(),
                     'quantiles': outputs['quantiles'].cpu().numpy(),
                     'p_long': outputs.get('p_long', torch.zeros(outputs['direction'].shape[0], device=outputs['direction'].device)).cpu().numpy(),
