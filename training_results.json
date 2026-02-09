@@ -1,0 +1,20 @@
+{
+  "tcn_SCALP_M5": {
+    "profile": "SCALP",
+    "epochs_trained": 30,
+    "best_val_loss": -3.5112086275666496,
+    "checkpoint_path": "E:\\pyProject\\pyForex-1\\checkpoints\\multihead_tcn\\multihead_tcn_SCALP.pth"
+  },
+  "tcn_SCALP_M15": {
+    "profile": "SCALP",
+    "epochs_trained": 37,
+    "best_val_loss": -2.8025872663215354,
+    "checkpoint_path": "E:\\pyProject\\pyForex-1\\checkpoints\\multihead_tcn\\multihead_tcn_SCALP.pth"
+  },
+  "tcn_SCALP_H1": {
+    "profile": "SCALP",
+    "epochs_trained": 40,
+    "best_val_loss": -0.4078615124409015,
+    "checkpoint_path": "E:\\pyProject\\pyForex-1\\checkpoints\\multihead_tcn\\multihead_tcn_SCALP.pth"
+  }
+}

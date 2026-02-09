@@ -1391,3 +1391,193 @@ Results saved to: E:\pyProject\pyForex-1\training_results.json
 2025-12-30 20:53:42,277 | INFO     | __main__                  | 
 Results saved to: E:\pyProject\pyForex-1\training_results.json
 2025-12-30 20:53:42,277 | INFO     | __main__                  | ======================================================================
+2026-02-10 00:54:40,010 | INFO     | __main__                  | ======================================================================
+2026-02-10 00:54:40,010 | INFO     | __main__                  |   pyForex COMPREHENSIVE MODEL TRAINING
+2026-02-10 00:54:40,011 | INFO     | __main__                  | ======================================================================
+2026-02-10 00:54:40,011 | INFO     | __main__                  |   Models: ['tcn']
+2026-02-10 00:54:40,011 | INFO     | __main__                  |   Profiles: ['SCALP']
+2026-02-10 00:54:40,011 | INFO     | __main__                  |   Max Data Rows: 1,000,000
+2026-02-10 00:54:40,012 | INFO     | __main__                  |   Epochs: 120
+2026-02-10 00:54:40,012 | INFO     | __main__                  |   Batch Size: 64
+2026-02-10 00:54:40,012 | INFO     | __main__                  |   Device: auto
+2026-02-10 00:54:40,012 | INFO     | __main__                  | ======================================================================
+2026-02-10 00:54:40,016 | INFO     | __main__                  | ============================================================
+2026-02-10 00:54:40,016 | INFO     | __main__                  |   TRAINING MultiHeadTCN - SCALP
+2026-02-10 00:54:40,016 | INFO     | __main__                  | ============================================================
+2026-02-10 00:54:42,238 | INFO     | __main__                  | Using device: cuda
+2026-02-10 00:54:42,239 | INFO     | __main__                  | Loading data from E:\pyProject\pyForex-1\data\raw\EURUSD_M5_latest.csv...
+2026-02-10 00:54:42,411 | INFO     | __main__                  | Data shape: (105120, 8)
+2026-02-10 00:54:42,411 | INFO     | __main__                  | Engineering features...
+2026-02-10 00:55:20,518 | INFO     | __main__                  | Features shape after dropna: (104921, 297)
+2026-02-10 00:55:20,701 | INFO     | __main__                  | Preparing features and labels...
+2026-02-10 00:55:25,121 | INFO     | __main__                  | Prepared 104,915 samples
+2026-02-10 00:55:25,121 | INFO     | __main__                  | Direction distribution: BEAR=5317, SIDE=93965, BULL=5633
+2026-02-10 00:55:25,125 | INFO     | __main__                  | Class weights: tensor([6.5773, 0.3722, 6.2084])
+2026-02-10 00:55:28,057 | INFO     | __main__                  | Train: 83,884, Val: 20,911
+2026-02-10 00:55:28,071 | INFO     | __main__                  | Model parameters: 518,603
+2026-02-10 00:55:30,976 | INFO     | risk_management.phase1_predictive.training | Starting training for 120 epochs
+2026-02-10 00:56:39,117 | INFO     | risk_management.phase1_predictive.training | Epoch 1/120 | Train Loss: 18.4471 | Val Loss: -0.0076 | Dir Acc: 0.701 | Vol MAE: 0.0001
+2026-02-10 00:57:46,068 | INFO     | risk_management.phase1_predictive.training | Epoch 2/120 | Train Loss: 0.1039 | Val Loss: -0.3264 | Dir Acc: 0.806 | Vol MAE: 0.0001
+2026-02-10 00:58:52,571 | INFO     | risk_management.phase1_predictive.training | Epoch 3/120 | Train Loss: -0.2369 | Val Loss: -0.0683 | Dir Acc: 0.763 | Vol MAE: 0.0006
+2026-02-10 01:00:00,151 | INFO     | risk_management.phase1_predictive.training | Epoch 4/120 | Train Loss: -0.7774 | Val Loss: -0.6897 | Dir Acc: 0.714 | Vol MAE: 0.0006
+2026-02-10 01:01:07,493 | INFO     | risk_management.phase1_predictive.training | Epoch 5/120 | Train Loss: -1.3981 | Val Loss: -1.5040 | Dir Acc: 0.658 | Vol MAE: 0.0004
+2026-02-10 01:02:13,921 | INFO     | risk_management.phase1_predictive.training | Epoch 6/120 | Train Loss: -2.1196 | Val Loss: -2.4354 | Dir Acc: 0.766 | Vol MAE: 0.0002
+2026-02-10 01:03:19,703 | INFO     | risk_management.phase1_predictive.training | Epoch 7/120 | Train Loss: -2.8582 | Val Loss: -2.6854 | Dir Acc: 0.672 | Vol MAE: 0.0004
+2026-02-10 01:04:26,357 | INFO     | risk_management.phase1_predictive.training | Epoch 8/120 | Train Loss: -3.4583 | Val Loss: -3.4629 | Dir Acc: 0.780 | Vol MAE: 0.0002
+2026-02-10 01:05:32,944 | INFO     | risk_management.phase1_predictive.training | Epoch 9/120 | Train Loss: -3.8839 | Val Loss: -3.4641 | Dir Acc: 0.508 | Vol MAE: 0.0002
+2026-02-10 01:06:39,993 | INFO     | risk_management.phase1_predictive.training | Epoch 10/120 | Train Loss: -3.9140 | Val Loss: -1.1543 | Dir Acc: 0.812 | Vol MAE: 0.0006
+2026-02-10 01:07:45,669 | INFO     | risk_management.phase1_predictive.training | Epoch 11/120 | Train Loss: -3.9990 | Val Loss: -2.4641 | Dir Acc: 0.775 | Vol MAE: 0.0004
+2026-02-10 01:08:48,011 | INFO     | risk_management.phase1_predictive.training | Epoch 12/120 | Train Loss: -3.9875 | Val Loss: -2.8367 | Dir Acc: 0.801 | Vol MAE: 0.0003
+2026-02-10 01:09:54,182 | INFO     | risk_management.phase1_predictive.training | Epoch 13/120 | Train Loss: -4.0341 | Val Loss: -1.3008 | Dir Acc: 0.760 | Vol MAE: 0.0004
+2026-02-10 01:11:01,439 | INFO     | risk_management.phase1_predictive.training | Epoch 14/120 | Train Loss: -4.0645 | Val Loss: -0.9521 | Dir Acc: 0.701 | Vol MAE: 0.0004
+2026-02-10 01:12:08,240 | INFO     | risk_management.phase1_predictive.training | Epoch 15/120 | Train Loss: -4.0947 | Val Loss: -3.5112 | Dir Acc: 0.768 | Vol MAE: 0.0002
+2026-02-10 01:13:14,388 | INFO     | risk_management.phase1_predictive.training | Epoch 16/120 | Train Loss: -4.1266 | Val Loss: -0.3500 | Dir Acc: 0.683 | Vol MAE: 0.0005
+2026-02-10 01:14:21,279 | INFO     | risk_management.phase1_predictive.training | Epoch 17/120 | Train Loss: -4.1023 | Val Loss: -0.9085 | Dir Acc: 0.683 | Vol MAE: 0.0004
+2026-02-10 01:15:28,296 | INFO     | risk_management.phase1_predictive.training | Epoch 18/120 | Train Loss: -4.1136 | Val Loss: -1.5462 | Dir Acc: 0.731 | Vol MAE: 0.0004
+2026-02-10 01:16:35,402 | INFO     | risk_management.phase1_predictive.training | Epoch 19/120 | Train Loss: -4.1322 | Val Loss: -1.1914 | Dir Acc: 0.787 | Vol MAE: 0.0004
+2026-02-10 01:17:41,725 | INFO     | risk_management.phase1_predictive.training | Epoch 20/120 | Train Loss: -4.1346 | Val Loss: 1.7081 | Dir Acc: 0.763 | Vol MAE: 0.0007
+2026-02-10 01:18:49,054 | INFO     | risk_management.phase1_predictive.training | Epoch 21/120 | Train Loss: -4.1539 | Val Loss: -3.0242 | Dir Acc: 0.677 | Vol MAE: 0.0002
+2026-02-10 01:19:56,076 | INFO     | risk_management.phase1_predictive.training | Epoch 22/120 | Train Loss: -4.1391 | Val Loss: -2.0802 | Dir Acc: 0.747 | Vol MAE: 0.0003
+2026-02-10 01:21:02,797 | INFO     | risk_management.phase1_predictive.training | Epoch 23/120 | Train Loss: -4.1284 | Val Loss: -1.5325 | Dir Acc: 0.733 | Vol MAE: 0.0004
+2026-02-10 01:22:09,687 | INFO     | risk_management.phase1_predictive.training | Epoch 24/120 | Train Loss: -4.1633 | Val Loss: -0.1755 | Dir Acc: 0.866 | Vol MAE: 0.0004
+2026-02-10 01:23:16,147 | INFO     | risk_management.phase1_predictive.training | Epoch 25/120 | Train Loss: -4.1664 | Val Loss: -2.2523 | Dir Acc: 0.834 | Vol MAE: 0.0003
+2026-02-10 01:24:23,063 | INFO     | risk_management.phase1_predictive.training | Epoch 26/120 | Train Loss: -4.1649 | Val Loss: -0.9138 | Dir Acc: 0.765 | Vol MAE: 0.0004
+2026-02-10 01:25:30,087 | INFO     | risk_management.phase1_predictive.training | Epoch 27/120 | Train Loss: -4.2150 | Val Loss: -1.1264 | Dir Acc: 0.761 | Vol MAE: 0.0004
+2026-02-10 01:26:36,640 | INFO     | risk_management.phase1_predictive.training | Epoch 28/120 | Train Loss: -3.9816 | Val Loss: -2.2257 | Dir Acc: 0.770 | Vol MAE: 0.0003
+2026-02-10 01:27:43,734 | INFO     | risk_management.phase1_predictive.training | Epoch 29/120 | Train Loss: -4.2051 | Val Loss: -2.0142 | Dir Acc: 0.807 | Vol MAE: 0.0003
+2026-02-10 01:28:50,754 | INFO     | risk_management.phase1_predictive.training | Epoch 30/120 | Train Loss: -4.2109 | Val Loss: -1.6081 | Dir Acc: 0.701 | Vol MAE: 0.0003
+2026-02-10 01:28:50,755 | INFO     | risk_management.phase1_predictive.training | Early stopping triggered at epoch 30
+2026-02-10 01:28:50,757 | INFO     | risk_management.phase1_predictive.training | Loaded best model from epoch 15
+2026-02-10 01:28:50,823 | INFO     | __main__                  | Saved checkpoint: E:\pyProject\pyForex-1\checkpoints\multihead_tcn\multihead_tcn_SCALP.pth
+2026-02-10 01:28:50,873 | INFO     | __main__                  | Saved weights: E:\pyProject\pyForex-1\models\weights\multihead_tcn_SCALP.pth
+2026-02-10 01:28:51,237 | INFO     | __main__                  | Saved 3TF weights: E:\pyProject\pyForex-1\models\weights\multihead_tcn_SCALP_M5.pth
+2026-02-10 01:28:51,243 | INFO     | __main__                  | Saved legacy weights: E:\pyProject\pyForex-1\models\weights\scalp_m5_best.pt
+2026-02-10 01:28:51,243 | INFO     | __main__                  | ============================================================
+2026-02-10 01:28:51,244 | INFO     | __main__                  |   TRAINING MultiHeadTCN - SCALP
+2026-02-10 01:28:51,244 | INFO     | __main__                  | ============================================================
+2026-02-10 01:28:51,245 | INFO     | __main__                  | Using device: cuda
+2026-02-10 01:28:51,245 | INFO     | __main__                  | Loading data from E:\pyProject\pyForex-1\data\raw\EURUSD_M15_latest.csv...
+2026-02-10 01:28:51,295 | INFO     | __main__                  | Data shape: (35040, 8)
+2026-02-10 01:28:51,295 | INFO     | __main__                  | Engineering features...
+2026-02-10 01:29:02,804 | INFO     | __main__                  | Features shape after dropna: (34841, 297)
+2026-02-10 01:29:02,822 | INFO     | __main__                  | Preparing features and labels...
+2026-02-10 01:29:04,407 | INFO     | __main__                  | Prepared 34,835 samples
+2026-02-10 01:29:04,408 | INFO     | __main__                  | Direction distribution: BEAR=4516, SIDE=25644, BULL=4675
+2026-02-10 01:29:04,409 | INFO     | __main__                  | Class weights: tensor([2.5712, 0.4528, 2.4838])
+2026-02-10 01:29:05,364 | INFO     | __main__                  | Train: 27,820, Val: 6,895
+2026-02-10 01:29:05,375 | INFO     | __main__                  | Model parameters: 518,603
+2026-02-10 01:29:05,400 | INFO     | risk_management.phase1_predictive.training | Starting training for 120 epochs
+2026-02-10 01:29:27,848 | INFO     | risk_management.phase1_predictive.training | Epoch 1/120 | Train Loss: 27.6712 | Val Loss: 0.1986 | Dir Acc: 0.686 | Vol MAE: 0.0002
+2026-02-10 01:29:50,002 | INFO     | risk_management.phase1_predictive.training | Epoch 2/120 | Train Loss: 0.2208 | Val Loss: 0.0543 | Dir Acc: 0.559 | Vol MAE: 0.0001
+2026-02-10 01:30:12,189 | INFO     | risk_management.phase1_predictive.training | Epoch 3/120 | Train Loss: 0.0696 | Val Loss: -0.1309 | Dir Acc: 0.596 | Vol MAE: 0.0001
+2026-02-10 01:30:34,631 | INFO     | risk_management.phase1_predictive.training | Epoch 4/120 | Train Loss: -0.1152 | Val Loss: -0.3198 | Dir Acc: 0.524 | Vol MAE: 0.0001
+2026-02-10 01:30:57,137 | INFO     | risk_management.phase1_predictive.training | Epoch 5/120 | Train Loss: -0.3343 | Val Loss: -0.3012 | Dir Acc: 0.439 | Vol MAE: 0.0004
+2026-02-10 01:31:19,473 | INFO     | risk_management.phase1_predictive.training | Epoch 6/120 | Train Loss: -0.5739 | Val Loss: -0.4077 | Dir Acc: 0.544 | Vol MAE: 0.0006
+2026-02-10 01:31:41,432 | INFO     | risk_management.phase1_predictive.training | Epoch 7/120 | Train Loss: -0.8063 | Val Loss: -0.6683 | Dir Acc: 0.583 | Vol MAE: 0.0005
+2026-02-10 01:32:03,671 | INFO     | risk_management.phase1_predictive.training | Epoch 8/120 | Train Loss: -1.0356 | Val Loss: -0.8634 | Dir Acc: 0.438 | Vol MAE: 0.0005
+2026-02-10 01:32:25,761 | INFO     | risk_management.phase1_predictive.training | Epoch 9/120 | Train Loss: -1.2704 | Val Loss: -0.9621 | Dir Acc: 0.416 | Vol MAE: 0.0006
+2026-02-10 01:32:47,695 | INFO     | risk_management.phase1_predictive.training | Epoch 10/120 | Train Loss: -1.5083 | Val Loss: -1.1246 | Dir Acc: 0.406 | Vol MAE: 0.0007
+2026-02-10 01:33:10,076 | INFO     | risk_management.phase1_predictive.training | Epoch 11/120 | Train Loss: -1.7440 | Val Loss: -1.4578 | Dir Acc: 0.466 | Vol MAE: 0.0006
+2026-02-10 01:33:32,538 | INFO     | risk_management.phase1_predictive.training | Epoch 12/120 | Train Loss: -1.9856 | Val Loss: -1.5908 | Dir Acc: 0.424 | Vol MAE: 0.0006
+2026-02-10 01:33:54,809 | INFO     | risk_management.phase1_predictive.training | Epoch 13/120 | Train Loss: -2.2254 | Val Loss: -1.8288 | Dir Acc: 0.465 | Vol MAE: 0.0006
+2026-02-10 01:34:16,856 | INFO     | risk_management.phase1_predictive.training | Epoch 14/120 | Train Loss: -2.4665 | Val Loss: -1.9117 | Dir Acc: 0.475 | Vol MAE: 0.0007
+2026-02-10 01:34:39,344 | INFO     | risk_management.phase1_predictive.training | Epoch 15/120 | Train Loss: -2.6986 | Val Loss: -1.9837 | Dir Acc: 0.468 | Vol MAE: 0.0008
+2026-02-10 01:35:01,962 | INFO     | risk_management.phase1_predictive.training | Epoch 16/120 | Train Loss: -2.9248 | Val Loss: -2.2486 | Dir Acc: 0.329 | Vol MAE: 0.0006
+2026-02-10 01:35:24,189 | INFO     | risk_management.phase1_predictive.training | Epoch 17/120 | Train Loss: -3.1384 | Val Loss: -2.6018 | Dir Acc: 0.381 | Vol MAE: 0.0005
+2026-02-10 01:35:46,619 | INFO     | risk_management.phase1_predictive.training | Epoch 18/120 | Train Loss: -3.3394 | Val Loss: -2.4286 | Dir Acc: 0.370 | Vol MAE: 0.0007
+2026-02-10 01:36:09,057 | INFO     | risk_management.phase1_predictive.training | Epoch 19/120 | Train Loss: -3.5270 | Val Loss: -2.2960 | Dir Acc: 0.487 | Vol MAE: 0.0008
+2026-02-10 01:36:31,440 | INFO     | risk_management.phase1_predictive.training | Epoch 20/120 | Train Loss: -3.6825 | Val Loss: -2.3534 | Dir Acc: 0.331 | Vol MAE: 0.0007
+2026-02-10 01:36:53,799 | INFO     | risk_management.phase1_predictive.training | Epoch 21/120 | Train Loss: -3.7994 | Val Loss: -2.7393 | Dir Acc: 0.410 | Vol MAE: 0.0005
+2026-02-10 01:37:16,276 | INFO     | risk_management.phase1_predictive.training | Epoch 22/120 | Train Loss: -3.8917 | Val Loss: -2.8026 | Dir Acc: 0.450 | Vol MAE: 0.0005
+2026-02-10 01:37:38,664 | INFO     | risk_management.phase1_predictive.training | Epoch 23/120 | Train Loss: -3.9483 | Val Loss: -2.0421 | Dir Acc: 0.429 | Vol MAE: 0.0007
+2026-02-10 01:38:00,920 | INFO     | risk_management.phase1_predictive.training | Epoch 24/120 | Train Loss: -4.0045 | Val Loss: -2.6152 | Dir Acc: 0.390 | Vol MAE: 0.0004
+2026-02-10 01:38:22,933 | INFO     | risk_management.phase1_predictive.training | Epoch 25/120 | Train Loss: -4.0208 | Val Loss: -1.6970 | Dir Acc: 0.409 | Vol MAE: 0.0006
+2026-02-10 01:38:45,156 | INFO     | risk_management.phase1_predictive.training | Epoch 26/120 | Train Loss: -4.0693 | Val Loss: -1.2726 | Dir Acc: 0.357 | Vol MAE: 0.0006
+2026-02-10 01:39:07,372 | INFO     | risk_management.phase1_predictive.training | Epoch 27/120 | Train Loss: -4.0398 | Val Loss: -1.2162 | Dir Acc: 0.190 | Vol MAE: 0.0006
+2026-02-10 01:39:29,414 | INFO     | risk_management.phase1_predictive.training | Epoch 28/120 | Train Loss: -4.0360 | Val Loss: -1.3467 | Dir Acc: 0.451 | Vol MAE: 0.0005
+2026-02-10 01:39:51,676 | INFO     | risk_management.phase1_predictive.training | Epoch 29/120 | Train Loss: -4.0847 | Val Loss: -1.1300 | Dir Acc: 0.376 | Vol MAE: 0.0006
+2026-02-10 01:40:13,811 | INFO     | risk_management.phase1_predictive.training | Epoch 30/120 | Train Loss: -4.0826 | Val Loss: -0.5671 | Dir Acc: 0.410 | Vol MAE: 0.0006
+2026-02-10 01:40:36,052 | INFO     | risk_management.phase1_predictive.training | Epoch 31/120 | Train Loss: -4.1160 | Val Loss: -0.9698 | Dir Acc: 0.347 | Vol MAE: 0.0006
+2026-02-10 01:40:58,181 | INFO     | risk_management.phase1_predictive.training | Epoch 32/120 | Train Loss: -4.1374 | Val Loss: -1.6118 | Dir Acc: 0.450 | Vol MAE: 0.0005
+2026-02-10 01:41:20,508 | INFO     | risk_management.phase1_predictive.training | Epoch 33/120 | Train Loss: -4.1133 | Val Loss: -1.4513 | Dir Acc: 0.411 | Vol MAE: 0.0004
+2026-02-10 01:41:42,682 | INFO     | risk_management.phase1_predictive.training | Epoch 34/120 | Train Loss: -4.0247 | Val Loss: -0.2776 | Dir Acc: 0.261 | Vol MAE: 0.0007
+2026-02-10 01:42:04,718 | INFO     | risk_management.phase1_predictive.training | Epoch 35/120 | Train Loss: -4.1205 | Val Loss: -1.0840 | Dir Acc: 0.316 | Vol MAE: 0.0005
+2026-02-10 01:42:26,844 | INFO     | risk_management.phase1_predictive.training | Epoch 36/120 | Train Loss: -4.1197 | Val Loss: -1.1322 | Dir Acc: 0.431 | Vol MAE: 0.0005
+2026-02-10 01:42:49,443 | INFO     | risk_management.phase1_predictive.training | Epoch 37/120 | Train Loss: -4.1685 | Val Loss: -0.1854 | Dir Acc: 0.348 | Vol MAE: 0.0007
+2026-02-10 01:42:49,443 | INFO     | risk_management.phase1_predictive.training | Early stopping triggered at epoch 37
+2026-02-10 01:42:49,445 | INFO     | risk_management.phase1_predictive.training | Loaded best model from epoch 22
+2026-02-10 01:42:49,495 | INFO     | __main__                  | Saved checkpoint: E:\pyProject\pyForex-1\checkpoints\multihead_tcn\multihead_tcn_SCALP.pth
+2026-02-10 01:42:49,550 | INFO     | __main__                  | Saved weights: E:\pyProject\pyForex-1\models\weights\multihead_tcn_SCALP.pth
+2026-02-10 01:42:49,679 | INFO     | __main__                  | Saved 3TF weights: E:\pyProject\pyForex-1\models\weights\multihead_tcn_SCALP_M15.pth
+2026-02-10 01:42:49,685 | INFO     | __main__                  | Saved legacy weights: E:\pyProject\pyForex-1\models\weights\scalp_m15_best.pt
+2026-02-10 01:42:49,685 | INFO     | __main__                  | ============================================================
+2026-02-10 01:42:49,686 | INFO     | __main__                  |   TRAINING MultiHeadTCN - SCALP
+2026-02-10 01:42:49,686 | INFO     | __main__                  | ============================================================
+2026-02-10 01:42:49,686 | INFO     | __main__                  | Using device: cuda
+2026-02-10 01:42:49,686 | INFO     | __main__                  | Loading data from E:\pyProject\pyForex-1\data\raw\EURUSD_H1_latest.csv...
+2026-02-10 01:42:49,703 | INFO     | __main__                  | Data shape: (8760, 8)
+2026-02-10 01:42:49,703 | INFO     | __main__                  | Engineering features...
+2026-02-10 01:42:52,650 | INFO     | __main__                  | Features shape after dropna: (8561, 297)
+2026-02-10 01:42:52,655 | INFO     | __main__                  | Preparing features and labels...
+2026-02-10 01:42:53,014 | INFO     | __main__                  | Prepared 8,555 samples
+2026-02-10 01:42:53,014 | INFO     | __main__                  | Direction distribution: BEAR=2305, SIDE=3830, BULL=2420
+2026-02-10 01:42:53,016 | INFO     | __main__                  | Class weights: tensor([1.2372, 0.7446, 1.1784])
+2026-02-10 01:42:53,233 | INFO     | __main__                  | Train: 6,796, Val: 1,639
+2026-02-10 01:42:53,243 | INFO     | __main__                  | Model parameters: 518,603
+2026-02-10 01:42:53,258 | INFO     | risk_management.phase1_predictive.training | Starting training for 120 epochs
+2026-02-10 01:42:58,925 | INFO     | risk_management.phase1_predictive.training | Epoch 1/120 | Train Loss: 44.8386 | Val Loss: 0.3211 | Dir Acc: 0.571 | Vol MAE: 0.0004
+2026-02-10 01:43:04,417 | INFO     | risk_management.phase1_predictive.training | Epoch 2/120 | Train Loss: 0.3346 | Val Loss: 0.2774 | Dir Acc: 0.572 | Vol MAE: 0.0004
+2026-02-10 01:43:09,850 | INFO     | risk_management.phase1_predictive.training | Epoch 3/120 | Train Loss: 0.2824 | Val Loss: 0.2210 | Dir Acc: 0.395 | Vol MAE: 0.0003
+2026-02-10 01:43:15,358 | INFO     | risk_management.phase1_predictive.training | Epoch 4/120 | Train Loss: 0.2268 | Val Loss: 0.1426 | Dir Acc: 0.217 | Vol MAE: 0.0002
+2026-02-10 01:43:20,798 | INFO     | risk_management.phase1_predictive.training | Epoch 5/120 | Train Loss: 0.1558 | Val Loss: 0.0891 | Dir Acc: 0.434 | Vol MAE: 0.0004
+2026-02-10 01:43:26,302 | INFO     | risk_management.phase1_predictive.training | Epoch 6/120 | Train Loss: 0.0824 | Val Loss: -0.0140 | Dir Acc: 0.570 | Vol MAE: 0.0002
+2026-02-10 01:43:31,731 | INFO     | risk_management.phase1_predictive.training | Epoch 7/120 | Train Loss: 0.0087 | Val Loss: -0.0439 | Dir Acc: 0.455 | Vol MAE: 0.0002
+2026-02-10 01:43:37,253 | INFO     | risk_management.phase1_predictive.training | Epoch 8/120 | Train Loss: -0.0583 | Val Loss: -0.1160 | Dir Acc: 0.423 | Vol MAE: 0.0002
+2026-02-10 01:43:43,040 | INFO     | risk_management.phase1_predictive.training | Epoch 9/120 | Train Loss: -0.1272 | Val Loss: -0.1759 | Dir Acc: 0.449 | Vol MAE: 0.0002
+2026-02-10 01:43:48,569 | INFO     | risk_management.phase1_predictive.training | Epoch 10/120 | Train Loss: -0.1991 | Val Loss: -0.0620 | Dir Acc: 0.273 | Vol MAE: 0.0006
+2026-02-10 01:43:53,944 | INFO     | risk_management.phase1_predictive.training | Epoch 11/120 | Train Loss: -0.2640 | Val Loss: 0.0290 | Dir Acc: 0.501 | Vol MAE: 0.0010
+2026-02-10 01:43:59,338 | INFO     | risk_management.phase1_predictive.training | Epoch 12/120 | Train Loss: -0.3258 | Val Loss: -0.0574 | Dir Acc: 0.476 | Vol MAE: 0.0009
+2026-02-10 01:44:04,926 | INFO     | risk_management.phase1_predictive.training | Epoch 13/120 | Train Loss: -0.3939 | Val Loss: 0.0853 | Dir Acc: 0.484 | Vol MAE: 0.0014
+2026-02-10 01:44:10,458 | INFO     | risk_management.phase1_predictive.training | Epoch 14/120 | Train Loss: -0.4596 | Val Loss: -0.1327 | Dir Acc: 0.389 | Vol MAE: 0.0009
+2026-02-10 01:44:15,950 | INFO     | risk_management.phase1_predictive.training | Epoch 15/120 | Train Loss: -0.5219 | Val Loss: -0.0466 | Dir Acc: 0.344 | Vol MAE: 0.0012
+2026-02-10 01:44:21,426 | INFO     | risk_management.phase1_predictive.training | Epoch 16/120 | Train Loss: -0.5845 | Val Loss: -0.2850 | Dir Acc: 0.406 | Vol MAE: 0.0008
+2026-02-10 01:44:26,640 | INFO     | risk_management.phase1_predictive.training | Epoch 17/120 | Train Loss: -0.6532 | Val Loss: -0.0984 | Dir Acc: 0.494 | Vol MAE: 0.0014
+2026-02-10 01:44:31,695 | INFO     | risk_management.phase1_predictive.training | Epoch 18/120 | Train Loss: -0.7152 | Val Loss: -0.2962 | Dir Acc: 0.365 | Vol MAE: 0.0009
+2026-02-10 01:44:37,177 | INFO     | risk_management.phase1_predictive.training | Epoch 19/120 | Train Loss: -0.7824 | Val Loss: -0.1658 | Dir Acc: 0.373 | Vol MAE: 0.0013
+2026-02-10 01:44:43,071 | INFO     | risk_management.phase1_predictive.training | Epoch 20/120 | Train Loss: -0.8477 | Val Loss: -0.1888 | Dir Acc: 0.365 | Vol MAE: 0.0014
+2026-02-10 01:44:48,476 | INFO     | risk_management.phase1_predictive.training | Epoch 21/120 | Train Loss: -0.9182 | Val Loss: -0.3080 | Dir Acc: 0.311 | Vol MAE: 0.0011
+2026-02-10 01:44:53,832 | INFO     | risk_management.phase1_predictive.training | Epoch 22/120 | Train Loss: -0.9914 | Val Loss: -0.3568 | Dir Acc: 0.414 | Vol MAE: 0.0011
+2026-02-10 01:44:59,404 | INFO     | risk_management.phase1_predictive.training | Epoch 23/120 | Train Loss: -1.0542 | Val Loss: -0.2525 | Dir Acc: 0.383 | Vol MAE: 0.0012
+2026-02-10 01:45:04,824 | INFO     | risk_management.phase1_predictive.training | Epoch 24/120 | Train Loss: -1.1256 | Val Loss: -0.2599 | Dir Acc: 0.453 | Vol MAE: 0.0012
+2026-02-10 01:45:10,291 | INFO     | risk_management.phase1_predictive.training | Epoch 25/120 | Train Loss: -1.2065 | Val Loss: -0.4079 | Dir Acc: 0.389 | Vol MAE: 0.0011
+2026-02-10 01:45:15,827 | INFO     | risk_management.phase1_predictive.training | Epoch 26/120 | Train Loss: -1.2839 | Val Loss: -0.2387 | Dir Acc: 0.387 | Vol MAE: 0.0014
+2026-02-10 01:45:21,564 | INFO     | risk_management.phase1_predictive.training | Epoch 27/120 | Train Loss: -1.3453 | Val Loss: -0.2541 | Dir Acc: 0.386 | Vol MAE: 0.0016
+2026-02-10 01:45:27,055 | INFO     | risk_management.phase1_predictive.training | Epoch 28/120 | Train Loss: -1.4164 | Val Loss: -0.2214 | Dir Acc: 0.441 | Vol MAE: 0.0014
+2026-02-10 01:45:32,374 | INFO     | risk_management.phase1_predictive.training | Epoch 29/120 | Train Loss: -1.4761 | Val Loss: -0.3860 | Dir Acc: 0.436 | Vol MAE: 0.0012
+2026-02-10 01:45:37,965 | INFO     | risk_management.phase1_predictive.training | Epoch 30/120 | Train Loss: -1.5496 | Val Loss: -0.1902 | Dir Acc: 0.398 | Vol MAE: 0.0014
+2026-02-10 01:45:43,599 | INFO     | risk_management.phase1_predictive.training | Epoch 31/120 | Train Loss: -1.6216 | Val Loss: -0.3652 | Dir Acc: 0.373 | Vol MAE: 0.0013
+2026-02-10 01:45:49,210 | INFO     | risk_management.phase1_predictive.training | Epoch 32/120 | Train Loss: -1.6902 | Val Loss: 0.0059 | Dir Acc: 0.364 | Vol MAE: 0.0014
+2026-02-10 01:45:54,653 | INFO     | risk_management.phase1_predictive.training | Epoch 33/120 | Train Loss: -1.7432 | Val Loss: -0.1455 | Dir Acc: 0.406 | Vol MAE: 0.0013
+2026-02-10 01:46:00,194 | INFO     | risk_management.phase1_predictive.training | Epoch 34/120 | Train Loss: -1.8343 | Val Loss: 0.0399 | Dir Acc: 0.400 | Vol MAE: 0.0014
+2026-02-10 01:46:05,697 | INFO     | risk_management.phase1_predictive.training | Epoch 35/120 | Train Loss: -1.9028 | Val Loss: 0.1141 | Dir Acc: 0.376 | Vol MAE: 0.0016
+2026-02-10 01:46:11,237 | INFO     | risk_management.phase1_predictive.training | Epoch 36/120 | Train Loss: -1.9403 | Val Loss: 0.1830 | Dir Acc: 0.408 | Vol MAE: 0.0014
+2026-02-10 01:46:16,902 | INFO     | risk_management.phase1_predictive.training | Epoch 37/120 | Train Loss: -2.0343 | Val Loss: 0.1930 | Dir Acc: 0.442 | Vol MAE: 0.0013
+2026-02-10 01:46:22,332 | INFO     | risk_management.phase1_predictive.training | Epoch 38/120 | Train Loss: -2.0710 | Val Loss: 0.2942 | Dir Acc: 0.389 | Vol MAE: 0.0011
+2026-02-10 01:46:27,660 | INFO     | risk_management.phase1_predictive.training | Epoch 39/120 | Train Loss: -2.1567 | Val Loss: 0.1945 | Dir Acc: 0.447 | Vol MAE: 0.0012
+2026-02-10 01:46:33,090 | INFO     | risk_management.phase1_predictive.training | Epoch 40/120 | Train Loss: -2.2190 | Val Loss: 0.2733 | Dir Acc: 0.320 | Vol MAE: 0.0014
+2026-02-10 01:46:33,090 | INFO     | risk_management.phase1_predictive.training | Early stopping triggered at epoch 40
+2026-02-10 01:46:33,094 | INFO     | risk_management.phase1_predictive.training | Loaded best model from epoch 25
+2026-02-10 01:46:33,166 | INFO     | __main__                  | Saved checkpoint: E:\pyProject\pyForex-1\checkpoints\multihead_tcn\multihead_tcn_SCALP.pth
+2026-02-10 01:46:33,226 | INFO     | __main__                  | Saved weights: E:\pyProject\pyForex-1\models\weights\multihead_tcn_SCALP.pth
+2026-02-10 01:46:33,265 | INFO     | __main__                  | Saved 3TF weights: E:\pyProject\pyForex-1\models\weights\multihead_tcn_SCALP_H1.pth
+2026-02-10 01:46:33,271 | INFO     | __main__                  | Saved legacy weights: E:\pyProject\pyForex-1\models\weights\scalp_h1_best.pt
+2026-02-10 01:46:33,272 | INFO     | __main__                  | 
+======================================================================
+2026-02-10 01:46:33,273 | INFO     | __main__                  |   TRAINING SUMMARY
+2026-02-10 01:46:33,273 | INFO     | __main__                  | ======================================================================
+2026-02-10 01:46:33,273 | INFO     | __main__                  |   [SUCCESS] tcn_SCALP_M5
+2026-02-10 01:46:33,273 | INFO     | __main__                  |   [SUCCESS] tcn_SCALP_M15
+2026-02-10 01:46:33,273 | INFO     | __main__                  |   [SUCCESS] tcn_SCALP_H1
+2026-02-10 01:46:33,275 | INFO     | __main__                  | 
+Results saved to: E:\pyProject\pyForex-1\training_results.json
+2026-02-10 01:46:33,275 | INFO     | __main__                  | ======================================================================
