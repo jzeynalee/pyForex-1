@@ -907,20 +907,22 @@ def main():
                         device=args.device
                     )
                     
-                    # Rename/Move output to match train_decision_fusion expectation: {profile}_{timeframe}_best.pt
-                    # train_multihead_tcn saves to: checkpoints/multihead_tcn/multihead_tcn_{profile}.pth
-                    # and: models/weights/multihead_tcn_{profile}.pth
-                    # We need to distinguish them by timeframe now.
-                    
-                    # NOTE: We need to modify train_multihead_tcn to accept timeframe or handle the renaming here.
-                    # Since train_multihead_tcn is defined above, let's adjust the call signature in a subsequent edit or 
-                    # use a specific kwarg if available. For now, we'll patch the save path manually.
+                    # Save with canonical name that MHTCNFeatureProvider._find_weight_file() expects:
+                    #   multihead_tcn_{PROFILE}_{TF}.pth  (primary lookup)
+                    # Also keep legacy format for decision_fusion compatibility:
+                    #   {profile}_{timeframe}_best.pt
                     
                     src = WEIGHTS_DIR / f"multihead_tcn_{profile}.pth"
-                    dst = WEIGHTS_DIR / f"{profile.lower()}_{timeframe.lower()}_best.pt"
                     if src.exists():
-                        shutil.copy(src, dst)
-                        logger.info(f"Saved MTF weights: {dst}")
+                        # Canonical name for 3TF system (MHTCNFeatureProvider)
+                        canonical = WEIGHTS_DIR / f"multihead_tcn_{profile}_{timeframe}.pth"
+                        shutil.copy(src, canonical)
+                        logger.info(f"Saved 3TF weights: {canonical}")
+                        
+                        # Legacy name for decision_fusion
+                        legacy = WEIGHTS_DIR / f"{profile.lower()}_{timeframe.lower()}_best.pt"
+                        shutil.copy(src, legacy)
+                        logger.info(f"Saved legacy weights: {legacy}")
 
                     results[f'tcn_{profile}_{timeframe}'] = result
                 except Exception as e:
