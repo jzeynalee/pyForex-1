@@ -1,0 +1,391 @@
+"""
+Experiment Harness — runs all 6 variants through identical backtest execution.
+
+Core loop per variant:
+    for each bar:
+        1. Shared regime detection
+        2. Alpha head evaluation -> AlphaSignal
+        3. MH-TCN filter (if present) -> g_factor
+        4. P_final = P_alpha * g_factor
+        5. Trade decision (P_final > min_probability gate)
+        6. Execution with shared SL/TP/sizing logic
+        7. Position management (SL/TP checks on open trades)
+
+All variants use identical:
+    - Data (same OHLCV bars)
+    - Feature engineering (same pipeline)
+    - Execution costs (spread, commission, slippage)
+    - Risk sizing (ATR-based SL, fixed % risk)
+    - Position management logic
+"""
+
+import logging
+import time
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Tuple
+
+import numpy as np
+import pandas as pd
+
+from ..interfaces import (
+    AlphaSignal, Direction, MHTCNOutput, TradeRecord,
+    VariantConfig, VariantResult,
+)
+from ..feature_pipeline import FeaturePipeline
+from ..regime_detector import RegimeDetector
+from ..calibrator import ProbabilityCalibrator
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class _OpenPosition:
+    """Internal position tracker."""
+    ticket: int
+    bar_index: int
+    entry_time: Optional[pd.Timestamp]
+    direction: Direction
+    entry_price: float
+    sl: float
+    tp: float
+    volume: float
+    p_alpha: float
+    p_final: float
+    g_factor: float
+    regime: str
+
+
+class _VariantRunner:
+    """Runs a single variant through the backtest loop."""
+
+    def __init__(self, config: VariantConfig, pip_size: float = 0.0001):
+        self.cfg = config
+        self.pip_size = pip_size
+        self.balance = config.initial_balance
+        self.equity_curve: List[float] = []
+        self.trades: List[TradeRecord] = []
+        self.positions: List[_OpenPosition] = []
+        self._ticket = 1000
+        self._last_trade_bar = -999
+        self._calibrator = ProbabilityCalibrator(method="passthrough")
+
+    def reset(self):
+        self.balance = self.cfg.initial_balance
+        self.equity_curve = []
+        self.trades = []
+        self.positions = []
+        self._ticket = 1000
+        self._last_trade_bar = -999
+        self.cfg.alpha_head.reset()
+        self.cfg.mhtcn_filter.reset()
+        self._calibrator.reset()
+
+    def step(
+        self,
+        bar_idx: int,
+        df_window: pd.DataFrame,
+        feat_window: pd.DataFrame,
+        regime,
+        current_bar: pd.Series,
+    ):
+        """Process one bar: manage positions, evaluate signal, maybe open."""
+        close = self._get_close(current_bar)
+        high = self._get_high(current_bar)
+        low = self._get_low(current_bar)
+        ts = current_bar.name if isinstance(current_bar.name, pd.Timestamp) else None
+
+        # 1. Check existing positions for SL/TP hit
+        self._manage_positions(bar_idx, high, low, close, ts)
+
+        # 2. Record equity
+        unrealized = self._unrealized_pnl(close)
+        self.equity_curve.append(self.balance + unrealized)
+
+        # 3. Skip if at max open trades or in cooldown
+        if len(self.positions) >= self.cfg.max_open_trades:
+            return
+        if (bar_idx - self._last_trade_bar) < self.cfg.cooldown_bars:
+            return
+
+        # 4. Alpha evaluation
+        signal = self.cfg.alpha_head.evaluate(df_window, feat_window, regime)
+        if not signal.is_trade:
+            return
+
+        # 5. MH-TCN filter
+        mhtcn_out = self.cfg.mhtcn_filter.filter(signal, df_window, feat_window)
+
+        # 6. Compute final probability
+        p_alpha = signal.probability
+        g = mhtcn_out.g_factor
+        p_final = p_alpha * g
+        p_final = self._calibrator.calibrate(p_final)
+
+        if p_final < self.cfg.min_probability:
+            return
+
+        # 7. Compute SL/TP from ATR
+        atr = self._compute_atr(df_window)
+        if atr < 1e-8:
+            return
+
+        sl_dist = atr * self.cfg.atr_sl_mult
+        tp_dist = sl_dist * self.cfg.min_rr  # minimum R:R
+
+        if signal.direction == Direction.LONG:
+            sl_price = close - sl_dist
+            tp_price = close + tp_dist
+        else:
+            sl_price = close + sl_dist
+            tp_price = close - tp_dist
+
+        # 8. Position sizing (fixed fractional risk)
+        risk_amount = self.balance * self.cfg.risk_per_trade
+        sl_pips = sl_dist / self.pip_size
+        if sl_pips < 1:
+            return
+        volume = risk_amount / (sl_pips * self.cfg.pip_value)
+        volume = round(max(0.01, min(volume, 1.0)), 2)
+
+        # 9. Apply spread cost at entry
+        spread_cost = self.cfg.spread_pips * self.pip_size
+        if signal.direction == Direction.LONG:
+            entry_price = close + spread_cost / 2
+        else:
+            entry_price = close - spread_cost / 2
+
+        # 10. Commission
+        commission = volume * self.cfg.commission_per_lot
+        self.balance -= commission
+
+        # 11. Open position
+        self._ticket += 1
+        pos = _OpenPosition(
+            ticket=self._ticket,
+            bar_index=bar_idx,
+            entry_time=ts,
+            direction=signal.direction,
+            entry_price=entry_price,
+            sl=sl_price,
+            tp=tp_price,
+            volume=volume,
+            p_alpha=p_alpha,
+            p_final=p_final,
+            g_factor=g,
+            regime=regime.value,
+        )
+        self.positions.append(pos)
+        self._last_trade_bar = bar_idx
+
+    def _manage_positions(self, bar_idx, high, low, close, ts):
+        """Check SL/TP hits and close positions."""
+        closed = []
+        for pos in self.positions:
+            hit_sl = False
+            hit_tp = False
+            exit_price = close
+
+            if pos.direction == Direction.LONG:
+                if low <= pos.sl:
+                    hit_sl = True
+                    exit_price = pos.sl
+                elif high >= pos.tp:
+                    hit_tp = True
+                    exit_price = pos.tp
+            else:  # SHORT
+                if high >= pos.sl:
+                    hit_sl = True
+                    exit_price = pos.sl
+                elif low <= pos.tp:
+                    hit_tp = True
+                    exit_price = pos.tp
+
+            if hit_sl or hit_tp:
+                pnl = self._calc_pnl(pos, exit_price)
+                self.balance += pnl
+                forward_label = 1 if pnl > 0 else 0
+
+                self.trades.append(TradeRecord(
+                    variant_id=self.cfg.variant_id.value,
+                    bar_index=pos.bar_index,
+                    entry_time=pos.entry_time,
+                    exit_time=ts,
+                    direction=pos.direction,
+                    entry_price=pos.entry_price,
+                    exit_price=exit_price,
+                    sl=pos.sl,
+                    tp=pos.tp,
+                    volume=pos.volume,
+                    pnl=pnl,
+                    p_alpha=pos.p_alpha,
+                    p_final=pos.p_final,
+                    g_factor=pos.g_factor,
+                    regime=pos.regime,
+                    forward_label=forward_label,
+                ))
+
+                # Update calibrator with outcome
+                self._calibrator.update(pos.p_final, forward_label)
+                closed.append(pos)
+
+        for pos in closed:
+            self.positions.remove(pos)
+
+    def _calc_pnl(self, pos: _OpenPosition, exit_price: float) -> float:
+        if pos.direction == Direction.LONG:
+            pips = (exit_price - pos.entry_price) / self.pip_size
+        else:
+            pips = (pos.entry_price - exit_price) / self.pip_size
+        return pips * pos.volume * self.cfg.pip_value
+
+    def _unrealized_pnl(self, current_price: float) -> float:
+        total = 0.0
+        for pos in self.positions:
+            total += self._calc_pnl(pos, current_price)
+        return total
+
+    def _compute_atr(self, df: pd.DataFrame, period: int = 14) -> float:
+        h = df["high"] if "high" in df.columns else df["High"]
+        l = df["low"] if "low" in df.columns else df["Low"]
+        c = df["close"] if "close" in df.columns else df["Close"]
+        if len(h) < period + 1:
+            return 0.0
+        tr = pd.concat([
+            h - l, (h - c.shift(1)).abs(), (l - c.shift(1)).abs()
+        ], axis=1).max(axis=1)
+        atr = tr.rolling(period).mean().iloc[-1]
+        return float(atr) if not np.isnan(atr) else 0.0
+
+    def _get_close(self, bar):
+        return float(bar.get("close", bar.get("Close", 0)))
+
+    def _get_high(self, bar):
+        return float(bar.get("high", bar.get("High", 0)))
+
+    def _get_low(self, bar):
+        return float(bar.get("low", bar.get("Low", 0)))
+
+
+class ExperimentHarness:
+    """Runs multiple variants through the same data with identical execution.
+
+    Usage:
+        harness = ExperimentHarness(df_ohlcv)
+        results = harness.run(variants, warmup=200)
+    """
+
+    def __init__(
+        self,
+        df: pd.DataFrame,
+        pip_size: float = 0.0001,
+        feature_pipeline: Optional[FeaturePipeline] = None,
+        regime_detector: Optional[RegimeDetector] = None,
+    ):
+        self.df = df.copy()
+        self.pip_size = pip_size
+        self.feature_pipeline = feature_pipeline or FeaturePipeline()
+        self.regime_detector = regime_detector or RegimeDetector()
+
+        # Normalize column names to lowercase
+        self.df.columns = [c.lower() for c in self.df.columns]
+
+        # Pre-compute shared features once
+        logger.info("Computing shared features...")
+        t0 = time.time()
+        self.features = self.feature_pipeline.compute_features(self.df)
+        logger.info(f"Features computed: {self.features.shape[1]} cols in {time.time()-t0:.1f}s")
+
+        # Inject category mapping into any Alpha2 heads later
+        self._cat_map = self.feature_pipeline.get_category_columns()
+
+    def run(
+        self,
+        variants: List[VariantConfig],
+        warmup: int = 200,
+        progress_interval: int = 1000,
+    ) -> List[VariantResult]:
+        """Execute all variants bar-by-bar on the same data.
+
+        Args:
+            variants: List of VariantConfig to evaluate.
+            warmup: Number of initial bars to skip (feature lookback).
+            progress_interval: Log progress every N bars.
+
+        Returns:
+            List of VariantResult, one per variant.
+        """
+        n_bars = len(self.df)
+        logger.info(f"Running {len(variants)} variants on {n_bars} bars (warmup={warmup})")
+
+        # Initialize runners
+        runners: List[_VariantRunner] = []
+        for vc in variants:
+            runner = _VariantRunner(vc, pip_size=self.pip_size)
+            runner.reset()
+            # Inject category column mapping for Alpha2
+            if hasattr(vc.alpha_head, 'set_category_columns'):
+                vc.alpha_head.set_category_columns(self._cat_map)
+            runners.append(runner)
+
+        # Pre-compute regime for each bar
+        logger.info("Pre-computing regimes...")
+        regimes = self.regime_detector.detect_series(self.df, self.features)
+
+        # Main loop
+        t0 = time.time()
+        for i in range(warmup, n_bars):
+            # Shared data windows (no future leak)
+            df_window = self.df.iloc[max(0, i - 500):i + 1]
+            feat_window = self.features.iloc[max(0, i - 500):i + 1]
+            regime = regimes.iloc[i]
+            current_bar = self.df.iloc[i]
+
+            for runner in runners:
+                runner.step(i, df_window, feat_window, regime, current_bar)
+
+            if (i - warmup) % progress_interval == 0 and i > warmup:
+                elapsed = time.time() - t0
+                bars_done = i - warmup
+                rate = bars_done / max(elapsed, 0.01)
+                logger.info(
+                    f"  bar {i}/{n_bars} ({bars_done} processed, {rate:.0f} bars/s)"
+                )
+
+        elapsed = time.time() - t0
+        logger.info(f"Backtest complete in {elapsed:.1f}s")
+
+        # Collect results
+        results = []
+        for runner in runners:
+            # Close any remaining open positions at last close
+            last_close = self._get_close(self.df.iloc[-1])
+            last_ts = self.df.index[-1] if isinstance(self.df.index, pd.DatetimeIndex) else None
+            for pos in list(runner.positions):
+                pnl = runner._calc_pnl(pos, last_close)
+                runner.balance += pnl
+                runner.trades.append(TradeRecord(
+                    variant_id=runner.cfg.variant_id.value,
+                    bar_index=pos.bar_index,
+                    entry_time=pos.entry_time,
+                    exit_time=last_ts,
+                    direction=pos.direction,
+                    entry_price=pos.entry_price,
+                    exit_price=last_close,
+                    sl=pos.sl, tp=pos.tp, volume=pos.volume,
+                    pnl=pnl, p_alpha=pos.p_alpha, p_final=pos.p_final,
+                    g_factor=pos.g_factor, regime=pos.regime,
+                    forward_label=1 if pnl > 0 else 0,
+                ))
+            runner.positions.clear()
+            runner.equity_curve.append(runner.balance)
+
+            results.append(VariantResult(
+                variant_id=runner.cfg.variant_id.value,
+                trades=runner.trades,
+                equity_curve=np.array(runner.equity_curve),
+            ))
+
+        return results
+
+    def _get_close(self, bar):
+        return float(bar.get("close", bar.get("Close", 0)))

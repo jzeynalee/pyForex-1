@@ -1471,7 +1471,11 @@ class FeatureEngineerOptimized:
                 pass
         if dt_series is None and 'timestamp' in cols:
             try:
-                dt_series = pd.to_datetime(cols['timestamp'])
+                _ts = cols['timestamp']
+                if isinstance(_ts, pd.DatetimeIndex):
+                    dt_series = _ts.to_series()
+                else:
+                    dt_series = pd.to_datetime(pd.Series(_ts))
             except:
                 pass
         if dt_series is None and isinstance(df.index, pd.DatetimeIndex):
