@@ -371,9 +371,9 @@ def train_profile(
         volatility_weight=1.0,
         quantile_weight=1.0,
         outcome_weight=1.5,               # Slightly boosted for SL/TP quality
-        use_focal_loss=True,
-        focal_gamma=2.0,
-        label_smoothing=0.05,             # Reduced — less smoothing helps direction
+        use_focal_loss=False,             # Disabled — focal down-weights at uniform p≈0.33
+        focal_gamma=0.0,
+        label_smoothing=0.0,              # Disabled — max gradient signal for direction
     )
 
     trainer = MultiHeadTCNTrainer(
