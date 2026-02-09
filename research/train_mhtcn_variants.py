@@ -167,6 +167,18 @@ def generate_alpha_signals(
     cat_probs = np.zeros((n, len(ALL_CATEGORIES)), dtype=np.float32)
 
     alpha_head.reset()
+
+    # AlphaV2 needs category→column mapping to produce directional signals
+    if hasattr(alpha_head, "set_category_columns"):
+        from .feature_pipeline import CATEGORY_DEFINITIONS, _safe_match
+        feat_cols = features.columns.tolist()
+        cat_map = {}
+        for cat, patterns in CATEGORY_DEFINITIONS.items():
+            cat_map[cat] = _safe_match(feat_cols, patterns)
+        alpha_head.set_category_columns(cat_map)
+        n_mapped = sum(len(v) for v in cat_map.values())
+        logger.info(f"Injected category mapping: {n_mapped} features across {len(cat_map)} categories")
+
     for i in range(warmup, n):
         window_df = df.iloc[max(0, i - 500) : i + 1]
         window_feat = features.iloc[max(0, i - 500) : i + 1]
@@ -412,8 +424,26 @@ def run_all(
     max_features: int = 64,
     warmup: int = 200,
     device: str = "cpu",
+    variants: Optional[List[str]] = None,
 ) -> Dict:
-    """Full training pipeline for all 4 MH-TCN models."""
+    """Training pipeline for MH-TCN research models.
+
+    Args:
+        variants: List of variant IDs to train, e.g. ["V6"] or ["V2","V6"].
+                  None or empty means train all 4 (V2, V4, V5, V6).
+    """
+    _ALL_VARIANTS = {"V2", "V4", "V5", "V6"}
+    if not variants:
+        target_variants = _ALL_VARIANTS
+    else:
+        target_variants = {v.upper() for v in variants} & _ALL_VARIANTS
+        if not target_variants:
+            raise ValueError(f"No valid variants in {variants}. Choose from {_ALL_VARIANTS}")
+    logger.info(f"Target variants: {sorted(target_variants)}")
+
+    # Determine which alpha heads are needed
+    need_v1 = bool(target_variants & {"V2", "V5"})
+    need_v2 = bool(target_variants & {"V4", "V6"})
     t0 = time.time()
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -440,90 +470,93 @@ def run_all(
     logger.info("  Phase 1: Alpha Signal Generation")
     logger.info("=" * 60)
 
-    alpha_v1 = AlphaHeadV1()
-    alpha_v2 = AlphaHeadV2()
+    signals_v1, signals_v2 = None, None
 
-    signals_v1 = generate_alpha_signals(alpha_v1, df, features, regimes, warmup)
-    signals_v2 = generate_alpha_signals(alpha_v2, df, features, regimes, warmup)
+    if need_v1:
+        alpha_v1 = AlphaHeadV1()
+        signals_v1 = generate_alpha_signals(alpha_v1, df, features, regimes, warmup)
+        np.savez_compressed(out / "cached_signals_v1.npz", **signals_v1)
+        logger.info("AlphaV1 signals cached.")
 
-    # Cache signals
-    np.savez_compressed(
-        out / "cached_signals_v1.npz", **signals_v1
-    )
-    np.savez_compressed(
-        out / "cached_signals_v2.npz", **signals_v2
-    )
-    logger.info("Alpha signals cached.")
+    if need_v2:
+        alpha_v2 = AlphaHeadV2()
+        signals_v2 = generate_alpha_signals(alpha_v2, df, features, regimes, warmup)
+        np.savez_compressed(out / "cached_signals_v2.npz", **signals_v2)
+        logger.info("AlphaV2 signals cached.")
 
     # ── Phase 2: Label generation ──────────────────────────────────
     logger.info("=" * 60)
     logger.info("  Phase 2: Label Generation")
     logger.info("=" * 60)
 
-    labels_v1 = generate_labels(
-        prices, signals_v1["directions"], label_horizon, persistence_threshold
-    )
-    labels_v2 = generate_labels(
-        prices, signals_v2["directions"], label_horizon, persistence_threshold
-    )
+    labels_v1, labels_v2 = None, None
+
+    if need_v1:
+        labels_v1 = generate_labels(
+            prices, signals_v1["directions"], label_horizon, persistence_threshold
+        )
+    if need_v2:
+        labels_v2 = generate_labels(
+            prices, signals_v2["directions"], label_horizon, persistence_threshold
+        )
 
     # ── Phase 3: Train RawFeature ResearchTCN ──────────────────────
     results = {}
 
-    logger.info("=" * 60)
-    logger.info("  Phase 3: Train ResearchTCN models")
-    logger.info("=" * 60)
+    if target_variants & {"V2", "V4"}:
+        logger.info("=" * 60)
+        logger.info("  Phase 3: Train ResearchTCN models")
+        logger.info("=" * 60)
 
-    # Model A: ResearchTCN for V2 (AlphaV1 + raw features)
-    results["V2_raw_mhtcn_alphaV1"] = train_raw_feature_tcn(
-        features=features,
-        labels=labels_v1,
-        config=training_config,
-        output_path=out / "raw_mhtcn_alphaV1.pt",
-        device=device,
-        max_features=max_features,
-    )
+        if "V2" in target_variants:
+            results["V2_raw_mhtcn_alphaV1"] = train_raw_feature_tcn(
+                features=features,
+                labels=labels_v1,
+                config=training_config,
+                output_path=out / "raw_mhtcn_alphaV1.pt",
+                device=device,
+                max_features=max_features,
+            )
 
-    # Model B: ResearchTCN for V4 (AlphaV2 + raw features)
-    results["V4_raw_mhtcn_alphaV2"] = train_raw_feature_tcn(
-        features=features,
-        labels=labels_v2,
-        config=training_config,
-        output_path=out / "raw_mhtcn_alphaV2.pt",
-        device=device,
-        max_features=max_features,
-    )
+        if "V4" in target_variants:
+            results["V4_raw_mhtcn_alphaV2"] = train_raw_feature_tcn(
+                features=features,
+                labels=labels_v2,
+                config=training_config,
+                output_path=out / "raw_mhtcn_alphaV2.pt",
+                device=device,
+                max_features=max_features,
+            )
 
     # ── Phase 4: Train ProbabilisticTCN ────────────────────────────
-    logger.info("=" * 60)
-    logger.info("  Phase 4: Train ProbabilisticTCN models")
-    logger.info("=" * 60)
+    if target_variants & {"V5", "V6"}:
+        logger.info("=" * 60)
+        logger.info("  Phase 4: Train ProbabilisticTCN models")
+        logger.info("=" * 60)
 
-    # Build probability matrices
-    prob_matrix_v1 = build_probability_sequences(
-        signals_v1["probabilities"], signals_v1["category_probs"], regimes
-    )
-    prob_matrix_v2 = build_probability_sequences(
-        signals_v2["probabilities"], signals_v2["category_probs"], regimes
-    )
+        if "V5" in target_variants:
+            prob_matrix_v1 = build_probability_sequences(
+                signals_v1["probabilities"], signals_v1["category_probs"], regimes
+            )
+            results["V5_prob_mhtcn_alphaV1"] = train_probabilistic_tcn(
+                prob_matrix=prob_matrix_v1,
+                labels=labels_v1,
+                config=training_config,
+                output_path=out / "prob_mhtcn_alphaV1.pt",
+                device=device,
+            )
 
-    # Model C: ProbabilisticTCN for V5 (AlphaV1 probs)
-    results["V5_prob_mhtcn_alphaV1"] = train_probabilistic_tcn(
-        prob_matrix=prob_matrix_v1,
-        labels=labels_v1,
-        config=training_config,
-        output_path=out / "prob_mhtcn_alphaV1.pt",
-        device=device,
-    )
-
-    # Model D: ProbabilisticTCN for V6 (AlphaV2 probs)
-    results["V6_prob_mhtcn_alphaV2"] = train_probabilistic_tcn(
-        prob_matrix=prob_matrix_v2,
-        labels=labels_v2,
-        config=training_config,
-        output_path=out / "prob_mhtcn_alphaV2.pt",
-        device=device,
-    )
+        if "V6" in target_variants:
+            prob_matrix_v2 = build_probability_sequences(
+                signals_v2["probabilities"], signals_v2["category_probs"], regimes
+            )
+            results["V6_prob_mhtcn_alphaV2"] = train_probabilistic_tcn(
+                prob_matrix=prob_matrix_v2,
+                labels=labels_v2,
+                config=training_config,
+                output_path=out / "prob_mhtcn_alphaV2.pt",
+                device=device,
+            )
 
     # ── Summary ────────────────────────────────────────────────────
     elapsed = time.time() - t0
@@ -547,7 +580,7 @@ def run_all(
 
     # Print final summary
     logger.info("=" * 70)
-    logger.info("  TRAINING COMPLETE — 4 MH-TCN models for 6 variants")
+    logger.info(f"  TRAINING COMPLETE — {len(results)} MH-TCN model(s) for variants {sorted(target_variants)}")
     logger.info("=" * 70)
     for name, res in results.items():
         status = res.get("status", "unknown")
@@ -588,6 +621,10 @@ def main():
     parser.add_argument("--max-features", type=int, default=64)
     parser.add_argument("--warmup", type=int, default=200)
     parser.add_argument("--device", default="auto")
+    parser.add_argument(
+        "--variant", nargs="+", default=None,
+        help="Train specific variant(s) only, e.g. --variant V6 or --variant V2 V6"
+    )
 
     args = parser.parse_args()
 
@@ -618,6 +655,7 @@ def main():
         max_features=args.max_features,
         warmup=args.warmup,
         device=device,
+        variants=args.variant,
     )
 
 
