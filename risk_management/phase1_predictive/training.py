@@ -137,9 +137,8 @@ class DirectionLoss(nn.Module):
         Returns:
             Scalar loss
         """
-        # Convert probs to logits for numerical stability
-        logits = torch.log(pred_probs + 1e-8)
-        return self.loss_fn(logits, target_direction)
+        # DirectionHead returns raw logits; pass directly to loss
+        return self.loss_fn(pred_probs, target_direction)
 
 
 class VolatilityLoss(nn.Module):
