@@ -300,7 +300,7 @@ class MHTCNFeatureProvider:
                 outputs = model(x, mode='all')
             
             # Extract outputs
-            direction_probs = outputs['direction'].cpu().numpy()[0]
+            direction_probs = torch.softmax(outputs['direction'], dim=-1).cpu().numpy()[0]
             volatility = float(outputs['volatility'].cpu().numpy().item())
             quantiles = outputs['quantiles'].cpu().numpy()[0]
             
