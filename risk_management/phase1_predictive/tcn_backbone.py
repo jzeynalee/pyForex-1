@@ -248,7 +248,7 @@ class DirectionHead(nn.Module):
         # Global average pooling over time
         pooled = features.mean(dim=-1)  # (batch, channels)
         logits = self.classifier(pooled)
-        return F.softmax(logits, dim=-1)
+        return logits  # Raw logits — CrossEntropyLoss applies log_softmax internally
 
 
 class VolatilityHead(nn.Module):
@@ -560,7 +560,7 @@ class MultiHeadTCN(nn.Module):
             outputs = self.forward(x, vision_features, mode='all')
         
         return RiskPrediction(
-            direction_probs=outputs['direction'],
+            direction_probs=F.softmax(outputs['direction'], dim=-1),
             volatility=outputs['volatility'],
             quantiles=outputs['quantiles'],
             features=outputs['features'],
