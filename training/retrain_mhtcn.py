@@ -366,10 +366,14 @@ def train_profile(
         min_delta=1e-4,
         grad_clip=1.0,
         warmup_epochs=5,
-        use_uncertainty_weighting=True,
+        use_uncertainty_weighting=False,  # Fixed weights — uncertainty suppresses direction
+        direction_weight=3.0,             # Boosted to force direction head learning
+        volatility_weight=1.0,
+        quantile_weight=1.0,
+        outcome_weight=1.5,               # Slightly boosted for SL/TP quality
         use_focal_loss=True,
         focal_gamma=2.0,
-        label_smoothing=0.1,
+        label_smoothing=0.05,             # Reduced — less smoothing helps direction
     )
 
     trainer = MultiHeadTCNTrainer(
