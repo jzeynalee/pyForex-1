@@ -139,12 +139,12 @@ _REGIME_TO_FLOAT = {
 
 
 class ProbabilisticMHTCNFilter(MHTCNFilter):
-    """MH-TCN filter using probability-space inputs.
+    """MH-TCN filter using probability-space + price-derived inputs.
 
-    Maintains a rolling buffer of per-bar category probabilities so that
+    Maintains a rolling buffer of per-bar feature vectors so that
     each call can build a (seq_len, n_channels) window.
 
-    Channel layout (8 channels):
+    Channel layout (14 channels):
         0: P_trend
         1: P_momentum
         2: P_oscillator
@@ -153,9 +153,15 @@ class ProbabilisticMHTCNFilter(MHTCNFilter):
         5: P_structure
         6: P_alpha_final
         7: regime_scalar
+        8: return_1bar   (close-to-close pct change, clipped)
+        9: return_5bar
+       10: return_10bar
+       11: norm_atr       (ATR / close, volatility proxy)
+       12: rsi_norm       (RSI / 100, bounded [0,1])
+       13: momentum_sign  (signed momentum: +1/-1 scaled by strength)
     """
 
-    N_CHANNELS = 8
+    N_CHANNELS = 14
 
     def __init__(
         self,
@@ -182,10 +188,10 @@ class ProbabilisticMHTCNFilter(MHTCNFilter):
             return
         self._model = ProbabilisticTCN(
             input_channels=self.N_CHANNELS,
-            hidden=32,
+            hidden=48,
             num_layers=3,
             kernel_size=3,
-            dropout=0.1,
+            dropout=0.15,
         ).to(self.device)
 
         if self._weights_path and Path(self._weights_path).exists():
@@ -204,13 +210,13 @@ class ProbabilisticMHTCNFilter(MHTCNFilter):
         df: pd.DataFrame,
         features: pd.DataFrame,
     ) -> MHTCNOutput:
-        """Compute g_factor from probability sequence.
+        """Compute g_factor from probability + price-derived sequence.
 
-        Always appends the current bar's probabilities to the buffer,
+        Always appends the current bar's features to the buffer,
         even for HOLD signals, so the temporal context stays current.
         """
-        # Build current-bar probability vector and append to buffer
-        row = self._build_prob_row(signal)
+        # Build current-bar feature vector and append to buffer
+        row = self._build_prob_row(signal, df)
         self._buffer.append(row)
 
         # If signal is HOLD, no need to run the model
@@ -261,8 +267,10 @@ class ProbabilisticMHTCNFilter(MHTCNFilter):
                 regime_validity=1.0,
             )
 
-    def _build_prob_row(self, signal: AlphaSignal) -> np.ndarray:
-        """Convert an AlphaSignal into a (N_CHANNELS,) probability vector."""
+    def _build_prob_row(
+        self, signal: AlphaSignal, df: Optional[pd.DataFrame] = None
+    ) -> np.ndarray:
+        """Convert an AlphaSignal + OHLCV into a (N_CHANNELS,) feature vector."""
         row = np.full(self.N_CHANNELS, 0.5, dtype=np.float32)
 
         # Category probabilities (channels 0-5)
@@ -275,6 +283,42 @@ class ProbabilisticMHTCNFilter(MHTCNFilter):
 
         # Regime scalar (channel 7)
         row[7] = _REGIME_TO_FLOAT.get(signal.regime, 0.5)
+
+        # Price-derived channels (8-13)
+        if df is not None and len(df) >= 2:
+            close_col = "close" if "close" in df.columns else "Close"
+            high_col = "high" if "high" in df.columns else "High"
+            low_col = "low" if "low" in df.columns else "Low"
+            closes = df[close_col].values
+            c = closes[-1]
+            if c > 1e-10:
+                # 1-bar return
+                row[8] = float(np.clip((c - closes[-2]) / closes[-2], -0.05, 0.05)) if len(closes) >= 2 else 0.0
+                # 5-bar return
+                row[9] = float(np.clip((c - closes[-min(6, len(closes))]) / closes[-min(6, len(closes))], -0.05, 0.05))
+                # 10-bar return
+                row[10] = float(np.clip((c - closes[-min(11, len(closes))]) / closes[-min(11, len(closes))], -0.05, 0.05))
+                # Normalized ATR (14-bar)
+                if len(df) >= 14:
+                    highs = df[high_col].values[-14:]
+                    lows = df[low_col].values[-14:]
+                    prev_c = closes[-15:-1] if len(closes) >= 15 else closes[-14:]
+                    tr = np.maximum(highs - lows, np.maximum(
+                        np.abs(highs - prev_c[:len(highs)]),
+                        np.abs(lows - prev_c[:len(lows)]))
+                    )
+                    row[11] = float(np.clip(tr.mean() / c, 0, 0.1))
+                # RSI (14-bar, normalized to [0,1])
+                if len(closes) >= 15:
+                    deltas = np.diff(closes[-15:])
+                    gains = np.maximum(deltas, 0).mean()
+                    losses = np.abs(np.minimum(deltas, 0)).mean()
+                    rs = gains / max(losses, 1e-10)
+                    row[12] = float(rs / (1.0 + rs))  # = RSI/100
+                # Signed momentum
+                if len(closes) >= 11:
+                    mom = (c - closes[-11]) / closes[-11]
+                    row[13] = float(np.clip(mom * 10, -1.0, 1.0))  # scale and clip
 
         return row
 
