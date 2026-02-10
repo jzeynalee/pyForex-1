@@ -317,18 +317,26 @@ def build_probability_sequences(
     probabilities: np.ndarray,
     category_probs: np.ndarray,
     regimes: np.ndarray,
+    df: Optional[pd.DataFrame] = None,
 ) -> np.ndarray:
-    """Build (n_bars, 8) probability matrix for ProbabilisticTCN.
+    """Build (n_bars, 14) feature matrix for ProbabilisticTCN.
 
     Channels:
-        0-5: category probabilities (trend, momentum, oscillator, volatility, volume, structure)
-        6:   P_alpha_final
-        7:   regime_scalar
+        0-5:  category probabilities (trend, momentum, oscillator, volatility, volume, structure)
+        6:    P_alpha_final
+        7:    regime_scalar
+        8:    return_1bar
+        9:    return_5bar
+        10:   return_10bar
+        11:   norm_atr
+        12:   rsi_norm
+        13:   momentum_sign
     """
     n = len(probabilities)
-    matrix = np.full((n, 8), 0.5, dtype=np.float32)
+    N_CHANNELS = 14
+    matrix = np.full((n, N_CHANNELS), 0.5, dtype=np.float32)
 
-    # Channels 0-5: category probs (already in category_probs columns)
+    # Channels 0-5: category probs
     n_cats = min(category_probs.shape[1], 6)
     matrix[:, :n_cats] = category_probs[:, :n_cats]
 
@@ -340,6 +348,58 @@ def build_probability_sequences(
         r = regimes[i] if i < len(regimes) else RegimeLabel.RANGING
         matrix[i, 7] = _REGIME_TO_FLOAT.get(r, 0.5)
 
+    # Channels 8-13: price-derived features
+    if df is not None:
+        close_col = "close" if "close" in df.columns else "Close"
+        high_col = "high" if "high" in df.columns else "High"
+        low_col = "low" if "low" in df.columns else "Low"
+        closes = df[close_col].values.astype(np.float64)
+        highs = df[high_col].values.astype(np.float64)
+        lows = df[low_col].values.astype(np.float64)
+
+        # 1-bar return
+        ret1 = np.zeros(n)
+        ret1[1:] = (closes[1:] - closes[:-1]) / np.maximum(closes[:-1], 1e-10)
+        matrix[:, 8] = np.clip(ret1, -0.05, 0.05).astype(np.float32)
+
+        # 5-bar return
+        ret5 = np.zeros(n)
+        ret5[5:] = (closes[5:] - closes[:-5]) / np.maximum(closes[:-5], 1e-10)
+        matrix[:, 9] = np.clip(ret5, -0.05, 0.05).astype(np.float32)
+
+        # 10-bar return
+        ret10 = np.zeros(n)
+        ret10[10:] = (closes[10:] - closes[:-10]) / np.maximum(closes[:-10], 1e-10)
+        matrix[:, 10] = np.clip(ret10, -0.05, 0.05).astype(np.float32)
+
+        # Normalized ATR (14-bar)
+        tr = np.maximum(
+            highs - lows,
+            np.maximum(
+                np.abs(highs - np.roll(closes, 1)),
+                np.abs(lows - np.roll(closes, 1)),
+            ),
+        )
+        tr[0] = highs[0] - lows[0]
+        atr14 = pd.Series(tr).rolling(14, min_periods=1).mean().values
+        norm_atr = atr14 / np.maximum(closes, 1e-10)
+        matrix[:, 11] = np.clip(norm_atr, 0, 0.1).astype(np.float32)
+
+        # RSI (14-bar, normalized to [0,1])
+        deltas = np.diff(closes, prepend=closes[0])
+        gains = np.maximum(deltas, 0)
+        losses = np.abs(np.minimum(deltas, 0))
+        avg_gain = pd.Series(gains).rolling(14, min_periods=1).mean().values
+        avg_loss = pd.Series(losses).rolling(14, min_periods=1).mean().values
+        rs = avg_gain / np.maximum(avg_loss, 1e-10)
+        rsi_norm = rs / (1.0 + rs)
+        matrix[:, 12] = rsi_norm.astype(np.float32)
+
+        # Signed momentum (10-bar, scaled)
+        mom = np.zeros(n)
+        mom[10:] = (closes[10:] - closes[:-10]) / np.maximum(closes[:-10], 1e-10)
+        matrix[:, 13] = np.clip(mom * 10, -1.0, 1.0).astype(np.float32)
+
     return matrix
 
 
@@ -349,6 +409,7 @@ def train_probabilistic_tcn(
     config: TrainingConfig,
     output_path: Path,
     device: str = "cpu",
+    input_channels: int = 14,
 ) -> Dict:
     """Train a ProbabilisticTCN on probability sequences + persistence labels."""
     logger.info("=" * 60)
@@ -367,17 +428,17 @@ def train_probabilistic_tcn(
         learning_rate=config.learning_rate,
         weight_decay=config.weight_decay,
         num_epochs=config.num_epochs,
-        patience=config.patience,
+        patience=max(config.patience, 15),
         grad_clip=config.grad_clip,
         shuffle_labels=config.shuffle_labels,
     )
 
     model = ProbabilisticTCN(
-        input_channels=8,
-        hidden=32,
+        input_channels=input_channels,
+        hidden=48,
         num_layers=3,
         kernel_size=3,
-        dropout=0.2,
+        dropout=0.15,
     )
 
     trainer = WalkForwardTrainer(config_copy, device=device)
@@ -536,7 +597,7 @@ def run_all(
 
         if "V5" in target_variants:
             prob_matrix_v1 = build_probability_sequences(
-                signals_v1["probabilities"], signals_v1["category_probs"], regimes
+                signals_v1["probabilities"], signals_v1["category_probs"], regimes, df
             )
             results["V5_prob_mhtcn_alphaV1"] = train_probabilistic_tcn(
                 prob_matrix=prob_matrix_v1,
@@ -548,7 +609,7 @@ def run_all(
 
         if "V6" in target_variants:
             prob_matrix_v2 = build_probability_sequences(
-                signals_v2["probabilities"], signals_v2["category_probs"], regimes
+                signals_v2["probabilities"], signals_v2["category_probs"], regimes, df
             )
             results["V6_prob_mhtcn_alphaV2"] = train_probabilistic_tcn(
                 prob_matrix=prob_matrix_v2,
