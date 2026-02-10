@@ -215,8 +215,8 @@ class WalkForwardTrainer:
             weight_decay=self.config.weight_decay,
         )
         criterion = nn.BCELoss()
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer, T_max=self.config.num_epochs
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode="min", factor=0.5, patience=5, min_lr=1e-6
         )
 
         train_loader = DataLoader(
@@ -257,7 +257,6 @@ class WalkForwardTrainer:
                 epoch_loss += loss.item()
                 n_batches += 1
 
-            scheduler.step()
             train_loss = epoch_loss / max(n_batches, 1)
             history["train_loss"].append(train_loss)
 
@@ -265,6 +264,8 @@ class WalkForwardTrainer:
             val_loss, val_acc = self._validate(model, val_loader, criterion)
             history["val_loss"].append(val_loss)
             history["val_acc"].append(val_acc)
+
+            scheduler.step(val_loss)
 
             if val_loss < best_val_loss - 1e-5:
                 best_val_loss = val_loss
