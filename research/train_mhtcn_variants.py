@@ -156,19 +156,17 @@ def generate_alpha_signals(
 ) -> Dict[str, np.ndarray]:
     """Run an alpha head on every bar after warmup.
 
+    Uses vectorized fast-path for AlphaV2 (bulk rolling z-scores + matrix
+    aggregation) which is ~100-500× faster than the per-bar loop.
+    Falls back to per-bar evaluation for non-V2 alpha heads.
+
     Returns dict with:
         directions: int array (+1, -1, 0)
         probabilities: float array
         category_probs: (n_bars, 6) float array (AlphaV2 only; zeros for V1)
     """
-    n = len(df)
-    directions = np.zeros(n, dtype=np.int32)
-    probabilities = np.zeros(n, dtype=np.float32)
-    cat_probs = np.zeros((n, len(ALL_CATEGORIES)), dtype=np.float32)
-
-    alpha_head.reset()
-
-    # AlphaV2 needs category→column mapping to produce directional signals
+    # Build category mapping for AlphaV2
+    cat_map = None
     if hasattr(alpha_head, "set_category_columns"):
         from .feature_pipeline import CATEGORY_DEFINITIONS, _safe_match
         feat_cols = features.columns.tolist()
@@ -178,6 +176,165 @@ def generate_alpha_signals(
         alpha_head.set_category_columns(cat_map)
         n_mapped = sum(len(v) for v in cat_map.values())
         logger.info(f"Injected category mapping: {n_mapped} features across {len(cat_map)} categories")
+
+    # ── Fast vectorized path for AlphaV2 ─────────────────────────────
+    if cat_map is not None:
+        return _generate_alpha_v2_vectorized(
+            alpha_head, features, regimes, cat_map, warmup
+        )
+
+    # ── Fallback: per-bar loop for V1 or unknown alpha heads ─────────
+    return _generate_alpha_signals_loop(alpha_head, df, features, regimes, warmup)
+
+
+def _generate_alpha_v2_vectorized(
+    alpha_head,
+    features: pd.DataFrame,
+    regimes: np.ndarray,
+    cat_map: Dict[str, List[str]],
+    warmup: int,
+) -> Dict[str, np.ndarray]:
+    """Vectorized AlphaV2 signal generation — replaces per-bar loop.
+
+    Instead of calling CategoryScorer.score() per bar per category, we:
+      1. Compute rolling mean/std for all mapped features at once
+      2. Compute z-scores as a single matrix operation
+      3. Aggregate per-category z-scores via matrix multiply
+      4. Apply sigmoid → logit fusion → direction logic vectorized
+    """
+    import time as _time
+    t0 = _time.perf_counter()
+    n = len(features)
+    lookback = alpha_head.lookback
+    min_prob = alpha_head.min_probability
+    edge_min = alpha_head.directional_edge_min
+
+    # Collect all mapped feature columns (deduplicated, preserving order)
+    all_cols = []
+    col_to_cat_idx = {}  # col → list of category indices
+    for j, cat in enumerate(ALL_CATEGORIES):
+        for c in cat_map.get(cat, []):
+            if c in features.columns:
+                if c not in col_to_cat_idx:
+                    col_to_cat_idx[c] = []
+                    all_cols.append(c)
+                col_to_cat_idx[c].append(j)
+
+    if not all_cols:
+        logger.warning("No mapped feature columns found — returning all HOLD")
+        return {
+            "directions": np.zeros(n, dtype=np.int32),
+            "probabilities": np.full(n, 0.5, dtype=np.float32),
+            "category_probs": np.full((n, len(ALL_CATEGORIES)), 0.5, dtype=np.float32),
+        }
+
+    # Step 1: Extract feature matrix and compute rolling z-scores
+    feat_matrix = features[all_cols].values.astype(np.float64)  # (n, F)
+
+    # Rolling mean/std using pandas (vectorized C implementation)
+    roll_mean = features[all_cols].shift(1).rolling(
+        window=lookback - 1, min_periods=10
+    ).mean().values  # (n, F)
+    roll_std = features[all_cols].shift(1).rolling(
+        window=lookback - 1, min_periods=10
+    ).std(ddof=0).values  # (n, F)
+
+    # Z-scores: (current - rolling_mean) / rolling_std, clipped to [-3, 3]
+    with np.errstate(divide="ignore", invalid="ignore"):
+        z_matrix = (feat_matrix - roll_mean) / np.maximum(roll_std, 1e-10)
+    z_matrix = np.clip(z_matrix, -3.0, 3.0)
+    z_matrix = np.nan_to_num(z_matrix, nan=0.0)
+
+    # Step 2: Aggregate z-scores per category (uniform weights, normalized)
+    n_cats = len(ALL_CATEGORIES)
+    cat_z = np.zeros((n, n_cats), dtype=np.float64)  # per-category z-score
+    for col_idx, col in enumerate(all_cols):
+        for cat_idx in col_to_cat_idx[col]:
+            cat_z[:, cat_idx] += z_matrix[:, col_idx]
+
+    # Normalize by feature count per category
+    cat_counts = np.zeros(n_cats)
+    for col in all_cols:
+        for cat_idx in col_to_cat_idx[col]:
+            cat_counts[cat_idx] += 1
+    cat_counts = np.maximum(cat_counts, 1)
+    cat_z /= cat_counts[np.newaxis, :]
+
+    # Step 3: Category probabilities = sigmoid(z_cat)
+    cat_z_clipped = np.clip(cat_z, -10, 10)
+    cat_probs = 1.0 / (1.0 + np.exp(-cat_z_clipped))  # (n, 6)
+
+    # Step 4: Logit-space fusion with regime-dependent weights
+    from .alpha_heads.alpha_v2 import _REGIME_WEIGHTS
+    # Build weight matrix (n, 6) based on per-bar regime
+    weight_matrix = np.full((n, n_cats), 1.0 / n_cats, dtype=np.float64)
+    unique_regimes = set(regimes)
+    for regime in unique_regimes:
+        mask = regimes == regime
+        rw = _REGIME_WEIGHTS.get(regime, _REGIME_WEIGHTS[RegimeLabel.TRANSITION])
+        for j, cat in enumerate(ALL_CATEGORIES):
+            weight_matrix[mask, j] = rw.get(cat, 1.0 / n_cats)
+
+    # logit(P_cat) for fusion
+    cat_probs_clipped = np.clip(cat_probs, 1e-6, 1.0 - 1e-6)
+    cat_logits = np.log(cat_probs_clipped / (1.0 - cat_probs_clipped))  # (n, 6)
+
+    # final_logit = Σ α_k * logit(P_k)  — element-wise multiply then sum
+    final_logit = np.sum(weight_matrix * cat_logits, axis=1)  # (n,)
+
+    # p_bull = sigmoid(final_logit)
+    final_logit_clipped = np.clip(final_logit, -10, 10)
+    p_bull = 1.0 / (1.0 + np.exp(-final_logit_clipped))  # (n,)
+
+    # Step 5: Direction logic
+    directional_edge = np.abs(2.0 * p_bull - 1.0)
+    probability = np.maximum(p_bull, 1.0 - p_bull)
+
+    directions = np.zeros(n, dtype=np.int32)
+    # LONG where p_bull > 0.5, SHORT where p_bull < 0.5
+    long_mask = (p_bull > 0.5) & (directional_edge >= edge_min) & (probability >= min_prob)
+    short_mask = (p_bull < 0.5) & (directional_edge >= edge_min) & (probability >= min_prob)
+    directions[long_mask] = 1
+    directions[short_mask] = -1
+
+    # Zero out warmup period
+    directions[:warmup] = 0
+    probability[:warmup] = 0.5
+
+    # Cast outputs
+    directions_out = directions.astype(np.int32)
+    probabilities_out = probability.astype(np.float32)
+    cat_probs_out = cat_probs.astype(np.float32)
+
+    elapsed = _time.perf_counter() - t0
+    n_long = int(np.sum(directions_out == 1))
+    n_short = int(np.sum(directions_out == -1))
+    n_hold = int(np.sum(directions_out == 0))
+    logger.info(
+        f"{alpha_head.name()} signals (vectorized, {elapsed:.1f}s): "
+        f"LONG={n_long}, SHORT={n_short}, HOLD={n_hold}"
+    )
+    return {
+        "directions": directions_out,
+        "probabilities": probabilities_out,
+        "category_probs": cat_probs_out,
+    }
+
+
+def _generate_alpha_signals_loop(
+    alpha_head,
+    df: pd.DataFrame,
+    features: pd.DataFrame,
+    regimes: np.ndarray,
+    warmup: int,
+) -> Dict[str, np.ndarray]:
+    """Original per-bar alpha signal generation (fallback for V1)."""
+    n = len(df)
+    directions = np.zeros(n, dtype=np.int32)
+    probabilities = np.zeros(n, dtype=np.float32)
+    cat_probs = np.zeros((n, len(ALL_CATEGORIES)), dtype=np.float32)
+
+    alpha_head.reset()
 
     for i in range(warmup, n):
         window_df = df.iloc[max(0, i - 500) : i + 1]
@@ -194,7 +351,6 @@ def generate_alpha_signals(
             directions[i] = 1
         elif signal.direction == Direction.SHORT:
             directions[i] = -1
-        # else HOLD → 0
 
         probabilities[i] = signal.probability
 
@@ -357,22 +513,29 @@ def build_probability_sequences(
         highs = df[high_col].values.astype(np.float64)
         lows = df[low_col].values.astype(np.float64)
 
+        # Scale factor: map returns from [-0.005, +0.005] to [0, 1]
+        # 0.005 = 50 pips for EURUSD — a significant move
+        _RET_SCALE = 0.005
+
+        def _scale_ret(r):
+            return np.clip(r / _RET_SCALE, -1.0, 1.0) * 0.5 + 0.5
+
         # 1-bar return
         ret1 = np.zeros(n)
         ret1[1:] = (closes[1:] - closes[:-1]) / np.maximum(closes[:-1], 1e-10)
-        matrix[:, 8] = np.clip(ret1, -0.05, 0.05).astype(np.float32)
+        matrix[:, 8] = _scale_ret(ret1).astype(np.float32)
 
         # 5-bar return
         ret5 = np.zeros(n)
         ret5[5:] = (closes[5:] - closes[:-5]) / np.maximum(closes[:-5], 1e-10)
-        matrix[:, 9] = np.clip(ret5, -0.05, 0.05).astype(np.float32)
+        matrix[:, 9] = _scale_ret(ret5).astype(np.float32)
 
         # 10-bar return
         ret10 = np.zeros(n)
         ret10[10:] = (closes[10:] - closes[:-10]) / np.maximum(closes[:-10], 1e-10)
-        matrix[:, 10] = np.clip(ret10, -0.05, 0.05).astype(np.float32)
+        matrix[:, 10] = _scale_ret(ret10).astype(np.float32)
 
-        # Normalized ATR (14-bar)
+        # Normalized ATR (14-bar) — scaled to ~[0, 1]
         tr = np.maximum(
             highs - lows,
             np.maximum(
@@ -383,7 +546,7 @@ def build_probability_sequences(
         tr[0] = highs[0] - lows[0]
         atr14 = pd.Series(tr).rolling(14, min_periods=1).mean().values
         norm_atr = atr14 / np.maximum(closes, 1e-10)
-        matrix[:, 11] = np.clip(norm_atr, 0, 0.1).astype(np.float32)
+        matrix[:, 11] = np.clip(norm_atr * 500.0, 0, 1.0).astype(np.float32)
 
         # RSI (14-bar, normalized to [0,1])
         deltas = np.diff(closes, prepend=closes[0])
@@ -395,10 +558,10 @@ def build_probability_sequences(
         rsi_norm = rs / (1.0 + rs)
         matrix[:, 12] = rsi_norm.astype(np.float32)
 
-        # Signed momentum (10-bar, scaled)
+        # Signed momentum (10-bar, scaled to [0, 1])
         mom = np.zeros(n)
         mom[10:] = (closes[10:] - closes[:-10]) / np.maximum(closes[:-10], 1e-10)
-        matrix[:, 13] = np.clip(mom * 10, -1.0, 1.0).astype(np.float32)
+        matrix[:, 13] = _scale_ret(mom).astype(np.float32)
 
     return matrix
 
