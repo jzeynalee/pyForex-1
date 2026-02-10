@@ -171,6 +171,18 @@ class WalkForwardTrainer:
         train_end = int(n * self.config.train_ratio)
         val_end = int(n * (self.config.train_ratio + self.config.val_ratio))
 
+        # Diagnostic: show label distribution across periods
+        valid_mask = labels >= 0
+        n_train_labels = int(valid_mask[:train_end].sum())
+        n_val_labels = int(valid_mask[train_end:val_end].sum())
+        n_test_labels = int(valid_mask[val_end:].sum())
+        logger.info(
+            f"Label distribution: total_valid={int(valid_mask.sum())}, "
+            f"train_period={n_train_labels}, val_period={n_val_labels}, "
+            f"test_period={n_test_labels} "
+            f"(boundaries: train_end={train_end}, val_end={val_end}, n={n})"
+        )
+
         # Train: first 70%
         train_ds = MHTCNDataset(
             features[:train_end], labels[:train_end],
