@@ -284,7 +284,13 @@ class ProbabilisticMHTCNFilter(MHTCNFilter):
         # Regime scalar (channel 7)
         row[7] = _REGIME_TO_FLOAT.get(signal.regime, 0.5)
 
-        # Price-derived channels (8-13)
+        # Price-derived channels (8-13) — scaled to [0, 1] to match training
+        _RET_SCALE = 0.005  # 50 pips full scale for EURUSD
+
+        def _sr(r):
+            """Scale return to [0, 1]: -50 pips → 0, 0 → 0.5, +50 pips → 1."""
+            return float(np.clip(r / _RET_SCALE, -1.0, 1.0) * 0.5 + 0.5)
+
         if df is not None and len(df) >= 2:
             close_col = "close" if "close" in df.columns else "Close"
             high_col = "high" if "high" in df.columns else "High"
@@ -293,12 +299,14 @@ class ProbabilisticMHTCNFilter(MHTCNFilter):
             c = closes[-1]
             if c > 1e-10:
                 # 1-bar return
-                row[8] = float(np.clip((c - closes[-2]) / closes[-2], -0.05, 0.05)) if len(closes) >= 2 else 0.0
+                row[8] = _sr((c - closes[-2]) / closes[-2]) if len(closes) >= 2 else 0.5
                 # 5-bar return
-                row[9] = float(np.clip((c - closes[-min(6, len(closes))]) / closes[-min(6, len(closes))], -0.05, 0.05))
+                idx5 = min(6, len(closes))
+                row[9] = _sr((c - closes[-idx5]) / closes[-idx5])
                 # 10-bar return
-                row[10] = float(np.clip((c - closes[-min(11, len(closes))]) / closes[-min(11, len(closes))], -0.05, 0.05))
-                # Normalized ATR (14-bar)
+                idx10 = min(11, len(closes))
+                row[10] = _sr((c - closes[-idx10]) / closes[-idx10])
+                # Normalized ATR (14-bar) — scaled by 500
                 if len(df) >= 14:
                     highs = df[high_col].values[-14:]
                     lows = df[low_col].values[-14:]
@@ -307,18 +315,18 @@ class ProbabilisticMHTCNFilter(MHTCNFilter):
                         np.abs(highs - prev_c[:len(highs)]),
                         np.abs(lows - prev_c[:len(lows)]))
                     )
-                    row[11] = float(np.clip(tr.mean() / c, 0, 0.1))
+                    row[11] = float(np.clip(tr.mean() / c * 500.0, 0, 1.0))
                 # RSI (14-bar, normalized to [0,1])
                 if len(closes) >= 15:
                     deltas = np.diff(closes[-15:])
                     gains = np.maximum(deltas, 0).mean()
                     losses = np.abs(np.minimum(deltas, 0)).mean()
                     rs = gains / max(losses, 1e-10)
-                    row[12] = float(rs / (1.0 + rs))  # = RSI/100
-                # Signed momentum
+                    row[12] = float(rs / (1.0 + rs))
+                # Signed momentum (10-bar, same return scale)
                 if len(closes) >= 11:
                     mom = (c - closes[-11]) / closes[-11]
-                    row[13] = float(np.clip(mom * 10, -1.0, 1.0))  # scale and clip
+                    row[13] = _sr(mom)
 
         return row
 
