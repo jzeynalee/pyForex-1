@@ -8,9 +8,9 @@ Trains 4 MH-TCN models (V1/V3 are no-MH-TCN baselines):
     Model D: ProbabilisticTCN + AlphaV2 labels  →  V6
 
 Usage:
-    python -m research.train_mhtcn_variants \
-        --data E:\pyProject\data\raw\EURUSD_H1_latest.csv \
-        --output-dir E:\pyProject\pyForex-assets\models\research \
+    python -m research.train_mhtcn_variants ^
+        --data E:/pyProject/data/raw/EURUSD_H1_latest.csv ^
+        --output-dir E:/pyProject/pyForex-assets/models/research ^
         --epochs 50 --device auto
 """
 
