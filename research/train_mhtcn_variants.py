@@ -621,7 +621,7 @@ def train_probabilistic_tcn(
         "status": "completed",
         "model": "ProbabilisticTCN",
         "output_path": str(output_path),
-        "input_channels": 8,
+        "input_channels": input_channels,
         "train_samples": len(train_ds),
         "val_samples": len(val_ds),
         "test_samples": len(test_ds),
@@ -846,8 +846,8 @@ def main():
     parser.add_argument("--warmup", type=int, default=200)
     parser.add_argument("--device", default="auto")
     parser.add_argument(
-        "--variant", nargs="+", default=None,
-        help="Train specific variant(s) only, e.g. --variant V6 or --variant V2 V6"
+        "--variant", action="append", default=None,
+        help="Train specific variant(s), repeatable: --variant V2 --variant V4"
     )
 
     args = parser.parse_args()
