@@ -160,24 +160,38 @@ class WalkForwardTrainer:
         features: np.ndarray,
         labels: np.ndarray,
     ) -> Tuple[MHTCNDataset, MHTCNDataset, MHTCNDataset]:
-        """Split data chronologically into train/val/test."""
+        """Split data chronologically into train/val/test.
+
+        Each split gets seq_len bars of lookback context from the preceding
+        period (for sequence construction), but labels in that context zone
+        are masked to -1 so no training labels leak into val/test metrics.
+        """
         n = len(features)
+        seq = self.config.sequence_length
         train_end = int(n * self.config.train_ratio)
         val_end = int(n * (self.config.train_ratio + self.config.val_ratio))
 
+        # Train: first 70%
         train_ds = MHTCNDataset(
             features[:train_end], labels[:train_end],
-            seq_len=self.config.sequence_length,
+            seq_len=seq,
             shuffle_labels=self.config.shuffle_labels,
         )
-        val_ds = MHTCNDataset(
-            features[:val_end], labels[:val_end],  # expanding window
-            seq_len=self.config.sequence_length,
-        )
-        test_ds = MHTCNDataset(
-            features[val_end:], labels[val_end:],
-            seq_len=self.config.sequence_length,
-        )
+
+        # Val: provide seq_len context from training period for lookback,
+        # but mask those labels so only val-period labels are evaluated.
+        val_ctx_start = max(0, train_end - seq)
+        val_feat = features[val_ctx_start:val_end]
+        val_lbl = labels[val_ctx_start:val_end].copy()
+        val_lbl[:train_end - val_ctx_start] = -1  # mask training-period labels
+        val_ds = MHTCNDataset(val_feat, val_lbl, seq_len=seq)
+
+        # Test: same approach — context from val period for lookback.
+        test_ctx_start = max(0, val_end - seq)
+        test_feat = features[test_ctx_start:]
+        test_lbl = labels[test_ctx_start:].copy()
+        test_lbl[:val_end - test_ctx_start] = -1  # mask pre-test labels
+        test_ds = MHTCNDataset(test_feat, test_lbl, seq_len=seq)
 
         logger.info(
             f"Splits: train={len(train_ds)}, val={len(val_ds)}, test={len(test_ds)}"
