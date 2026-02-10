@@ -1,20 +1,20 @@
 {
-  "tcn_SCALP_M5": {
-    "profile": "SCALP",
-    "epochs_trained": 30,
-    "best_val_loss": -3.5112086275666496,
-    "checkpoint_path": "E:\\pyProject\\pyForex-1\\checkpoints\\multihead_tcn\\multihead_tcn_SCALP.pth"
+  "tcn_INTRADAY_M15": {
+    "profile": "INTRADAY",
+    "epochs_trained": 19,
+    "best_val_loss": -1.5959292203187943,
+    "checkpoint_path": "E:\\pyProject\\pyForex-1\\checkpoints\\multihead_tcn\\multihead_tcn_INTRADAY.pth"
   },
-  "tcn_SCALP_M15": {
-    "profile": "SCALP",
-    "epochs_trained": 37,
-    "best_val_loss": -2.8025872663215354,
-    "checkpoint_path": "E:\\pyProject\\pyForex-1\\checkpoints\\multihead_tcn\\multihead_tcn_SCALP.pth"
+  "tcn_INTRADAY_H1": {
+    "profile": "INTRADAY",
+    "epochs_trained": 27,
+    "best_val_loss": -1.4249033647425033,
+    "checkpoint_path": "E:\\pyProject\\pyForex-1\\checkpoints\\multihead_tcn\\multihead_tcn_INTRADAY.pth"
   },
-  "tcn_SCALP_H1": {
-    "profile": "SCALP",
-    "epochs_trained": 40,
-    "best_val_loss": -0.4078615124409015,
-    "checkpoint_path": "E:\\pyProject\\pyForex-1\\checkpoints\\multihead_tcn\\multihead_tcn_SCALP.pth"
+  "tcn_INTRADAY_H4": {
+    "profile": "INTRADAY",
+    "epochs_trained": 24,
+    "best_val_loss": -1.2647300464542288,
+    "checkpoint_path": "E:\\pyProject\\pyForex-1\\checkpoints\\multihead_tcn\\multihead_tcn_INTRADAY.pth"
   }
 }
