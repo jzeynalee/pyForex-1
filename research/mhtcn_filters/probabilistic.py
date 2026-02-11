@@ -176,12 +176,14 @@ class ProbabilisticMHTCNFilter(MHTCNFilter):
         # Rolling buffer: each entry is a (N_CHANNELS,) vector
         self._buffer: deque = deque(maxlen=seq_len)
         self._model: Optional[ProbabilisticTCN] = None
+        self._precomputed_rows: Optional[np.ndarray] = None
 
     def name(self) -> str:
         return "Probabilistic_MHTCN"
 
     def reset(self) -> None:
         self._buffer.clear()
+        self._precomputed_rows = None
 
     def _ensure_model(self):
         if self._model is not None:
@@ -266,6 +268,102 @@ class ProbabilisticMHTCNFilter(MHTCNFilter):
                 confidence_decay=0.0,
                 regime_validity=1.0,
             )
+
+    def precompute_buffer_rows(
+        self,
+        alpha_head,
+        regimes: pd.Series,
+        closes: np.ndarray,
+        highs: np.ndarray,
+        lows: np.ndarray,
+    ) -> None:
+        """Vectorize the entire (n_bars, N_CHANNELS) buffer matrix upfront.
+
+        Channels 0-5: category probs from AlphaV2 precomputed scores
+        Channel 6:    alpha probability (max(p_bull, p_bear))
+        Channel 7:    regime scalar
+        Channels 8-13: price-derived features (returns, ATR, RSI, momentum)
+        """
+        n = len(closes)
+        buf = np.full((n, self.N_CHANNELS), 0.5, dtype=np.float32)
+
+        # Channels 0-5: category probabilities
+        from ..feature_pipeline import ALL_CATEGORIES
+        if hasattr(alpha_head, '_precomputed_cat_probs') and alpha_head._precomputed_cat_probs is not None:
+            for i, cat in enumerate(ALL_CATEGORIES):
+                buf[:, i] = alpha_head._precomputed_cat_probs[cat].astype(np.float32)
+
+        # Channel 6: alpha probability = max(p_bull, p_bear)
+        if hasattr(alpha_head, '_precomputed_p_bull') and alpha_head._precomputed_p_bull is not None:
+            p_bull = alpha_head._precomputed_p_bull
+            p_bear = alpha_head._precomputed_p_bear
+            buf[:, 6] = np.maximum(p_bull, p_bear).astype(np.float32)
+
+        # Channel 7: regime scalar
+        regime_map = {
+            RegimeLabel.TRENDING: 0.0,
+            RegimeLabel.RANGING: 0.33,
+            RegimeLabel.VOLATILE: 0.67,
+            RegimeLabel.TRANSITION: 1.0,
+        }
+        for rl, val in regime_map.items():
+            mask = (regimes == rl).values
+            buf[mask, 7] = val
+
+        # Channels 8-13: price-derived features (vectorized)
+        _RET_SCALE = 0.005
+
+        def _scale_ret(r):
+            return np.clip(r / _RET_SCALE, -1.0, 1.0) * 0.5 + 0.5
+
+        # 1-bar return (channel 8)
+        ret1 = np.zeros(n, dtype=np.float64)
+        ret1[1:] = (closes[1:] - closes[:-1]) / np.maximum(closes[:-1], 1e-10)
+        buf[:, 8] = _scale_ret(ret1).astype(np.float32)
+
+        # 5-bar return (channel 9)
+        ret5 = np.zeros(n, dtype=np.float64)
+        ret5[5:] = (closes[5:] - closes[:-5]) / np.maximum(closes[:-5], 1e-10)
+        buf[:, 9] = _scale_ret(ret5).astype(np.float32)
+
+        # 10-bar return (channel 10)
+        ret10 = np.zeros(n, dtype=np.float64)
+        ret10[10:] = (closes[10:] - closes[:-10]) / np.maximum(closes[:-10], 1e-10)
+        buf[:, 10] = _scale_ret(ret10).astype(np.float32)
+
+        # Normalized ATR (channel 11)
+        tr = np.maximum(
+            highs - lows,
+            np.maximum(np.abs(highs - np.roll(closes, 1)),
+                       np.abs(lows - np.roll(closes, 1)))
+        )
+        tr[0] = highs[0] - lows[0]
+        atr14 = pd.Series(tr).rolling(14).mean().values
+        norm_atr = np.clip(atr14 / np.maximum(closes, 1e-10) * 500.0, 0, 1.0)
+        norm_atr = np.nan_to_num(norm_atr, nan=0.5)
+        buf[:, 11] = norm_atr.astype(np.float32)
+
+        # RSI (channel 12)
+        deltas = np.diff(closes, prepend=closes[0])
+        gains = np.maximum(deltas, 0)
+        losses = np.abs(np.minimum(deltas, 0))
+        avg_gain = pd.Series(gains).rolling(14).mean().values
+        avg_loss = pd.Series(losses).rolling(14).mean().values
+        rs = avg_gain / np.maximum(avg_loss, 1e-10)
+        rsi = rs / (1.0 + rs)
+        rsi = np.nan_to_num(rsi, nan=0.5)
+        buf[:, 12] = rsi.astype(np.float32)
+
+        # Momentum sign (channel 13) = 10-bar return scaled
+        buf[:, 13] = buf[:, 10]  # same as 10-bar return
+
+        self._precomputed_rows = buf
+        logger.info(f"MH-TCN: pre-computed {n:,} buffer rows ({self.N_CHANNELS} channels)")
+
+    def feed_bar(self, bar_idx: int) -> None:
+        """O(1) buffer feeding from pre-computed rows."""
+        if self._precomputed_rows is not None and bar_idx < len(self._precomputed_rows):
+            self._buffer.append(self._precomputed_rows[bar_idx])
 
     def _build_prob_row(
         self, signal: AlphaSignal, df: Optional[pd.DataFrame] = None

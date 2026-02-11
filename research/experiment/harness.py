@@ -282,6 +282,40 @@ class _VariantRunner:
         atr = tr.rolling(period).mean().iloc[-1]
         return float(atr) if not np.isnan(atr) else 0.0
 
+    def _run_mhtcn_from_buffer(self, mf) -> MHTCNOutput:
+        """Run MH-TCN model directly from pre-fed buffer (no DataFrame needed)."""
+        if len(mf._buffer) < mf.seq_len:
+            return MHTCNOutput(
+                g_factor=1.0,
+                signal_survival_prob=0.5,
+                confidence_decay=0.0,
+                regime_validity=1.0,
+            )
+        try:
+            mf._ensure_model()
+            import torch
+            window = np.array(list(mf._buffer), dtype=np.float32)
+            x = torch.tensor(window, dtype=torch.float32).unsqueeze(0).to(mf.device)
+            with torch.no_grad():
+                out = mf._model(x)
+            g = float(out["g_factor"].item())
+            surv = float(out["survival"].item())
+            valid = float(out["validity"].item())
+            return MHTCNOutput(
+                g_factor=float(np.clip(g, 0.01, 1.0)),
+                signal_survival_prob=surv,
+                confidence_decay=float(1.0 - surv),
+                regime_validity=valid,
+            )
+        except Exception as e:
+            logger.debug(f"MH-TCN buffer run error: {e}")
+            return MHTCNOutput(
+                g_factor=1.0,
+                signal_survival_prob=0.5,
+                confidence_decay=0.0,
+                regime_validity=1.0,
+            )
+
     def _get_close(self, bar):
         return float(bar.get("close", bar.get("Close", 0)))
 

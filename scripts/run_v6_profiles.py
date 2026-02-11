@@ -39,14 +39,26 @@ PROFILE_CONFIG = {
     "SCALP": {
         "base_tf": "M5",
         "weights": "v6_prob_mhtcn_SCALP_M5.pt",
+        "lookback": 50,
+        "cooldown_bars": 3,
+        "min_probability": 0.50,
+        "directional_edge_min": 0.03,
     },
     "INTRADAY": {
         "base_tf": "M15",
         "weights": "v6_prob_mhtcn_INTRADAY_M15.pt",
+        "lookback": 100,
+        "cooldown_bars": 6,
+        "min_probability": 0.50,
+        "directional_edge_min": 0.03,
     },
     "SWING": {
         "base_tf": "H1",
         "weights": "v6_prob_mhtcn_SWING_H1.pt",
+        "lookback": 200,
+        "cooldown_bars": 10,
+        "min_probability": 0.50,
+        "directional_edge_min": 0.03,
     },
 }
 
@@ -96,12 +108,19 @@ def load_data(path: Path, max_bars: int = 0) -> pd.DataFrame:
     return df
 
 
-def build_v6_variant(weights_path: str, device: str = "cpu") -> VariantConfig:
+def build_v6_variant(
+    weights_path: str,
+    device: str = "cpu",
+    lookback: int = 100,
+    cooldown_bars: int = 6,
+    min_probability: float = 0.50,
+    directional_edge_min: float = 0.03,
+) -> VariantConfig:
     """Build a single V6 variant config with profile-specific weights."""
     alpha = AlphaHeadV2(
-        lookback=100,
+        lookback=lookback,
         min_probability=0.40,
-        directional_edge_min=0.04,
+        directional_edge_min=directional_edge_min,
     )
     mhtcn_filter = ProbabilisticMHTCNFilter(
         seq_len=64,
@@ -121,8 +140,8 @@ def build_v6_variant(weights_path: str, device: str = "cpu") -> VariantConfig:
         min_rr=1.5,
         atr_sl_mult=2.0,
         max_open_trades=1,
-        cooldown_bars=6,
-        min_probability=0.55,
+        cooldown_bars=cooldown_bars,
+        min_probability=min_probability,
     )
 
 
@@ -146,8 +165,15 @@ def run_profile(
     df = load_data(csv_path, max_bars=max_bars)
     logger.info(f"  {len(df):,} bars  |  {df.index[0]} → {df.index[-1]}")
 
-    # Build variant
-    variant = build_v6_variant(str(weights_file), device=device)
+    # Build variant with TF-specific parameters
+    variant = build_v6_variant(
+        str(weights_file),
+        device=device,
+        lookback=cfg.get("lookback", 100),
+        cooldown_bars=cfg.get("cooldown_bars", 6),
+        min_probability=cfg.get("min_probability", 0.50),
+        directional_edge_min=cfg.get("directional_edge_min", 0.03),
+    )
 
     # Run harness
     t0 = time.time()
