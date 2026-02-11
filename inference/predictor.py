@@ -4,7 +4,6 @@ Enhanced Hybrid Predictor with Risk Management Integration
 
 Combines:
 - TCN for time-series predictions (direction, volatility, quantiles, outcomes)
-- ViT for visual chart patterns
 - Price Action for rule-based pattern detection
 - Fusion network for combining modalities
 - Risk management predictions (Phase 1 multi-head outputs)
@@ -55,7 +54,7 @@ class PredictionResult(NamedTuple):
     p_short: Optional[float] = None
     
     # Modality info
-    gate_weights: Optional[np.ndarray] = None  # [seq, vit, price_action]
+    gate_weights: Optional[np.ndarray] = None  # [seq, price_action]
     features: Optional[np.ndarray] = None      # Hidden features
 
 
@@ -481,7 +480,7 @@ class RiskAwareTCNPredictor:
 
 class HybridPredictor:
     """
-    Full hybrid predictor combining TCN + ViT + Price Action + Fusion.
+    Full hybrid predictor combining TCN + Price Action + Fusion.
     
     This is the production predictor that combines all modalities
     with risk management outputs.
@@ -491,9 +490,9 @@ class HybridPredictor:
         self,
         config: Optional[PredictorConfig] = None,
         tcn_weights: Optional[str] = None,
-        vit_weights: Optional[str] = None,
         price_action_weights: Optional[str] = None,
-        fusion_weights: Optional[str] = None
+        fusion_weights: Optional[str] = None,
+        vit_weights: Optional[str] = None,  # ignored, kept for backward compat
     ):
         self.config = config or PredictorConfig()
         self.device = get_device(self.config.device)
@@ -503,27 +502,16 @@ class HybridPredictor:
         if tcn_weights:
             self.tcn_predictor.load_weights(tcn_weights)
         
-        # Vision components (optional)
-        self.vit_model = None
         self.price_action_model = None
         self.fusion_model = None
-        
-        if self.config.use_vision:
-            self._init_vision(vit_weights)
         
         if self.config.use_price_action:
             self._init_price_action(price_action_weights)
 
-        if (self.vit_model or self.price_action_model) and fusion_weights and Path(fusion_weights).exists():
+        if self.price_action_model and fusion_weights and Path(fusion_weights).exists():
             self._init_fusion(fusion_weights)
         
         logger.info("HybridPredictor initialized")
-    
-    def _init_vision(self, weights_path: Optional[str]):
-        """Initialize ViT model - DISABLED in v2.0."""
-        # ViT has been removed in v2.0 due to weak performance
-        logger.info("ViT model disabled in v2.0 - using MH-TCN + Price Action only")
-        self.vit_model = None
     
     def _init_price_action(self, weights_path: Optional[str]):
         """Initialize Price Action pattern detector."""
@@ -545,20 +533,6 @@ class HybridPredictor:
             from models.fusion import FusionNet
             
             seq_dim = 64  # TCN output dimension
-            vit_dim = 0
-            if self.vit_model:
-                try:
-                    vit_dim = int(getattr(self.vit_model, 'feature_dim', 0) or 0)
-                except Exception:
-                    vit_dim = 0
-                if vit_dim <= 0:
-                    try:
-                        vit_backbone = getattr(self.vit_model, 'vit', None)
-                        vit_dim = int(getattr(vit_backbone, 'num_features', 0) or 0)
-                    except Exception:
-                        vit_dim = 0
-                if vit_dim <= 0:
-                    vit_dim = 768
             price_action_dim = 0
             if self.price_action_model:
                 try:
@@ -573,8 +547,7 @@ class HybridPredictor:
             
             self.fusion_model = FusionNet(
                 seq_dim=seq_dim,
-                vit_dim=vit_dim,
-                yolo_dim=price_action_dim  # Reuse yolo_dim parameter for price action
+                price_action_dim=price_action_dim,
             ).to(self.device)
             
             if weights_path:
@@ -598,7 +571,7 @@ class HybridPredictor:
         
         Args:
             features: Time-series features for TCN
-            chart_image: Optional chart image for ViT/YOLO
+            chart_image: Optional OHLCV data for Price Action extraction
             return_all: Return all intermediate outputs
         
         Returns:
@@ -607,16 +580,12 @@ class HybridPredictor:
         # Get TCN prediction with risk parameters
         tcn_result = self.tcn_predictor.predict(features, return_features=True)
         
-        # If no vision or no image, return TCN result
-        if not self.config.use_vision or chart_image is None:
+        # If no price action or no data, return TCN result
+        if not self.config.use_price_action or chart_image is None:
             return tcn_result
         
-        # Get vision features
-        vit_features = None
+        # Get price action features
         price_action_features = None
-        
-        if self.vit_model and chart_image is not None:
-            vit_features = self._get_vit_features(chart_image)
         
         if self.price_action_model and chart_image is not None:
             price_action_features = self._get_price_action_features(chart_image)
@@ -625,7 +594,6 @@ class HybridPredictor:
         if self.fusion_model and tcn_result.features is not None:
             fused_probs, gate_weights = self._fuse_predictions(
                 tcn_result.features,
-                vit_features,
                 price_action_features
             )
             
@@ -645,48 +613,6 @@ class HybridPredictor:
             )
         
         return tcn_result
-    
-    def _get_vit_features(self, image: np.ndarray) -> np.ndarray:
-        """Extract features from ViT."""
-        # Preprocess image
-        if image.max() > 1:
-            image = image / 255.0
-        
-        # Add batch and channel dimensions if needed
-        if image.ndim == 2:
-            image = np.stack([image] * 3, axis=0)
-        elif image.ndim == 3 and image.shape[-1] == 3:
-            image = np.transpose(image, (2, 0, 1))
-        
-        x = torch.tensor(image, dtype=torch.float32).unsqueeze(0).to(self.device)
-        
-        with torch.no_grad():
-            # Prefer timm-style forward_features() to get embeddings.
-            try:
-                vit_backbone = getattr(self.vit_model, 'vit', None)
-                if vit_backbone is not None and hasattr(vit_backbone, 'forward_features'):
-                    feats = vit_backbone.forward_features(x)
-                elif hasattr(self.vit_model, 'forward_features'):
-                    feats = self.vit_model.forward_features(x)
-                else:
-                    feats = None
-            except Exception:
-                feats = None
-
-            if feats is None:
-                # Fallback: use the model forward output (may be logits; still better than crashing).
-                feats = self.vit_model(x)
-
-            # Normalize common timm output shapes into [B, D].
-            if isinstance(feats, dict):
-                if 'cls_token' in feats:
-                    feats = feats['cls_token']
-                elif 'x' in feats:
-                    feats = feats['x']
-            if hasattr(feats, 'dim') and feats.dim() == 3:
-                feats = feats[:, 0, :]
-
-        return feats.cpu().numpy()[0]
     
     def _get_price_action_features(self, image: np.ndarray) -> np.ndarray:
         """Extract pattern features from Price Action analysis."""
@@ -710,25 +636,18 @@ class HybridPredictor:
     def _fuse_predictions(
         self,
         seq_features: np.ndarray,
-        vit_features: Optional[np.ndarray],
         price_action_features: Optional[np.ndarray]
     ) -> Tuple[np.ndarray, np.ndarray]:
-        """Fuse features from all modalities."""
-        # Prepare inputs
+        """Fuse features from TCN + Price Action."""
         seq_tensor = torch.tensor(seq_features, dtype=torch.float32).unsqueeze(0).to(self.device)
-        
-        vit_tensor = None
-        if vit_features is not None:
-            vit_tensor = torch.tensor(vit_features, dtype=torch.float32).unsqueeze(0).to(self.device)
         
         price_action_tensor = None
         if price_action_features is not None:
             price_action_tensor = torch.tensor(price_action_features, dtype=torch.float32).unsqueeze(0).to(self.device)
         
         with torch.no_grad():
-            logits, gate_weights = self.fusion_model(
-                seq_tensor, vit_tensor, price_action_tensor,
-                return_gate_weights=True
+            logits, gate_weights = self.fusion_model.forward_with_gates(
+                seq_tensor, price_action_tensor,
             )
             probs = F.softmax(logits, dim=-1)
             
@@ -751,7 +670,6 @@ def create_predictor(
     Args:
         profile: Trading profile ('SCALP', 'INTRADAY', 'SWING')
         weights_path: Path to model weights
-        use_vision: Enable ViT
         use_price_action: Enable Price Action patterns
     
     Returns:

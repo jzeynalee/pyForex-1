@@ -1,5 +1,5 @@
 """
-Production-Grade Decision/Fusion Layer for Price Action + ViT + TCN
+Production-Grade Decision/Fusion Layer for Price Action + TCN
 
 Implements the sophisticated multi-stage fusion architecture with:
 1. Feature alignment to shared semantic space
@@ -31,7 +31,7 @@ class DecisionOutput:
     direction_probs: torch.Tensor   # (B, 3)
     direction_label: torch.Tensor   # (B,) - argmax
     confidence: torch.Tensor        # (B, 1) - [0, 1]
-    gate_weights: torch.Tensor      # (B, 3) - [price_action, vit, tcn]
+    gate_weights: torch.Tensor      # (B, 2) - [price_action, tcn]
     regime_probs: torch.Tensor      # (B, 3) - [trend, range, volatile]
     attention_weights: torch.Tensor # (B, 1, N) - Price Action attention
     fused_features: torch.Tensor    # (B, D_f)
@@ -44,7 +44,7 @@ class DecisionOutput:
 class FeatureAlignment(nn.Module):
     """Stage 1: Project all modalities to shared semantic space."""
     
-    def __init__(self, price_action_dim: int, vit_dim: int, tcn_dim: int, hidden_dim: int = 256):
+    def __init__(self, price_action_dim: int, tcn_dim: int, hidden_dim: int = 256):
         super().__init__()
         
         self.hidden_dim = hidden_dim
@@ -57,13 +57,6 @@ class FeatureAlignment(nn.Module):
             nn.Dropout(0.1)
         )
         
-        self.vit_proj = nn.Sequential(
-            nn.Linear(vit_dim, hidden_dim),
-            nn.LayerNorm(hidden_dim),
-            nn.GELU(),
-            nn.Dropout(0.1)
-        )
-        
         self.tcn_proj = nn.Sequential(
             nn.Linear(tcn_dim, hidden_dim),
             nn.LayerNorm(hidden_dim),
@@ -71,15 +64,14 @@ class FeatureAlignment(nn.Module):
             nn.Dropout(0.1)
         )
     
-    def forward(self, price_action_feat, vit_feat, tcn_feat):
+    def forward(self, price_action_feat, tcn_feat):
         """
         Args:
             price_action_feat: (B, N, D_p) or (B, D_p) - Price Action features
-            vit_feat: (B, D_v) - ViT CLS token
             tcn_feat: (B, D_t) - TCN features
         
         Returns:
-            Tuple of (price_action_proj, vit_proj, tcn_proj) all in (B, *, D_f)
+            Tuple of (price_action_proj, tcn_proj) all in (B, *, D_f)
         """
         # Handle different Price Action input shapes
         if price_action_feat.dim() == 3:
@@ -89,15 +81,14 @@ class FeatureAlignment(nn.Module):
             # (B, D_p) -> (B, 1, D_f) for consistency
             price_action_proj = self.price_action_proj(price_action_feat).unsqueeze(1)
         
-        # Project ViT and TCN
-        vit_proj = self.vit_proj(vit_feat).unsqueeze(1)  # (B, 1, D_f)
+        # Project TCN
         tcn_proj = self.tcn_proj(tcn_feat).unsqueeze(1)  # (B, 1, D_f)
         
-        return price_action_proj, vit_proj, tcn_proj
+        return price_action_proj, tcn_proj
 
 
 class StructuralAttention(nn.Module):
-    """Stage 2: Cross-attention from ViT/TCN to Price Action structures."""
+    """Stage 2: Cross-attention from TCN to Price Action structures."""
     
     def __init__(self, hidden_dim: int, num_heads: int = 4):
         super().__init__()
@@ -109,7 +100,7 @@ class StructuralAttention(nn.Module):
         assert hidden_dim % num_heads == 0, "hidden_dim must be divisible by num_heads"
         
         # Multi-head attention components
-        self.q_proj = nn.Linear(hidden_dim * 2, hidden_dim)
+        self.q_proj = nn.Linear(hidden_dim, hidden_dim)
         self.k_proj = nn.Linear(hidden_dim, hidden_dim)
         self.v_proj = nn.Linear(hidden_dim, hidden_dim)
         self.out_proj = nn.Linear(hidden_dim, hidden_dim)
@@ -117,21 +108,20 @@ class StructuralAttention(nn.Module):
         self.dropout = nn.Dropout(0.1)
         self.scale = self.head_dim ** -0.5
     
-    def forward(self, price_action_feat, vit_feat, tcn_feat):
+    def forward(self, price_action_feat, tcn_feat):
         """
         Args:
             price_action_feat: (B, N, D_f) - Price Action features (keys/values)
-            vit_feat: (B, 1, D_f) - ViT features (query)
             tcn_feat: (B, 1, D_f) - TCN features (query)
         
         Returns:
-            attended_vit, attended_tcn: (B, 1, D_f) each
+            attended: (B, 1, D_f)
             attention_weights: (B, 1, N) - for explainability
         """
         batch_size, n_price_action, _ = price_action_feat.shape
         
-        # Combine ViT and TCN as query
-        query = torch.cat([vit_feat.squeeze(1), tcn_feat.squeeze(1)], dim=1)  # (B, 2*D_f)
+        # TCN as query
+        query = tcn_feat.squeeze(1)  # (B, D_f)
         query = self.q_proj(query)  # (B, D_f)
         query = query.view(batch_size, 1, self.num_heads, self.head_dim).transpose(1, 2)  # (B, H, 1, d)
         
@@ -165,24 +155,22 @@ class ConfidenceAwareGating(nn.Module):
         super().__init__()
         
         self.gate_mlp = nn.Sequential(
-            nn.Linear(5, hidden_dim // 2),  # 5 quality signals
+            nn.Linear(3, hidden_dim // 2),  # 3 quality signals
             nn.ReLU(),
             nn.Dropout(0.1),
-            nn.Linear(hidden_dim // 2, 3),  # 3 modalities
+            nn.Linear(hidden_dim // 2, 2),  # 2 modalities: PA + TCN
             nn.Softmax(dim=1)
         )
     
-    def forward(self, price_action_conf, vit_entropy, tcn_stability, attn_norm_vit, attn_norm_tcn):
+    def forward(self, price_action_conf, tcn_stability, attn_norm_tcn):
         """
         Args:
             price_action_conf: (B,) or (B, N) - Price Action pattern confidences
-            vit_entropy: (B, 1) - ViT attention entropy
             tcn_stability: (B, 1) - TCN prediction stability
-            attn_norm_vit: (B, 1) - L2 norm of attended ViT features
             attn_norm_tcn: (B, 1) - L2 norm of attended TCN features
         
         Returns:
-            gate_weights: (B, 3) - [price_action, vit, tcn]
+            gate_weights: (B, 2) - [price_action, tcn]
         """
         # Process Price Action confidences
         if price_action_conf.dim() > 1:
@@ -190,19 +178,15 @@ class ConfidenceAwareGating(nn.Module):
         
         # Normalize inputs
         price_action_conf = torch.clamp(price_action_conf, 0, 1)
-        vit_entropy = torch.clamp(vit_entropy / 10, 0, 1)  # Normalize entropy
         tcn_stability = torch.clamp(1 - tcn_stability, 0, 1)  # Invert stability (higher = better)
-        attn_norm_vit = torch.clamp(attn_norm_vit / 10, 0, 1)
         attn_norm_tcn = torch.clamp(attn_norm_tcn / 10, 0, 1)
         
         # Concatenate quality signals
         gate_input = torch.stack([
             price_action_conf,
-            vit_entropy.squeeze(1),
             tcn_stability.squeeze(1),
-            attn_norm_vit.squeeze(1),
             attn_norm_tcn.squeeze(1)
-        ], dim=1)  # (B, 5)      
+        ], dim=1)  # (B, 3)      
         return self.gate_mlp(gate_input)
 
 
@@ -212,7 +196,7 @@ class RegimeConditioning(nn.Module):
     def __init__(self, hidden_dim: int):
         super().__init__()
         
-        # Regime classifier from ViT features
+        # Regime classifier from TCN features
         self.regime_head = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim // 2),
             nn.ReLU(),
@@ -221,23 +205,23 @@ class RegimeConditioning(nn.Module):
             nn.Softmax(dim=1)
         )
         
-        # Regime masks (learnable)
-        self.register_buffer('trend_mask', torch.tensor([0.2, 0.5, 0.3]))
-        self.register_buffer('range_mask', torch.tensor([0.6, 0.2, 0.2]))
-        self.register_buffer('volatile_mask', torch.tensor([0.2, 0.2, 0.6]))
+        # Regime masks (learnable) for 2-modality gating
+        self.register_buffer('trend_mask', torch.tensor([0.3, 0.7]))
+        self.register_buffer('range_mask', torch.tensor([0.7, 0.3]))
+        self.register_buffer('volatile_mask', torch.tensor([0.4, 0.6]))
     
-    def forward(self, vit_features, gate_weights):
+    def forward(self, tcn_features, gate_weights):
         """
         Args:
-            vit_features: (B, 1, D_f) - ViT features
-            gate_weights: (B, 3) - Original gate weights
+            tcn_features: (B, 1, D_f) - TCN features
+            gate_weights: (B, 2) - Original gate weights
         
         Returns:
-            adjusted_gates: (B, 3) - Regime-adjusted gates
+            adjusted_gates: (B, 2) - Regime-adjusted gates
             regime_probs: (B, 3) - Regime probabilities
         """
         # Classify regime
-        regime_probs = self.regime_head(vit_features.squeeze(1))
+        regime_probs = self.regime_head(tcn_features.squeeze(1))
         
         # Weight regime masks by probabilities
         adjusted_mask = (
@@ -332,14 +316,13 @@ class DecisionFusionLayer(nn.Module):
     """
     Complete Decision/Fusion Layer implementing the production-grade architecture.
     
-    Integrates Price Action + ViT + TCN with sophisticated multi-stage fusion,
+    Integrates Price Action + TCN with sophisticated multi-stage fusion,
     confidence-aware gating, regime conditioning, and multi-task outputs.
     """
     
     def __init__(
         self,
         price_action_dim: int = 44,  # Updated to match PriceActionPatternExtractor
-        vit_dim: int = 768,
         tcn_dim: int = 64,
         hidden_dim: int = 256,
         num_classes: int = 3,
@@ -353,7 +336,7 @@ class DecisionFusionLayer(nn.Module):
         self.use_regime_conditioning = use_regime_conditioning
         
         # Stage 1: Feature alignment
-        self.alignment = FeatureAlignment(price_action_dim, vit_dim, tcn_dim, hidden_dim)
+        self.alignment = FeatureAlignment(price_action_dim, tcn_dim, hidden_dim)
         
         # Stage 2: Structural attention
         self.attention = StructuralAttention(hidden_dim)
@@ -377,8 +360,6 @@ class DecisionFusionLayer(nn.Module):
         self,
         price_action_features: torch.Tensor,
         price_action_confidence: torch.Tensor,
-        vit_features: torch.Tensor,
-        vit_entropy: torch.Tensor,
         tcn_features: torch.Tensor,
         tcn_stability: torch.Tensor,
         apply_risk_management: bool = False,
@@ -390,8 +371,6 @@ class DecisionFusionLayer(nn.Module):
         Args:
             price_action_features: (B, N, D_p) or (B, D_p) - Price Action pattern features
             price_action_confidence: (B,) or (B, N) - Price Action pattern confidences
-            vit_features: (B, D_v) - ViT CLS token features
-            vit_entropy: (B, 1) - ViT attention entropy
             tcn_features: (B, D_t) - TCN sequential features
             tcn_stability: (B, 1) - TCN prediction stability
             apply_risk_management: Whether to apply risk calculations
@@ -403,26 +382,23 @@ class DecisionFusionLayer(nn.Module):
         batch_size = price_action_features.size(0)
         
         # Stage 1: Feature alignment
-        price_action_proj, vit_proj, tcn_proj = self.alignment(price_action_features, vit_features, tcn_features)
+        price_action_proj, tcn_proj = self.alignment(price_action_features, tcn_features)
         
         # Stage 2: Structural attention
-        attended_features, attention_weights = self.attention(price_action_proj, vit_proj, tcn_proj)
+        attended_features, attention_weights = self.attention(price_action_proj, tcn_proj)
         
         # Stage 3: Confidence-aware gating
-        attn_norm_vit = torch.norm(attended_features, p=2, dim=-1)
         attn_norm_tcn = torch.norm(attended_features, p=2, dim=-1)
         
         gate_weights = self.gating(
             price_action_confidence,
-            vit_entropy,
             tcn_stability,
-            attn_norm_vit,
             attn_norm_tcn
         )
         
         # Stage 4: Regime conditioning (optional)
         if self.use_regime_conditioning:
-            gate_weights, regime_probs = self.regime(vit_proj, gate_weights)
+            gate_weights, regime_probs = self.regime(tcn_proj, gate_weights)
         else:
             regime_probs = torch.zeros(batch_size, 3, device=price_action_features.device)
             regime_probs[:, 1] = 1.0  # Default to range regime
@@ -437,8 +413,7 @@ class DecisionFusionLayer(nn.Module):
         
         fused_features = (
             gate_weights[:, 0:1] * price_action_weighted +
-            gate_weights[:, 1:2] * attended_features.squeeze(1) +
-            gate_weights[:, 2:3] * tcn_proj.squeeze(1)
+            gate_weights[:, 1:2] * tcn_proj.squeeze(1)
         )
         
         # Stage 5: Multi-task heads
@@ -492,9 +467,8 @@ class DecisionFusionLayer(nn.Module):
             confidence = decision_output.confidence[i].item()
             
             # Modality importance
-            yolo_w = decision_output.gate_weights[i, 0].item()
-            vit_w = decision_output.gate_weights[i, 1].item()
-            tcn_w = decision_output.gate_weights[i, 2].item()
+            pa_w = decision_output.gate_weights[i, 0].item()
+            tcn_w = decision_output.gate_weights[i, 1].item()
             
             # Regime
             regime = ['TREND', 'RANGE', 'VOLATILE'][torch.argmax(decision_output.regime_probs[i]).item()]
@@ -504,11 +478,10 @@ class DecisionFusionLayer(nn.Module):
                 'confidence': f"{confidence:.3f}",
                 'regime': regime,
                 'modality_weights': {
-                    'YOLO (patterns)': f"{yolo_w:.3f}",
-                    'ViT (context)': f"{vit_w:.3f}",
+                    'PriceAction (patterns)': f"{pa_w:.3f}",
                     'TCN (temporal)': f"{tcn_w:.3f}"
                 },
-                'dominant_modality': ['YOLO', 'ViT', 'TCN'][torch.argmax(decision_output.gate_weights[i]).item()]
+                'dominant_modality': ['PriceAction', 'TCN'][torch.argmax(decision_output.gate_weights[i]).item()]
             }
             
             explanations.append(explanation)
@@ -522,8 +495,7 @@ class DecisionFusionLayer(nn.Module):
 
 def create_decision_fusion(
     fusion_type: str = "production",
-    yolo_dim: int = 25,
-    vit_dim: int = 768,
+    price_action_dim: int = 44,
     tcn_dim: int = 64,
     hidden_dim: int = 256,
     **kwargs
@@ -533,8 +505,7 @@ def create_decision_fusion(
     
     Args:
         fusion_type: Type of fusion ('production', 'simple', 'attention')
-        yolo_dim: YOLO feature dimension
-        vit_dim: ViT feature dimension
+        price_action_dim: Price Action feature dimension
         tcn_dim: TCN feature dimension
         hidden_dim: Hidden dimension for projections
         **kwargs: Additional arguments
@@ -544,8 +515,7 @@ def create_decision_fusion(
     """
     if fusion_type == "production":
         return DecisionFusionLayer(
-            yolo_dim=yolo_dim,
-            vit_dim=vit_dim,
+            price_action_dim=price_action_dim,
             tcn_dim=tcn_dim,
             hidden_dim=hidden_dim,
             **kwargs
@@ -556,7 +526,6 @@ def create_decision_fusion(
         return create_fusion_model(
             fusion_type=fusion_type,
             seq_dim=tcn_dim,
-            vit_dim=vit_dim,
-            yolo_dim=yolo_dim,
+            price_action_dim=price_action_dim,
             **kwargs
         )

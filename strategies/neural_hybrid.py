@@ -3,7 +3,7 @@
 Neural Hybrid Strategy with Full Risk Management (v2)
 
 Integrates ALL 5 PHASES:
-- Phase 1: TCN/ViT/YOLO prediction pipeline
+- Phase 1: TCN + Price Action prediction pipeline
 - Phase 2: Risk calculations (via decision engine)
 - Phase 3: Meta-labeling (via decision engine)
 - Phase 4: Exit advisor integration hooks
@@ -124,7 +124,6 @@ class StrategyConfig:
     
     # Model paths
     tcn_weights: str = 'models/weights/tcn_best.pt'
-    vit_weights: Optional[str] = None  # DISABLED - ViT removed for weak performance
     yolo_weights: Optional[str] = None  # Disabled - replaced by price action
     fusion_weights: Optional[str] = 'models/weights/fusion_best.pt'
     meta_model_path: Optional[str] = 'models/weights/meta_model.joblib'
@@ -132,7 +131,7 @@ class StrategyConfig:
     
     # Feature settings
     sequence_length: int = 60
-    use_vision: bool = False  # DISABLED - ViT removed for weak performance
+    use_vision: bool = False
     use_price_action: bool = True
     
     # Risk settings - RAISED for better trade quality
@@ -218,24 +217,6 @@ class StrategyConfig:
                 if candidate.exists():
                     self.tcn_weights = str(candidate)
                     break
-
-        if bool(self.use_vision):
-            vit_name = {
-                'SCALP': 'vit_SCALP.pth',
-                'INTRADAY': 'vit_INTRADAY.pth',
-                'SWING': 'vit_SWING.pth',
-            }.get(self.profile, 'vit_INTRADAY.pth')
-            if not _exists(self.vit_weights) or str(self.vit_weights).startswith('models/weights/'):
-                vit_candidates = [
-                    weights_dir / vit_name,
-                    weights_dir / 'vit_INTRADAY.pth',
-                ]
-                for vit_candidate in vit_candidates:
-                    if vit_candidate.exists():
-                        self.vit_weights = str(vit_candidate)
-                        break
-        else:
-            self.vit_weights = None
 
         # Fusion weights are not shipped in the extracted zip; keep disabled unless explicitly provided.
         if not _exists(self.fusion_weights):

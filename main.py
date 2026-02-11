@@ -206,7 +206,7 @@ class SystemChecker:
         ]
         
         optional = [
-            ("timm", "timm (for ViT)"),
+            # ("timm", "timm - removed"),
             ("ultralytics", "Ultralytics (for YOLO)"),
             ("xgboost", "XGBoost"),
         ]
@@ -325,7 +325,6 @@ class SystemChecker:
         weight_files = [
             "multihead_tcn_INTRADAY.pth",
             "multihead_tcn_INTRADAY_pa_v1.pth",
-            "vit_INTRADAY.pth",
             "scaler.joblib",
         ]
         for wf in weight_files:
@@ -1476,9 +1475,10 @@ def cmd_predict(args, logger: logging.Logger):
 
         if result.gate_weights is not None:
             print(f"\n  Gate Weights (modality importance):")
-            modalities = ['TCN', 'ViT', 'YOLO']
+            modalities = ['TCN', 'PriceAction']
             for i, name in enumerate(modalities):
-                print(f"    {name}: {result.gate_weights[i]:.2%}")
+                if i < len(result.gate_weights):
+                    print(f"    {name}: {result.gate_weights[i]:.2%}")
 
         if getattr(result, 'p_long', None) is not None and getattr(result, 'p_short', None) is not None:
             print(f"\n  TP-before-SL Probabilities:")
@@ -1525,44 +1525,9 @@ def cmd_generate(args, logger: logging.Logger):
             else:
                 generator.generate_from_csv(args.data, max_samples=args.samples)
         
-        elif dataset_type == "vit":
-            from utils.vit_dataset_generator import ViTDatasetGenerator, FuturePriceLabeler
-            
-            labeler = FuturePriceLabeler(forward_bars=10, threshold_pct=0.5)
-            
-            generator = ViTDatasetGenerator(
-                output_dir=str(output_dir),
-                image_size=args.image_size,
-                window_size=args.window,
-                stride=args.stride,
-                labeler=labeler,
-            )
-            
-            if args.synthetic or not args.data:
-                generator.generate_synthetic(n_samples=args.samples)
-            else:
-                generator.generate_from_csv(args.data, max_samples=args.samples)
-        
-        elif dataset_type == "both":
-            # Generate both datasets
-            logger.info("Generating YOLO dataset...")
-            cmd_generate_args = argparse.Namespace(
-                dataset="yolo", data=args.data, output=str(output_dir / "yolo"),
-                samples=args.samples, synthetic=args.synthetic,
-                image_size=256, window=args.window, stride=10, dry_run=False,
-            )
-            cmd_generate(cmd_generate_args, logger)
-            
-            logger.info("Generating ViT dataset...")
-            cmd_generate_args.dataset = "vit"
-            cmd_generate_args.output = str(output_dir / "vit")
-            cmd_generate_args.image_size = 224
-            cmd_generate_args.stride = 5
-            cmd_generate(cmd_generate_args, logger)
-        
         else:
             logger.error(f"Unknown dataset type: {dataset_type}")
-            logger.info("Available: yolo, vit, both")
+            logger.info("Available: yolo")
             return 1
         
         logger.info(f"✅ Dataset generated at {output_dir}")
@@ -1602,7 +1567,7 @@ Examples:
   %(prog)s alpha-backtest --data data/EURUSD_H1.csv --layer alpha_only
   %(prog)s train tcn --epochs 50
   %(prog)s predict --symbol EURUSD
-  %(prog)s generate vit --synthetic --samples 10000
+  %(prog)s generate yolo --synthetic --samples 10000
   %(prog)s status --verbose
         """,
     )
@@ -1710,7 +1675,7 @@ Examples:
         type=int,
         help="Optional cap on number of candles (use most recent N) for faster backtests",
     )
-    bt_parser.add_argument("--no-vision", action="store_true", help="Disable ViT vision model for backtest")
+    bt_parser.add_argument("--no-vision", action="store_true", help="Disable vision model for backtest (legacy, no-op)")
     bt_parser.add_argument("--no-yolo", action="store_true", help="Disable YOLO model for backtest")
     bt_parser.add_argument(
         "--min-confidence",
@@ -1853,11 +1818,11 @@ Examples:
     gen_parser = subparsers.add_parser(
         "generate",
         help="Generate training dataset",
-        description="Generate YOLO or ViT training datasets",
+        description="Generate YOLO training datasets",
     )
     gen_parser.add_argument(
         "dataset",
-        choices=["yolo", "vit", "both"],
+        choices=["yolo"],
         help="Dataset type to generate",
     )
     gen_parser.add_argument("--data", type=str, help="Source OHLCV CSV file")

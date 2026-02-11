@@ -5,13 +5,10 @@ Main Dataset Generation Script for pyForex.
 
 Generates training datasets for:
 1. YOLO - Candlestick pattern detection
-2. ViT - Trend classification
 
 Usage:
     python generate_dataset.py --synthetic --samples 10000 --output datasets/
     python generate_dataset.py --data data/EURUSD_H1.csv --output datasets/
-    python generate_dataset.py --yolo-only --synthetic --samples 3000
-    python generate_dataset.py --vit-only --synthetic --samples 5000
 """
 
 import argparse
@@ -23,14 +20,13 @@ import json
 from .candle_to_image import CandlestickRenderer, candle_image
 from .pattern_detector import CandlestickPatternDetector, PATTERN_NAMES
 from .yolo_dataset_generator import YOLODatasetGenerator
-from .vit_dataset_generator import ViTDatasetGenerator, FuturePriceLabeler
 
 
 def print_banner():
     print("""
 ╔═══════════════════════════════════════════════════════════════╗
 ║         pyForex Dataset Generator v1.0                        ║
-║         Generate training data for YOLO & ViT models          ║
+║         Generate training data for YOLO models                ║
 ╚═══════════════════════════════════════════════════════════════╝
 """)
 
@@ -56,31 +52,6 @@ def generate_yolo_dataset(data_path, output_dir, samples, synthetic, image_size=
     return stats
 
 
-def generate_vit_dataset(data_path, output_dir, samples, synthetic, image_size=224, window_size=60):
-    """Generate ViT classification dataset."""
-    print("\n🔮 Generating ViT Dataset...")
-    print("-" * 50)
-    
-    labeler = FuturePriceLabeler(forward_bars=10, threshold_pct=0.5)
-    
-    generator = ViTDatasetGenerator(
-        output_dir=output_dir,
-        image_size=image_size,
-        window_size=window_size,
-        stride=5,
-        val_split=0.2,
-        labeler=labeler,
-        include_volume=True,
-    )
-    
-    if synthetic:
-        stats = generator.generate_synthetic(n_samples=samples, symbol="SYN", class_balance=(0.33, 0.34, 0.33))
-    else:
-        stats = generator.generate_from_csv(data_path, max_samples=samples)
-    
-    return stats
-
-
 def save_stats(stats, output_path):
     """Save generation statistics to JSON."""
     with open(output_path, 'w') as f:
@@ -99,11 +70,8 @@ def main():
     parser.add_argument('--data', type=str, help='Path to OHLCV CSV file')
     parser.add_argument('--synthetic', action='store_true', help='Generate synthetic data')
     parser.add_argument('--output', type=str, default='datasets', help='Output directory')
-    parser.add_argument('--yolo-only', action='store_true', help='Generate only YOLO dataset')
-    parser.add_argument('--vit-only', action='store_true', help='Generate only ViT dataset')
     parser.add_argument('--samples', type=int, default=5000, help='Number of samples')
     parser.add_argument('--yolo-size', type=int, default=256, help='YOLO image size')
-    parser.add_argument('--vit-size', type=int, default=224, help='ViT image size')
     parser.add_argument('--window', type=int, default=60, help='Candles per image')
     
     args = parser.parse_args()
@@ -120,38 +88,22 @@ def main():
     output_base = Path(args.output)
     output_base.mkdir(parents=True, exist_ok=True)
     
-    generate_yolo = not args.vit_only
-    generate_vit = not args.yolo_only
-    
     all_stats = {
         'generated_at': datetime.now().isoformat(),
         'source': 'synthetic' if args.synthetic else args.data,
         'samples_requested': args.samples,
     }
     
-    if generate_yolo:
-        yolo_output = output_base / "yolo"
-        yolo_stats = generate_yolo_dataset(
+    yolo_output = output_base / "yolo"
+    yolo_stats = generate_yolo_dataset(
             data_path=args.data,
             output_dir=str(yolo_output),
             samples=args.samples,
             synthetic=args.synthetic,
             image_size=args.yolo_size,
             window_size=args.window,
-        )
-        all_stats['yolo'] = yolo_stats
-    
-    if generate_vit:
-        vit_output = output_base / "vit"
-        vit_stats = generate_vit_dataset(
-            data_path=args.data,
-            output_dir=str(vit_output),
-            samples=args.samples,
-            synthetic=args.synthetic,
-            image_size=args.vit_size,
-            window_size=args.window,
-        )
-        all_stats['vit'] = vit_stats
+    )
+    all_stats['yolo'] = yolo_stats
     
     stats_path = output_base / "generation_stats.json"
     save_stats(all_stats, str(stats_path))
@@ -161,29 +113,15 @@ def main():
     print("=" * 60)
     print(f"📁 Output directory: {output_base.absolute()}")
     
-    if generate_yolo:
-        print(f"\n🎯 YOLO Dataset: {output_base / 'yolo'}")
-        print(f"   Train: {all_stats['yolo'].get('train', 'N/A')} images")
-        print(f"   Val: {all_stats['yolo'].get('val', 'N/A')} images")
-    
-    if generate_vit:
-        print(f"\n🔮 ViT Dataset: {output_base / 'vit'}")
-        vit_train = all_stats['vit'].get('train', {})
-        vit_val = all_stats['vit'].get('val', {})
-        print(f"   Train: {vit_train.get('total', 'N/A')} images")
-        print(f"   Val: {vit_val.get('total', 'N/A')} images")
+    print(f"\n🎯 YOLO Dataset: {output_base / 'yolo'}")
+    print(f"   Train: {all_stats['yolo'].get('train', 'N/A')} images")
+    print(f"   Val: {all_stats['yolo'].get('val', 'N/A')} images")
     
     print("\n" + "=" * 60)
     print("\n📖 Next Steps:")
-    if generate_yolo:
-        print(f"""
+    print(f"""
    YOLO Training:
    $ yolo detect train data={output_base}/yolo/data.yaml model=yolov8n.pt epochs=80
-""")
-    if generate_vit:
-        print(f"""
-   ViT Training:
-   $ python training/train_vit.py --data_dir {output_base}/vit --epochs 30
 """)
 
 

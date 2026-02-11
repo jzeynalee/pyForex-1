@@ -1,7 +1,7 @@
 # candle_to_image.py
 """
 Candlestick chart image generator for ML training.
-Converts OHLCV DataFrames to chart images suitable for ViT/YOLO.
+Converts OHLCV DataFrames to chart images suitable for ML models.
 """
 
 import numpy as np

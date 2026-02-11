@@ -4,13 +4,12 @@ Comprehensive Model Training Script for pyForex
 
 Trains all models in the system:
 1. MultiHeadTCN (with risk heads) - Direction, Volatility, Quantiles
-2. ViT (Vision Transformer) - Chart pattern recognition
-3. YOLO - Pattern detection
-4. Meta-labeling (LightGBM/RandomForest) - Trade filtering
-5. Exit Optimizer (PPO) - RL-based exit timing
+2. YOLO - Pattern detection
+3. Meta-labeling (LightGBM/RandomForest) - Trade filtering
+4. Exit Optimizer (PPO) - RL-based exit timing
 
 Usage Examples:
-    python scripts/train_all_models.py --models tcn vit meta --profiles INTRADAY
+    python scripts/train_all_models.py --models tcn meta --profiles INTRADAY
     python scripts/train_all_models.py --all
 """
 
@@ -75,7 +74,6 @@ def ensure_dirs():
     WEIGHTS_DIR.mkdir(parents=True, exist_ok=True)
     CHECKPOINTS_DIR.mkdir(parents=True, exist_ok=True)
     (CHECKPOINTS_DIR / "multihead_tcn").mkdir(exist_ok=True)
-    (CHECKPOINTS_DIR / "vit").mkdir(exist_ok=True)
     (CHECKPOINTS_DIR / "meta_labeling").mkdir(exist_ok=True)
     (CHECKPOINTS_DIR / "exit_optimizer").mkdir(exist_ok=True)
 
@@ -335,219 +333,6 @@ def train_multihead_tcn(
         'epochs_trained': len(history.get('train_loss', [])),
         'best_val_loss': min(history.get('val_loss', [float('inf')])),
         'checkpoint_path': str(checkpoint_path)
-    }
-
-
-# =============================================================================
-# 2. ViT Training
-# =============================================================================
-
-def train_vit(
-    profile: str,
-    data_path: str,
-    max_rows: int = 1_000_000,
-    epochs: int = 30,
-    batch_size: int = 32,
-    device: str = 'auto'
-) -> Dict[str, Any]:
-    """Train Vision Transformer for chart pattern recognition."""
-    logger.info("=" * 60)
-    logger.info(f"  TRAINING ViT - {profile}")
-    logger.info("=" * 60)
-    
-    # Import ViT training utilities
-    try:
-        from training.finetune_vit import (
-            PROFILES as VIT_PROFILES,
-            generate_chart_dataset,
-            train_vit_model
-        )
-    except ImportError:
-        logger.warning("ViT training module not fully available. Using simplified training.")
-        return train_vit_simplified(profile, data_path, max_rows, epochs, batch_size, device)
-    
-    if device == 'auto':
-        device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    
-    # Get profile config
-    vit_config = VIT_PROFILES.get(profile, VIT_PROFILES['INTRADAY'])
-    
-    # Generate dataset if needed
-    dataset_dir = PROJECT_ROOT / vit_config['dataset_dir']
-    if not dataset_dir.exists() or len(list(dataset_dir.glob('*/*.png'))) < 100:
-        logger.info("Generating chart dataset...")
-        generate_chart_dataset(
-            data_path=data_path,
-            output_dir=str(dataset_dir),
-            window_size=vit_config['window_size'],
-            stride=vit_config['stride'],
-            forward_bars=vit_config['forward_bars'],
-            threshold_pct=vit_config['threshold_pct'],
-            max_samples=min(max_rows // 10, 50000)  # Limit chart images
-        )
-    
-    # Train
-    result = train_vit_model(
-        data_dir=str(dataset_dir),
-        profile=profile,
-        epochs=epochs,
-        batch_size=batch_size,
-        device=device
-    )
-    
-    return result
-
-
-def train_vit_simplified(
-    profile: str,
-    data_path: str,
-    max_rows: int = 1_000_000,
-    epochs: int = 30,
-    batch_size: int = 32,
-    device: str = 'auto'
-) -> Dict[str, Any]:
-    """Simplified ViT training when full module not available."""
-    logger.info("Using simplified ViT training...")
-    
-    import timm
-    from torch import nn
-    from torch.utils.data import DataLoader, TensorDataset
-    
-    if device == 'auto':
-        device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    
-    # Load data
-    df = pd.read_csv(data_path)
-    if len(df) > max_rows:
-        df = df.tail(max_rows)
-    
-    # Create simple chart images (placeholder - in production use proper chart generation)
-    logger.info("Creating synthetic chart features for ViT training...")
-    
-    window_size = {'SCALP': 30, 'INTRADAY': 60, 'SWING': 90}[profile]
-    forward_bars = {'SCALP': 6, 'INTRADAY': 10, 'SWING': 20}[profile]
-    threshold = {'SCALP': 0.0015, 'INTRADAY': 0.003, 'SWING': 0.006}[profile]
-    
-    # Generate features from price patterns
-    features = []
-    labels = []
-    
-    prices = df['close'].values
-    
-    for i in range(window_size, len(prices) - forward_bars, 10):  # stride=10
-        window = prices[i-window_size:i]
-        
-        # Normalize window
-        window_norm = (window - window.min()) / (window.max() - window.min() + 1e-8)
-        
-        # Create simple 2D representation (expand to 3 channels for ViT)
-        # Reshape to 224x224 using interpolation
-        from scipy.ndimage import zoom
-        
-        # Create a simple 1D to 2D mapping
-        img_1d = np.tile(window_norm, (window_size, 1)).T
-        
-        # Resize to 224x224
-        zoom_factor = (224 / img_1d.shape[0], 224 / img_1d.shape[1])
-        img_2d = zoom(img_1d, zoom_factor, order=1)
-        
-        # Stack to 3 channels
-        img_3d = np.stack([img_2d, img_2d, img_2d], axis=0).astype(np.float32)
-        features.append(img_3d)
-        
-        # Label
-        future_return = (prices[i + forward_bars] - prices[i]) / prices[i]
-        if future_return > threshold:
-            label = 2  # BULL
-        elif future_return < -threshold:
-            label = 0  # BEAR
-        else:
-            label = 1  # SIDEWAYS
-        labels.append(label)
-        
-        if len(features) >= 10000:  # Limit for memory
-            break
-    
-    features = np.array(features, dtype=np.float32)
-    labels = np.array(labels, dtype=np.int64)
-    
-    logger.info(f"Created {len(features)} samples")
-    logger.info(f"Label distribution: BEAR={np.sum(labels==0)}, SIDE={np.sum(labels==1)}, BULL={np.sum(labels==2)}")
-    
-    # Create model
-    model = timm.create_model('vit_tiny_patch16_224', pretrained=True, num_classes=3)
-    model = model.to(device)
-    
-    # Create dataset
-    dataset = TensorDataset(
-        torch.from_numpy(features),
-        torch.from_numpy(labels)
-    )
-    
-    train_size = int(0.8 * len(dataset))
-    val_size = len(dataset) - train_size
-    train_dataset, val_dataset = torch.utils.data.random_split(dataset, [train_size, val_size])
-    
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size)
-    
-    # Training
-    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
-    criterion = nn.CrossEntropyLoss()
-    
-    best_val_acc = 0
-    best_state = None
-    
-    for epoch in range(epochs):
-        model.train()
-        train_loss = 0
-        for batch_x, batch_y in train_loader:
-            batch_x, batch_y = batch_x.to(device), batch_y.to(device)
-            
-            optimizer.zero_grad()
-            outputs = model(batch_x)
-            loss = criterion(outputs, batch_y)
-            loss.backward()
-            optimizer.step()
-            
-            train_loss += loss.item()
-        
-        # Validation
-        model.eval()
-        val_correct = 0
-        val_total = 0
-        with torch.no_grad():
-            for batch_x, batch_y in val_loader:
-                batch_x, batch_y = batch_x.to(device), batch_y.to(device)
-                outputs = model(batch_x)
-                _, predicted = torch.max(outputs, 1)
-                val_total += batch_y.size(0)
-                val_correct += (predicted == batch_y).sum().item()
-        
-        val_acc = val_correct / val_total
-        
-        if val_acc > best_val_acc:
-            best_val_acc = val_acc
-            best_state = model.state_dict().copy()
-        
-        if (epoch + 1) % 5 == 0:
-            logger.info(f"Epoch {epoch+1}/{epochs} - Train Loss: {train_loss/len(train_loader):.4f}, Val Acc: {val_acc:.4f}")
-    
-    # Save model
-    weights_path = WEIGHTS_DIR / f"vit_{profile}.pth"
-    torch.save({
-        'state_dict': best_state or model.state_dict(),
-        'profile': profile,
-        'num_classes': 3,
-        'best_val_acc': best_val_acc
-    }, weights_path)
-    
-    logger.info(f"Saved ViT weights: {weights_path}")
-    
-    return {
-        'profile': profile,
-        'best_val_acc': best_val_acc,
-        'weights_path': str(weights_path)
     }
 
 
@@ -817,7 +602,7 @@ def main():
     parser = argparse.ArgumentParser(description='Train all pyForex models')
     
     parser.add_argument('--models', nargs='+', 
-                        choices=['tcn', 'vit', 'meta', 'exit', 'yolo', 'all'],
+                        choices=['tcn', 'meta', 'exit', 'yolo', 'all'],
                         default=['all'],
                         help='Models to train')
     parser.add_argument('--profiles', nargs='+',
@@ -847,7 +632,7 @@ def main():
     
     # Resolve 'all' options
     if 'all' in args.models:
-        models_to_train = ['tcn', 'vit', 'meta', 'exit', 'yolo']
+        models_to_train = ['tcn', 'meta', 'exit', 'yolo']
     else:
         models_to_train = args.models
     
@@ -929,29 +714,13 @@ def main():
                     logger.error(f"TCN training failed for {profile} {timeframe}: {e}")
                     results[f'tcn_{profile}_{timeframe}'] = {'status': 'failed', 'error': str(e)}
         
-        # ViT, Meta, Exit, YOLO are usually trained once per profile (dataset aggregation) or on primary TF
-        # We keep them running once per profile to avoid redundancy, as they are often less sensitive to exact timeframe dynamics 
-        # or use aggregated datasets.
+        # Meta, Exit, YOLO are usually trained once per profile (dataset aggregation) or on primary TF
+        # We keep them running once per profile to avoid redundancy.
         
         # Use primary TF for these
         primary_tf = PROFILE_DATA_MAP[profile]['primary'].split('_')[1].split('_')[0] # e.g. M5 from data/raw/EURUSD_M5_latest.csv
         primary_data_path = PROJECT_ROOT / PROFILE_DATA_MAP[profile]['primary']
 
-        if 'vit' in models_to_train:
-            try:
-                result = train_vit(
-                    profile=profile,
-                    data_path=str(primary_data_path),
-                    max_rows=args.data_rows,
-                    epochs=min(args.epochs, 30),  # ViT typically needs fewer epochs
-                    batch_size=args.batch_size,
-                    device=args.device
-                )
-                results[f'vit_{profile}'] = result
-            except Exception as e:
-                logger.error(f"ViT training failed for {profile}: {e}")
-                results[f'vit_{profile}'] = {'status': 'failed', 'error': str(e)}
-        
         if 'meta' in models_to_train:
             try:
                 result = train_meta_labeling(

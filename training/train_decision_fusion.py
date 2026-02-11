@@ -2,7 +2,7 @@
 Training script for the Decision Fusion Layer
 
 Trains the production-grade multi-modal fusion network that combines
-Price Action + ViT + TCN features with sophisticated gating and multi-task outputs.
+Price Action + TCN features with sophisticated gating and multi-task outputs.
 
 Usage:
     python train_decision_fusion.py --profile INTRADAY --epochs 100
@@ -28,62 +28,19 @@ import logging
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from models.decision_fusion import DecisionFusionLayer, DecisionOutput
-from models.vit_extractor import ViTExtractor
-from training.train_tcn_enhanced import EnhancedTCN
-from utils.candle_to_image import CandlestickRenderer
 from models.price_action_pattern import PriceActionPatternExtractor
 from utils.checkpoint_loader import ModelLoader
 from utils.mtf_config import Timeframe, get_profile
 from utils.feature_schema import get_feature_schema_version
 from utils.training_utils import copy_schema_tagged, set_global_seed
-# RiskManager is used by DecisionFusionLayer internally, not needed here
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-class _ViTHead(torch.nn.Module):
-    def __init__(self, in_features: int = 768, hidden_dim: int = 256, num_classes: int = 3, dropout: float = 0.2):
-        super().__init__()
-        self.norm = nn.LayerNorm(in_features)
-        self.block = nn.Sequential(
-            nn.Linear(in_features, hidden_dim),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.GELU(),
-            nn.Dropout(dropout),
-        )
-        self.classifier = nn.Linear(hidden_dim, num_classes)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        x = self.norm(x)
-        x = self.block(x)
-        return self.classifier(x)
-
-
-def _load_vit_head(vit_checkpoint: Optional[str], device: str) -> Optional[torch.nn.Module]:
-    if not vit_checkpoint:
-        return None
-    p = Path(vit_checkpoint)
-    if not p.exists():
-        logger.warning(f"ViT checkpoint not found: {p}")
-        return None
-
-    ckpt = torch.load(p, map_location='cpu', weights_only=False)
-    state = ckpt.get('model_state') if isinstance(ckpt, dict) else None
-    if not isinstance(state, dict):
-        logger.warning(f"Unexpected ViT checkpoint format: {p}")
-        return None
-
-    head = _ViTHead().to(device)
-    head.load_state_dict(state)
-    head.eval()
-    return head
-
-
-def _load_tcn_checkpoint(tcn_checkpoint: Optional[str], device: str) -> Tuple[EnhancedTCN, List[str]]:
+def _load_tcn_checkpoint(tcn_checkpoint: Optional[str], device: str):
+    """Load a TCN checkpoint via ModelLoader. Returns (model, feature_columns)."""
     if tcn_checkpoint:
         p = Path(tcn_checkpoint)
         if p.exists():
@@ -92,23 +49,7 @@ def _load_tcn_checkpoint(tcn_checkpoint: Optional[str], device: str) -> Tuple[En
             features = loader.get_features_safe(fallback=[])
             return model, (features or [])
         logger.warning(f"TCN checkpoint not found: {p}")
-
-    model = EnhancedTCN.from_profile('INTRADAY', input_dim=4).to(device).eval()
-    return model, ['open', 'high', 'low', 'close']
-
-
-def _load_tcn_checkpoint_for_profile(
-    tcn_checkpoint: Optional[str],
-    profile: str,
-    device: str,
-) -> Tuple[EnhancedTCN, List[str]]:
-    model, features = _load_tcn_checkpoint(tcn_checkpoint, device=device)
-    if tcn_checkpoint and Path(tcn_checkpoint).exists():
-        return model, features
-
-    # If checkpoint missing, at least match profile architecture
-    fallback = EnhancedTCN.from_profile(profile.upper(), input_dim=max(4, len(features) or 4)).to(device).eval()
-    return fallback, (features or ['open', 'high', 'low', 'close'])
+    return None, ['open', 'high', 'low', 'close']
 
 
 def _load_price_action_extractor(include_extended: bool = True, include_confidence: bool = False) -> PriceActionPatternExtractor:
@@ -152,10 +93,6 @@ def _resolve_price_action_checkpoint(profile: str) -> str:
     return ""
 
 
-def _resolve_vit_checkpoint(profile: str) -> str:
-    return f"models/vit/vit_{profile.lower()}.pt"
-
-
 def _default_hparams_for_timeframe(timeframe: str) -> Dict[str, Union[int, float]]:
     tf = timeframe.upper()
     if tf == 'M5':
@@ -173,7 +110,7 @@ def _default_hparams_for_timeframe(timeframe: str) -> Dict[str, Union[int, float
 
 class MultiModalDataset(Dataset):
     """
-    Dataset for multi-modal training with Price Action, ViT, and TCN features.
+    Dataset for multi-modal training with Price Action + TCN features.
     """
     
     def __init__(
@@ -187,57 +124,57 @@ class MultiModalDataset(Dataset):
         forward_bars: int = 6,
         threshold_pct: float = 0.15,
         max_samples: Optional[int] = None,
-        vit_checkpoint: Optional[str] = None,
         tcn_checkpoint: Optional[str] = None,
         price_action_include_extended: bool = True,
         price_action_include_confidence: bool = False,
         cache_dir: Optional[str] = None,
         use_cache: bool = False,
         refresh_cache: bool = False,
-        image_size: int = 224,
         device: str = 'auto',
         seed: int = 42,
-        label_noise_std: float = 0.0,
-        feature_noise_std: float = 0.0,
-        temporal_augmentation: bool = False,
-        price_augmentation: bool = False,
-        enable_debug: bool = False
+        **_kwargs,
     ):
+        self.profile = profile
+        self.timeframe = timeframe
+        self.data_csv = csv_path
         self.sequence_length = sequence_length
         self.window_bars = window_bars
         self.stride = stride
         self.forward_bars = forward_bars
         self.threshold_pct = threshold_pct
-        self.mode = 'train'
         self.max_samples = max_samples
         self.cache_dir = cache_dir
         self.use_cache = bool(use_cache)
         self.refresh_cache = bool(refresh_cache)
-        self.vit_checkpoint = vit_checkpoint
         self.tcn_checkpoint = tcn_checkpoint
-        self.yolo_checkpoint = yolo_checkpoint
-        self.yolo_include_confidence = bool(yolo_include_confidence)
+
+        if device == 'auto':
+            self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        else:
+            self.device = device
+        
+        # Load data
+        self.data = pd.read_csv(csv_path)
+        for col in ['open', 'high', 'low', 'close']:
+            if col not in self.data.columns:
+                raise ValueError(f"CSV missing required column: {col}")
         
         # Initialize components
-        self.vit_extractor = ViTExtractor(pretrained=True, freeze=True).to(self.device).eval()
-        self.vit_head = _load_vit_head(vit_checkpoint, device=self.device)
-
-        self.tcn_model, self.tcn_feature_columns = _load_tcn_checkpoint_for_profile(
-            tcn_checkpoint,
-            profile=self.profile,
-            device=self.device,
+        self.tcn_model, self.tcn_feature_columns = _load_tcn_checkpoint(
+            tcn_checkpoint, device=self.device
         )
+        if self.tcn_model is not None:
+            self.tcn_model.eval()
 
         self.price_action_extractor = _load_price_action_extractor(
             include_extended=price_action_include_extended,
             include_confidence=price_action_include_confidence
         )
-        self.renderer = CandlestickRenderer(image_size=(image_size, image_size))
 
         # Generate samples (optionally cached)
         self.samples = self._load_or_generate_samples()
         
-        logger.info(f"Created {mode} dataset with {len(self.samples)} samples")
+        logger.info(f"Created dataset with {len(self.samples)} samples")
 
     def _cache_key_dict(self) -> Dict[str, Union[str, int, float, bool]]:
         def _mtime(p: Optional[str]) -> int:
@@ -258,20 +195,14 @@ class MultiModalDataset(Dataset):
             'data_mtime': data_mtime,
             'profile': str(self.profile),
             'timeframe': str(self.timeframe),
-            'image_size': int(self.image_size),
             'sequence_length': int(self.sequence_length),
             'window_bars': int(self.window_bars),
             'stride': int(self.stride),
             'forward_bars': int(self.forward_bars),
             'threshold_pct': float(self.threshold_pct),
             'max_samples': int(self.max_samples) if self.max_samples is not None else -1,
-            'vit_checkpoint': str(self.vit_checkpoint or ''),
-            'vit_checkpoint_mtime': _mtime(self.vit_checkpoint),
             'tcn_checkpoint': str(self.tcn_checkpoint or ''),
             'tcn_checkpoint_mtime': _mtime(self.tcn_checkpoint),
-            'yolo_checkpoint': str(self.yolo_checkpoint or ''),
-            'yolo_checkpoint_mtime': _mtime(self.yolo_checkpoint),
-            'yolo_include_confidence': bool(self.yolo_include_confidence),
         }
 
     def _cache_path(self) -> Optional[Path]:
@@ -343,18 +274,12 @@ class MultiModalDataset(Dataset):
             tcn_features = self._extract_tcn_features(window)
             tcn_stability = torch.var(tcn_features).unsqueeze(0)
             
-            # ViT entropy (attention entropy)
-            chart_image = self._render_chart(window)
-            vit_features, vit_entropy = self._extract_vit_features(chart_image)
-            
             # Price Action patterns and confidences
             price_action_features, price_action_confidence = self._extract_price_action_features(window)
             
             sample = {
                 'tcn_features': tcn_features,
                 'tcn_stability': tcn_stability,
-                'vit_features': vit_features,
-                'vit_entropy': vit_entropy,
                 'price_action_features': price_action_features,
                 'price_action_confidence': price_action_confidence,
                 'direction': torch.tensor(direction, dtype=torch.long),
@@ -371,6 +296,16 @@ class MultiModalDataset(Dataset):
 
     def _extract_tcn_features(self, window: pd.DataFrame) -> torch.Tensor:
         """Extract TCN features from OHLCV data."""
+        if self.tcn_model is None:
+            # No TCN checkpoint — derive simple features from OHLCV
+            w = window.tail(self.sequence_length)
+            closes = w['close'].values.astype(np.float32)
+            returns = np.diff(closes) / (closes[:-1] + 1e-8)
+            # Pad to fixed 64-dim feature vector
+            feat = np.zeros(64, dtype=np.float32)
+            feat[:min(len(returns), 64)] = returns[:64]
+            return torch.tensor(feat, dtype=torch.float32)
+
         feature_cols = self.tcn_feature_columns
         if not feature_cols:
             feature_cols = ['open', 'high', 'low', 'close']
@@ -379,38 +314,13 @@ class MultiModalDataset(Dataset):
         features = _extract_feature_matrix(w, feature_cols)
         features = (features - np.mean(features, axis=0)) / (np.std(features, axis=0) + 1e-8)
         
-        # Convert to tensor
         features_tensor = torch.FloatTensor(features).unsqueeze(0)
         
-        # Extract features using TCN
         with torch.no_grad():
             tcn_out = self.tcn_model(features_tensor.to(self.device), mode='features')
             tcn_features = tcn_out.squeeze(0).detach().cpu()
         
         return tcn_features
-    
-    def _render_chart(self, window: pd.DataFrame) -> np.ndarray:
-        """Render candlestick chart image."""
-        return self.renderer.render(window)
-    
-    def _extract_vit_features(self, chart_image: np.ndarray) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Extract ViT features and compute attention entropy."""
-        with torch.no_grad():
-            # Convert image to tensor
-            image_tensor = torch.FloatTensor(chart_image).permute(2, 0, 1).unsqueeze(0).to(self.device)
-            
-            # Extract features
-            vit_features = self.vit_extractor(image_tensor)  # (1, 768)
-            
-            # Compute entropy from profile-specific ViT classifier head probabilities
-            if self.vit_head is not None:
-                logits = self.vit_head(vit_features)
-                probs = torch.softmax(logits, dim=1)
-                entropy = -torch.sum(probs * torch.log(probs + 1e-8), dim=1, keepdim=True)
-            else:
-                entropy = torch.zeros((1, 1), device=vit_features.device)
-        
-        return vit_features.squeeze(0).detach().cpu(), entropy.detach().cpu()
     
     def _extract_price_action_features(self, window: pd.DataFrame) -> Tuple[torch.Tensor, torch.Tensor]:
         """Extract Price Action pattern features and confidences."""
@@ -498,8 +408,6 @@ class DecisionFusionTrainer:
             output: DecisionOutput = self.model(
                 price_action_features=batch['price_action_features'],
                 price_action_confidence=batch['price_action_confidence'],
-                vit_features=batch['vit_features'],
-                vit_entropy=batch['vit_entropy'],
                 tcn_features=batch['tcn_features'],
                 tcn_stability=batch['tcn_stability']
             )
@@ -557,8 +465,6 @@ class DecisionFusionTrainer:
                 output: DecisionOutput = self.model(
                     price_action_features=batch['price_action_features'],
                     price_action_confidence=batch['price_action_confidence'],
-                    vit_features=batch['vit_features'],
-                    vit_entropy=batch['vit_entropy'],
                     tcn_features=batch['tcn_features'],
                     tcn_stability=batch['tcn_stability']
                 )
@@ -690,7 +596,6 @@ def main():
     parser.add_argument('--patience', type=int, default=15)
     parser.add_argument('--max_samples', type=int, default=None)
     parser.add_argument('--seed', type=int, default=42)
-    parser.add_argument('--vit_checkpoint', type=str, default=None)
     parser.add_argument('--tcn_checkpoint', type=str, default=None)
     parser.add_argument('--price_action_include_extended', action='store_true', help='Include extended price action patterns')
     parser.add_argument('--price_action_include_confidence', action='store_true', help='Include confidence scores')
@@ -721,8 +626,6 @@ def main():
     if not Path(data_csv).exists():
         raise FileNotFoundError(f"Data CSV not found: {data_csv}")
 
-    vit_checkpoint = args.vit_checkpoint or _resolve_vit_checkpoint(args.profile)
-
     tcn_checkpoint = args.tcn_checkpoint or _resolve_tcn_checkpoint(args.profile, timeframe)
     if not Path(tcn_checkpoint).exists():
         fallback = Path('models/weights/tcn_enhanced_best.pt')
@@ -740,7 +643,6 @@ def main():
     
     model = DecisionFusionLayer(
         price_action_dim=price_action_dim,
-        vit_dim=768,
         tcn_dim=64,
         hidden_dim=256,
         num_classes=3,
@@ -760,9 +662,7 @@ def main():
         forward_bars=config['forward_bars'],
         threshold_pct=config['threshold_pct'],
         device=args.device,
-        image_size=224,
         max_samples=args.max_samples,
-        vit_checkpoint=vit_checkpoint,
         tcn_checkpoint=tcn_checkpoint,
         price_action_include_extended=args.price_action_include_extended,
         price_action_include_confidence=args.price_action_include_confidence,

@@ -15,7 +15,7 @@ from utils.indicators_extended import TrendIndicators
 class TrendFeatureBuilder:
     """
     Builds comprehensive feature set for ML trend confirmation
-    These features augment your existing LSTM/ViT/YOLO features
+    These features augment your existing TCN/Price Action features
     """
     
     def __init__(self):

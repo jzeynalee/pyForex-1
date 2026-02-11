@@ -491,7 +491,7 @@ class MultiHeadTCN(nn.Module):
         
         Args:
             x: (batch, seq_len, features) - OHLCV + technical indicators
-            vision_features: (batch, vision_dim) - Optional YOLO/ViT features
+            vision_features: (batch, vision_dim) - Optional vision features
             mode: 'all' | 'direction' | 'volatility' | 'quantiles' | 'outcomes' | 'features'
         
         Returns:

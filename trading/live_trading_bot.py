@@ -114,7 +114,6 @@ class BotConfig:
     
     # Model paths
     tcn_weights: str = 'models/weights/tcn_best.pt'
-    vit_weights: Optional[str] = None
     yolo_weights: Optional[str] = None
     meta_model_path: Optional[str] = None
     exit_model_path: Optional[str] = None  # NEW: Phase 4 exit model
