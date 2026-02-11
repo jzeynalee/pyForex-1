@@ -421,6 +421,14 @@ class ExperimentHarness:
                 if ah._precomputed_p_bull is not None:
                     mf.precompute_buffer_rows(ah, regimes, _closes, _highs, _lows)
 
+        # Feed MH-TCN buffer during warmup so it has full context at trading start
+        for runner in runners:
+            mf = runner.cfg.mhtcn_filter
+            if hasattr(mf, 'feed_bar') and hasattr(mf, '_precomputed_rows') and mf._precomputed_rows is not None:
+                for i in range(warmup):
+                    mf.feed_bar(i)
+                logger.info(f"MH-TCN buffer pre-filled with {min(warmup, mf.seq_len)} warmup bars")
+
         # Main loop
         t0 = time.time()
         _win = 100  # reduced window for MH-TCN price-derived features

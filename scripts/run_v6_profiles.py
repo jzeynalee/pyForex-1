@@ -55,7 +55,7 @@ PROFILE_CONFIG = {
     "SWING": {
         "base_tf": "H1",
         "weights": "v6_prob_mhtcn_SWING_H1.pt",
-        "lookback": 200,
+        "lookback": 150,
         "cooldown_bars": 10,
         "min_probability": 0.50,
         "directional_edge_min": 0.03,
