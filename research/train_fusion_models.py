@@ -159,6 +159,15 @@ def extract_pa_features(df: pd.DataFrame) -> Tuple[np.ndarray, np.ndarray]:
         include_extended_patterns=True,
         include_confidence=False
     )
+
+    # Ensure 'volume' column exists (PA extractor expects it)
+    if "volume" not in df.columns:
+        if "tick_volume" in df.columns:
+            df = df.copy()
+            df["volume"] = df["tick_volume"]
+        else:
+            df = df.copy()
+            df["volume"] = 0.0
     
     window_size = 120  # PriceActionPatternExtractor needs >= 100 bars
     N = len(df)
