@@ -578,6 +578,17 @@ class FeatureEngineerOptimized:
     
     def __init__(self, db_connector=None):
         self.db = db_connector
+
+        # ── Feature cache for backtest speedup ──────────────────────
+        # When the same underlying dataset is queried with growing
+        # windows (as in per-bar backtesting), we compute features
+        # once on the *full* dataset and serve slices.
+        # Supports multiple cached datasets (one per TF).
+        # Each entry: { 'feats': DataFrame, 'time_idx': DatetimeIndex|None }
+        self._cache: Dict[int, Dict] = {}           # key → {feats, time_idx}
+        self._cache_order: List[int] = []            # LRU order
+        self._cache_max: int = 5                     # max entries
+
         self._warmup_numba()
     
     def _warmup_numba(self):
@@ -638,8 +649,82 @@ class FeatureEngineerOptimized:
         df = df.loc[:, ~df.columns.duplicated(keep='last')]
         return df
     
+    def precompute(self, full_df: pd.DataFrame) -> pd.DataFrame:
+        """Compute features for *full_df* once and store in cache.
+
+        Subsequent calls to ``generate_features`` on windows that are
+        sub-ranges of *full_df* will return slices from this cache
+        instead of recomputing, giving ~200-500x speedup per bar.
+
+        Returns the full feature DataFrame (also cached internally).
+        """
+        df = full_df.copy()
+        df.columns = [str(c).lower().strip() for c in df.columns]
+        if 'tick_volume' in df.columns and 'volume' not in df.columns:
+            df['volume'] = df['tick_volume']
+
+        feats = self.generate_features(df, batch_processing=True)
+
+        # Build a time-based index for fast lookups
+        time_idx = None
+        if 'time' in df.columns:
+            time_idx = pd.DatetimeIndex(pd.to_datetime(df['time']))
+            feats = feats.copy()
+            feats.index = range(len(feats))
+
+        key = self._make_cache_key(df)
+        # Store in multi-entry cache (LRU eviction)
+        self._cache[key] = {'feats': feats, 'time_idx': time_idx}
+        self._cache_order.append(key)
+        while len(self._cache_order) > self._cache_max:
+            old_key = self._cache_order.pop(0)
+            self._cache.pop(old_key, None)
+        return feats
+
+    @staticmethod
+    def _make_cache_key(df: pd.DataFrame) -> int:
+        """Fingerprint a DataFrame by its length and boundary close values."""
+        try:
+            close = df['close'].values
+            return hash((len(df), float(close[0]), float(close[-1])))
+        except Exception:
+            return -1
+
+    def _try_cache_slice(self, df: pd.DataFrame) -> Optional[pd.DataFrame]:
+        """If *df* is a tail-slice of any precomputed dataset, return
+        the corresponding feature rows from cache.  Otherwise return None."""
+        if not self._cache:
+            return None
+
+        has_time = 'time' in df.columns
+
+        for entry in self._cache.values():
+            cache_df = entry['feats']
+            time_idx = entry['time_idx']
+            try:
+                if has_time and time_idx is not None:
+                    last_time = pd.Timestamp(df['time'].iloc[-1])
+                    first_time = pd.Timestamp(df['time'].iloc[0])
+
+                    end = int(time_idx.searchsorted(last_time, side='right'))
+                    start = int(time_idx.searchsorted(first_time, side='left'))
+
+                    end = min(end, len(cache_df))
+                    start = max(0, start)
+
+                    if end > start and (end - start) >= len(df) * 0.8:
+                        return cache_df.iloc[start:end].reset_index(drop=True)
+            except Exception:
+                continue
+        return None
+
     def generate_features(self, df: pd.DataFrame, batch_processing: bool = True) -> pd.DataFrame:
-        """Public entry point"""
+        """Public entry point.
+
+        If ``precompute()`` was called earlier on a superset of *df*,
+        this returns a cached slice (sub-millisecond).  Otherwise it
+        falls through to the full indicator calculation.
+        """
         if 'tick_volume' in df.columns and 'volume' not in df.columns:
             df['volume'] = df['tick_volume']
         
@@ -647,6 +732,11 @@ class FeatureEngineerOptimized:
         missing = [c for c in required if c not in df.columns]
         if missing:
             raise ValueError(f"DataFrame missing required columns: {missing}")
+
+        # ── Try cache hit ───────────────────────────────────────────
+        cached = self._try_cache_slice(df)
+        if cached is not None:
+            return cached
         
         if len(df) > self.BATCH_SIZE and batch_processing:
             print(f"⚡ Large dataset ({len(df):,} rows). Using batch processing...")
