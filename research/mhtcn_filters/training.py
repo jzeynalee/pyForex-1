@@ -18,7 +18,8 @@ Horizon alignment:
 """
 
 import logging
-from dataclasses import dataclass
+import math
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -28,6 +29,36 @@ import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 
 logger = logging.getLogger(__name__)
+
+
+class FocalLoss(nn.Module):
+    """Binary focal loss for class-imbalanced datasets.
+
+    FL(p_t) = -alpha_t * (1 - p_t)^gamma * log(p_t)
+
+    When gamma=0, this reduces to standard BCE with class weights.
+    Higher gamma (e.g. 2.0) down-weights easy examples more aggressively.
+    """
+
+    def __init__(self, gamma: float = 2.0, pos_weight: float = 1.0):
+        super().__init__()
+        self.gamma = gamma
+        self.pos_weight = pos_weight
+
+    def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        eps = 1e-7
+        pred = pred.clamp(eps, 1.0 - eps)
+
+        # Per-sample weight: pos_weight for positives, 1.0 for negatives
+        alpha = torch.where(target == 1, self.pos_weight, 1.0)
+
+        # p_t = p if y=1 else 1-p
+        p_t = torch.where(target == 1, pred, 1.0 - pred)
+
+        focal_weight = alpha * (1.0 - p_t) ** self.gamma
+        bce = -(target * torch.log(pred) + (1.0 - target) * torch.log(1.0 - pred))
+
+        return (focal_weight * bce).mean()
 
 
 @dataclass
@@ -50,6 +81,14 @@ class TrainingConfig:
     num_epochs: int = 50
     patience: int = 8
     grad_clip: float = 1.0
+
+    # Focal loss (class imbalance)
+    use_focal_loss: bool = False
+    focal_gamma: float = 2.0
+    auto_pos_weight: bool = True     # auto-compute pos_weight from label distribution
+
+    # LR warmup
+    warmup_epochs: int = 0           # 0 = no warmup; >0 = linear warmup over N epochs
 
     # Negative control
     shuffle_labels: bool = False    # set True for shuffled-label control
@@ -221,12 +260,41 @@ class WalkForwardTrainer:
         Returns training history.
         """
         model = model.to(self.device)
+
+        # Determine base LR (warmup will ramp up to this)
+        base_lr = self.config.learning_rate
+        warmup_epochs = self.config.warmup_epochs
+        init_lr = base_lr / 10.0 if warmup_epochs > 0 else base_lr
+
         optimizer = torch.optim.AdamW(
             model.parameters(),
-            lr=self.config.learning_rate,
+            lr=init_lr,
             weight_decay=self.config.weight_decay,
         )
-        criterion = nn.BCELoss()
+
+        # Loss function: focal loss or standard BCE
+        if self.config.use_focal_loss:
+            pos_weight = 1.0
+            if self.config.auto_pos_weight and len(train_ds) > 0:
+                pos_rate = float(train_ds.targets.mean())
+                if 0.01 < pos_rate < 0.99:
+                    pos_weight = (1.0 - pos_rate) / pos_rate
+                    pos_weight = min(pos_weight, 10.0)  # cap to avoid instability
+                logger.info(
+                    f"FocalLoss: gamma={self.config.focal_gamma}, "
+                    f"auto_pos_weight={pos_weight:.3f} (pos_rate={pos_rate:.3f})"
+                )
+            criterion = FocalLoss(
+                gamma=self.config.focal_gamma, pos_weight=pos_weight
+            )
+        else:
+            criterion = nn.BCELoss()
+
+        if warmup_epochs > 0:
+            logger.info(
+                f"LR warmup: {init_lr:.6f} → {base_lr:.6f} over {warmup_epochs} epochs"
+            )
+
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer, mode="min", factor=0.5, patience=5, min_lr=1e-6
         )
@@ -272,19 +340,29 @@ class WalkForwardTrainer:
             train_loss = epoch_loss / max(n_batches, 1)
             history["train_loss"].append(train_loss)
 
+            # LR warmup: linearly ramp from init_lr to base_lr
+            if warmup_epochs > 0 and epoch < warmup_epochs:
+                warmup_lr = init_lr + (base_lr - init_lr) * (epoch + 1) / warmup_epochs
+                for pg in optimizer.param_groups:
+                    pg["lr"] = warmup_lr
+
             # Validate
             val_loss, val_acc = self._validate(model, val_loader, criterion)
             history["val_loss"].append(val_loss)
             history["val_acc"].append(val_acc)
 
-            scheduler.step(val_loss)
+            # Only use plateau scheduler after warmup completes
+            if epoch >= warmup_epochs:
+                scheduler.step(val_loss)
 
             if val_loss < best_val_loss - 1e-5:
                 best_val_loss = val_loss
                 best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
                 patience_counter = 0
             else:
-                patience_counter += 1
+                # Don't count patience during warmup
+                if epoch >= warmup_epochs:
+                    patience_counter += 1
 
             if (epoch + 1) % 10 == 0 or epoch == 0:
                 logger.info(
