@@ -342,6 +342,96 @@ class MHTCNFeatureProvider:
             )
             return None
     
+    def predict_fast(self, df: pd.DataFrame, timeframe: str) -> Optional[MHTCNPrediction]:
+        """Fast MH-TCN prediction — skips FeatureEngineerOptimized (~100x faster).
+
+        Uses minimal OHLCV-derived features instead of the full 220+ indicator
+        pipeline. Suitable for backtesting where per-bar speed matters.
+        """
+        model = self._get_model(timeframe)
+        if model is None:
+            return None
+
+        try:
+            features = self._prepare_features_fast(df, timeframe)
+            if features is None:
+                return None
+
+            expected_dim = self._get_expected_input_dim(timeframe)
+            features = self._align_feature_dim(features, expected_dim)
+
+            x = torch.tensor(features, dtype=torch.float32).unsqueeze(0).to(self.device)
+
+            model.eval()
+            with torch.no_grad():
+                outputs = model(x, mode='all')
+
+            direction_probs = torch.softmax(outputs['direction'], dim=-1).cpu().numpy()[0]
+            volatility = float(outputs['volatility'].cpu().numpy().item())
+            quantiles = outputs['quantiles'].cpu().numpy()[0]
+
+            if quantiles is not None and len(quantiles) >= 2:
+                if not all(quantiles[i] <= quantiles[i + 1] for i in range(len(quantiles) - 1)):
+                    quantiles = np.sort(quantiles)
+                if float(np.max(np.abs(quantiles))) > 0.1:
+                    quantiles = np.clip(quantiles, -0.05, 0.05)
+
+            p_long = float(outputs['p_long'].cpu().numpy().item()) if 'p_long' in outputs else None
+            p_short = float(outputs['p_short'].cpu().numpy().item()) if 'p_short' in outputs else None
+            features_out = outputs['features'].cpu().numpy()[0] if 'features' in outputs else None
+
+            return MHTCNPrediction(
+                direction_probs=direction_probs,
+                volatility=volatility,
+                quantiles=quantiles,
+                p_long=p_long,
+                p_short=p_short,
+                features=features_out,
+            )
+        except Exception as e:
+            logger.error(f"MH-TCN fast prediction failed for {timeframe}: {e}")
+            return None
+
+    def _prepare_features_fast(self, df: pd.DataFrame, timeframe: str) -> Optional[np.ndarray]:
+        """Minimal OHLCV feature preparation — no FeatureEngineerOptimized."""
+        if df is None or len(df) < self.sequence_length:
+            return None
+
+        try:
+            d = df.copy()
+            d.columns = [c.lower() for c in d.columns]
+            if 'volume' not in d.columns:
+                d['volume'] = d.get('tick_volume', 1000)
+
+            d = d.tail(self.sequence_length).copy()
+            close = d['close'].values.astype(np.float64)
+            high = d['high'].values.astype(np.float64)
+            low = d['low'].values.astype(np.float64)
+            opn = d['open'].values.astype(np.float64)
+            vol = d['volume'].values.astype(np.float64)
+
+            base = close[0] if close[0] != 0 else 1.0
+            returns = np.diff(close, prepend=close[0]) / (np.abs(close) + 1e-8)
+            vol_norm = vol / (np.mean(vol) + 1e-8)
+
+            feature_array = np.stack([
+                (close - base) / base,
+                (opn - base) / base,
+                (high - base) / base,
+                (low - base) / base,
+                returns,
+                vol_norm,
+            ], axis=1).astype(np.float32)
+
+            scaler = self._scalers.get(timeframe)
+            if scaler is not None:
+                feature_array = self._apply_scaling(feature_array, scaler)
+
+            return np.nan_to_num(feature_array, nan=0.0, posinf=1.0, neginf=-1.0)
+        except Exception as e:
+            logger.error(f"Fast feature preparation failed: {e}")
+            return None
+
     def _prepare_features(self, df: pd.DataFrame, timeframe: str) -> Optional[np.ndarray]:
         """Prepare feature array from OHLCV DataFrame."""
         if df is None or len(df) < self.sequence_length:

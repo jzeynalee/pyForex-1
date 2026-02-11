@@ -159,6 +159,11 @@ class AlphaHeadV2(AlphaHead):
         self._scorers: Dict[str, CategoryScorer] = {}
         self._category_columns: Dict[str, List[str]] = {}
         self._eval_count = 0
+        # Vectorized pre-computed scores (populated by precompute_all_scores)
+        self._precomputed_cat_probs: Optional[Dict[str, np.ndarray]] = None
+        self._precomputed_p_bull: Optional[np.ndarray] = None
+        self._precomputed_p_bear: Optional[np.ndarray] = None
+        self._precomputed_regimes: Optional[pd.Series] = None
 
         # Create scorers for each category
         for cat in ALL_CATEGORIES:
@@ -169,8 +174,74 @@ class AlphaHeadV2(AlphaHead):
 
     def reset(self) -> None:
         self._eval_count = 0
+        self._precomputed_cat_probs = None
+        self._precomputed_p_bull = None
+        self._precomputed_p_bear = None
+        self._precomputed_regimes = None
         for scorer in self._scorers.values():
             scorer._initialized = False
+
+    def precompute_all_scores(
+        self,
+        features: pd.DataFrame,
+        regimes: pd.Series,
+    ) -> None:
+        """Vectorized pre-computation of all category scores for every bar.
+
+        After calling this, evaluate() returns cached results in O(1) per bar
+        instead of O(lookback * n_features).
+        """
+        n = len(features)
+        lb = self.lookback
+        logger.info(f"AlphaV2: pre-computing scores for {n:,} bars (lookback={lb})...")
+
+        # Per-category z-scores via vectorized rolling
+        cat_probs_all: Dict[str, np.ndarray] = {cat: np.full(n, 0.5) for cat in ALL_CATEGORIES}
+
+        for cat in ALL_CATEGORIES:
+            cols = self._category_columns.get(cat, [])
+            valid_cols = [c for c in cols if c in features.columns]
+            if not valid_cols:
+                continue
+
+            # Stack all feature columns and compute rolling z-scores
+            sub = features[valid_cols].astype(np.float64)
+            rolling_mean = sub.rolling(window=lb, min_periods=10).mean().shift(1)
+            rolling_std = sub.rolling(window=lb, min_periods=10).std().shift(1)
+            rolling_std = rolling_std.replace(0, np.nan)
+
+            z_scores = ((sub - rolling_mean) / rolling_std).clip(-3.0, 3.0)
+            z_scores = z_scores.fillna(0.0)
+
+            # Uniform weights, normalized
+            n_feats = len(valid_cols)
+            z_cat = z_scores.mean(axis=1).values  # mean = sum * (1/n) / (n * 1/n) = mean z
+            cat_probs_all[cat] = 1.0 / (1.0 + np.exp(-np.clip(z_cat, -10, 10)))
+
+        # Per-regime logit-space fusion for every bar
+        p_bull_all = np.full(n, 0.5)
+        p_bear_all = np.full(n, 0.5)
+
+        for regime_label in [RegimeLabel.TRENDING, RegimeLabel.RANGING,
+                             RegimeLabel.VOLATILE, RegimeLabel.TRANSITION]:
+            mask = (regimes == regime_label).values
+            if not mask.any():
+                continue
+            weights = _REGIME_WEIGHTS.get(regime_label, _REGIME_WEIGHTS[RegimeLabel.TRANSITION])
+            logit_sum = np.zeros(n)
+            for cat in ALL_CATEGORIES:
+                alpha_k = weights.get(cat, 1.0 / len(ALL_CATEGORIES))
+                p_cat = np.clip(cat_probs_all[cat], 1e-6, 1.0 - 1e-6)
+                logit_sum += alpha_k * np.log(p_cat / (1.0 - p_cat))
+            p_bull = 1.0 / (1.0 + np.exp(-np.clip(logit_sum, -10, 10)))
+            p_bull_all[mask] = p_bull[mask]
+            p_bear_all[mask] = (1.0 - p_bull)[mask]
+
+        self._precomputed_cat_probs = cat_probs_all
+        self._precomputed_p_bull = p_bull_all
+        self._precomputed_p_bear = p_bear_all
+        self._precomputed_regimes = regimes
+        logger.info(f"AlphaV2: pre-computation complete")
 
     def set_category_columns(self, mapping: Dict[str, List[str]]):
         """Inject actual feature→category mapping from FeaturePipeline."""
@@ -181,9 +252,18 @@ class AlphaHeadV2(AlphaHead):
         df: pd.DataFrame,
         features: pd.DataFrame,
         regime: RegimeLabel,
+        bar_idx: int = -1,
     ) -> AlphaSignal:
         self._eval_count += 1
 
+        # ── Fast path: use pre-computed scores ──────────────────────────
+        if self._precomputed_p_bull is not None and bar_idx >= 0:
+            try:
+                return self._evaluate_precomputed(bar_idx, regime, features)
+            except Exception:
+                pass  # fall through to slow path
+
+        # ── Slow path: per-bar computation ──────────────────────────────
         if len(features) < 30:
             return self._hold(regime)
 
@@ -245,6 +325,43 @@ class AlphaHeadV2(AlphaHead):
         except Exception as e:
             logger.debug(f"AlphaV2 eval error: {e}")
             return self._hold(regime)
+
+    def _evaluate_precomputed(
+        self,
+        bar_idx: int,
+        regime: RegimeLabel,
+        features: pd.DataFrame,
+    ) -> AlphaSignal:
+        """O(1) evaluation using pre-computed scores."""
+        p_bull = float(self._precomputed_p_bull[bar_idx])
+        p_bear = float(self._precomputed_p_bear[bar_idx])
+
+        cat_probs = {cat: float(self._precomputed_cat_probs[cat][bar_idx])
+                     for cat in ALL_CATEGORIES}
+
+        directional_edge = abs(p_bull - p_bear)
+        if directional_edge < self.directional_edge_min:
+            return self._hold(regime, max(p_bull, p_bear), cat_probs)
+
+        if p_bull > p_bear:
+            direction = Direction.LONG
+            probability = p_bull
+        else:
+            direction = Direction.SHORT
+            probability = p_bear
+
+        if probability < self.min_probability:
+            return self._hold(regime, probability, cat_probs)
+
+        return AlphaSignal(
+            direction=direction,
+            probability=float(np.clip(probability, 0.0, 1.0)),
+            confidence=float(directional_edge),
+            regime=regime,
+            reasoning=[f"{cat}={cat_probs[cat]:.3f}" for cat in ALL_CATEGORIES],
+            category_probs=cat_probs,
+            timestamp=None,
+        )
 
     def _hold(
         self,

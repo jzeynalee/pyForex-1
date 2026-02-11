@@ -64,18 +64,18 @@ class Settings(BaseSettings):
     SCALP_MIN_DIR_SCORE: float = 0.10
     SCALP_RELAXED: bool = True
 
-    INTRADAY_MIN_HTF_CONF: float = 0.62
-    INTRADAY_MIN_MTF_CONF: float = 0.66
-    INTRADAY_MIN_LTF_CONF: float = 0.72
-    INTRADAY_MIN_STABILITY: float = 0.55
-    INTRADAY_MIN_DIR_SCORE: float = 0.32
+    INTRADAY_MIN_HTF_CONF: float = 0.40
+    INTRADAY_MIN_MTF_CONF: float = 0.42
+    INTRADAY_MIN_LTF_CONF: float = 0.44
+    INTRADAY_MIN_STABILITY: float = 0.40
+    INTRADAY_MIN_DIR_SCORE: float = 0.05
     INTRADAY_RELAXED: bool = False
 
-    SWING_MIN_HTF_CONF: float = 0.65
-    SWING_MIN_MTF_CONF: float = 0.70
-    SWING_MIN_LTF_CONF: float = 0.75
-    SWING_MIN_STABILITY: float = 0.60
-    SWING_MIN_DIR_SCORE: float = 0.35
+    SWING_MIN_HTF_CONF: float = 0.42
+    SWING_MIN_MTF_CONF: float = 0.44
+    SWING_MIN_LTF_CONF: float = 0.46
+    SWING_MIN_STABILITY: float = 0.45
+    SWING_MIN_DIR_SCORE: float = 0.08
     SWING_RELAXED: bool = False
 
     # Risk Management

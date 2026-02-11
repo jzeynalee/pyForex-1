@@ -385,6 +385,42 @@ class Unified3TFStrategy(Strategy):
             logger.error(f"Initialization failed: {e}")
             return False
 
+    def precompute_features(self, data_by_tf: dict) -> None:
+        """Pre-compute ALL 220+ features once per timeframe for backtest speedup.
+
+        Call this **before** the bar loop.  Subsequent per-bar
+        ``generate_features`` calls inside ``_evaluate_timeframe``
+        will return cached slices (sub-ms) instead of recomputing.
+
+        Args:
+            data_by_tf: ``{timeframe_str: pd.DataFrame}`` with full
+                OHLCV data for each TF used by this strategy.
+        """
+        import time as _time
+
+        if self._feature_engineer is None:
+            self._feature_engineer = FeatureEngineerOptimized()
+
+        engine = self._get_engine()
+
+        for tf, df in data_by_tf.items():
+            if df is None or df.empty:
+                continue
+            tf_upper = str(tf).upper()
+            t0 = _time.time()
+            logger.info(f"Pre-computing features for {tf_upper} ({len(df):,} bars)...")
+            self._feature_engineer.precompute(df)
+            elapsed = _time.time() - t0
+            logger.info(f"  {tf_upper} features cached in {elapsed:.1f}s")
+
+        # Share the same feature engineer with MH-TCN provider so it
+        # also gets cache hits instead of re-generating features.
+        if engine is not None and hasattr(engine, 'mhtcn_provider'):
+            provider = engine.mhtcn_provider
+            if provider is not None:
+                provider._feature_engineer = self._feature_engineer
+                logger.info("Shared feature cache with MHTCNFeatureProvider")
+
     def _directional_score_ok(self, out) -> bool:
         try:
             if out is None:

@@ -55,7 +55,7 @@ PA_DIM = 44  # PriceActionPatternExtractor with extended patterns
 # ===================================================================
 # Data loading and feature extraction
 # ===================================================================
-def load_ohlcv(timeframe: str, max_rows: int = 200_000) -> pd.DataFrame:
+def load_ohlcv(timeframe: str, max_rows: int = 20_000) -> pd.DataFrame:
     path = DATA_DIR / f"EURUSD_{timeframe}_latest.csv"
     if not path.exists():
         raise FileNotFoundError(f"Data not found: {path}")
@@ -170,20 +170,29 @@ def extract_pa_features(df: pd.DataFrame) -> Tuple[np.ndarray, np.ndarray]:
             df["volume"] = 0.0
     
     window_size = 120  # PriceActionPatternExtractor needs >= 100 bars
+    stride = 10  # Extract every 10th bar for speed
     N = len(df)
     pa_dim = extractor.get_feature_dim()
     features = np.zeros((N, pa_dim), dtype=np.float32)
     confidences = np.zeros(N, dtype=np.float32)
 
-    for i in range(window_size, N):
+    total_windows = (N - window_size) // stride
+    extracted = 0
+    for i in range(window_size, N, stride):
         try:
             window = df.iloc[i - window_size:i]
             vec = extractor.extract(window)
-            features[i] = vec
-            confidences[i] = float(np.mean(np.abs(vec))) if np.any(vec != 0) else 0.0
+            end = min(i + stride, N)
+            features[i:end] = vec
+            conf = float(np.mean(np.abs(vec))) if np.any(vec != 0) else 0.0
+            confidences[i:end] = conf
+            extracted += 1
+            if extracted % 500 == 0:
+                logger.info(f"    PA progress: {extracted}/{total_windows} windows")
         except Exception:
-            pass  # leave zeros
+            pass
 
+    logger.info(f"  Extracted PA features for {extracted}/{total_windows} windows")
     return features, confidences
 
 

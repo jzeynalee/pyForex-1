@@ -83,16 +83,24 @@ class _VariantRunner:
     def step(
         self,
         bar_idx: int,
-        df_window: pd.DataFrame,
-        feat_window: pd.DataFrame,
+        df_full: pd.DataFrame,
+        feat_full: pd.DataFrame,
         regime,
-        current_bar: pd.Series,
+        current_bar,
+        *,
+        high: float = 0.0,
+        low: float = 0.0,
+        close: float = 0.0,
+        ts=None,
+        atr_val: float = 0.0,
+        _win: int = 100,
     ):
         """Process one bar: manage positions, evaluate signal, maybe open."""
-        close = self._get_close(current_bar)
-        high = self._get_high(current_bar)
-        low = self._get_low(current_bar)
-        ts = current_bar.name if isinstance(current_bar.name, pd.Timestamp) else None
+        if close == 0.0:
+            close = self._get_close(current_bar)
+            high = self._get_high(current_bar)
+            low = self._get_low(current_bar)
+            ts = current_bar.name if isinstance(current_bar.name, pd.Timestamp) else None
 
         # 1. Check existing positions for SL/TP hit
         self._manage_positions(bar_idx, high, low, close, ts)
@@ -107,13 +115,31 @@ class _VariantRunner:
         if (bar_idx - self._last_trade_bar) < self.cfg.cooldown_bars:
             return
 
-        # 4. Alpha evaluation
-        signal = self.cfg.alpha_head.evaluate(df_window, feat_window, regime)
+        # 4. Alpha evaluation (pass bar_idx for vectorized pre-computed path)
+        _has_precomputed = (hasattr(self.cfg.alpha_head, '_precomputed_p_bull')
+                           and self.cfg.alpha_head._precomputed_p_bull is not None)
+        if _has_precomputed:
+            signal = self.cfg.alpha_head.evaluate(None, None, regime, bar_idx=bar_idx)
+        else:
+            s = max(0, bar_idx - _win)
+            signal = self.cfg.alpha_head.evaluate(
+                df_full.iloc[s:bar_idx + 1], feat_full.iloc[s:bar_idx + 1], regime)
+
         if not signal.is_trade:
             return
 
         # 5. MH-TCN filter
-        mhtcn_out = self.cfg.mhtcn_filter.filter(signal, df_window, feat_window)
+        mf = self.cfg.mhtcn_filter
+        _mhtcn_precomputed = (hasattr(mf, '_precomputed_rows')
+                              and mf._precomputed_rows is not None)
+        if _mhtcn_precomputed:
+            # Buffer already fed by harness loop; run model directly
+            mhtcn_out = self._run_mhtcn_from_buffer(mf)
+        else:
+            s = max(0, bar_idx - _win)
+            df_window = df_full.iloc[s:bar_idx + 1]
+            feat_window = feat_full.iloc[s:bar_idx + 1]
+            mhtcn_out = mf.filter(signal, df_window, feat_window)
 
         # 6. Compute final probability
         p_alpha = signal.probability
@@ -125,7 +151,7 @@ class _VariantRunner:
             return
 
         # 7. Compute SL/TP from ATR
-        atr = self._compute_atr(df_window)
+        atr = atr_val if atr_val > 1e-8 else self._compute_atr(df_window)
         if atr < 1e-8:
             return
 
@@ -331,17 +357,63 @@ class ExperimentHarness:
         logger.info("Pre-computing regimes...")
         regimes = self.regime_detector.detect_series(self.df, self.features)
 
+        # Pre-compute AlphaV2 scores vectorially if applicable
+        for runner in runners:
+            ah = runner.cfg.alpha_head
+            if hasattr(ah, 'precompute_all_scores') and hasattr(ah, '_precomputed_p_bull'):
+                if ah._precomputed_p_bull is None:
+                    ah.precompute_all_scores(self.features, regimes)
+
+        # Pre-extract numpy arrays for fast per-bar access
+        _highs = self.df["high"].values if "high" in self.df.columns else self.df["High"].values
+        _lows = self.df["low"].values if "low" in self.df.columns else self.df["Low"].values
+        _closes = self.df["close"].values if "close" in self.df.columns else self.df["Close"].values
+        _has_dt_idx = isinstance(self.df.index, pd.DatetimeIndex)
+
+        # Pre-compute ATR as numpy array
+        _tr = np.maximum(
+            _highs - _lows,
+            np.maximum(np.abs(_highs - np.roll(_closes, 1)),
+                       np.abs(_lows - np.roll(_closes, 1)))
+        )
+        _tr[0] = _highs[0] - _lows[0]
+        _atr = pd.Series(_tr).rolling(14).mean().values
+
+        # Pre-compute MH-TCN buffer rows for each runner
+        for runner in runners:
+            mf = runner.cfg.mhtcn_filter
+            ah = runner.cfg.alpha_head
+            if hasattr(mf, 'precompute_buffer_rows') and hasattr(ah, '_precomputed_p_bull'):
+                if ah._precomputed_p_bull is not None:
+                    mf.precompute_buffer_rows(ah, regimes, _closes, _highs, _lows)
+
         # Main loop
         t0 = time.time()
+        _win = 100  # reduced window for MH-TCN price-derived features
+
+        # Store references for lazy window builder
+        _df_ref = self.df
+        _feat_ref = self.features
+
         for i in range(warmup, n_bars):
-            # Shared data windows (no future leak)
-            df_window = self.df.iloc[max(0, i - 500):i + 1]
-            feat_window = self.features.iloc[max(0, i - 500):i + 1]
             regime = regimes.iloc[i]
-            current_bar = self.df.iloc[i]
+            h_i = float(_highs[i])
+            l_i = float(_lows[i])
+            c_i = float(_closes[i])
+            ts_i = _df_ref.index[i] if _has_dt_idx else None
+            atr_i = float(_atr[i]) if not np.isnan(_atr[i]) else 0.0
 
             for runner in runners:
-                runner.step(i, df_window, feat_window, regime, current_bar)
+                # Feed MH-TCN buffer every bar (O(1) from pre-computed rows)
+                mf = runner.cfg.mhtcn_filter
+                if hasattr(mf, 'feed_bar') and hasattr(mf, '_precomputed_rows') and mf._precomputed_rows is not None:
+                    mf.feed_bar(i)
+
+                runner.step(
+                    i, _df_ref, _feat_ref, regime, None,
+                    high=h_i, low=l_i, close=c_i, ts=ts_i, atr_val=atr_i,
+                    _win=_win,
+                )
 
             if (i - warmup) % progress_interval == 0 and i > warmup:
                 elapsed = time.time() - t0

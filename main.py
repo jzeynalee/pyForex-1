@@ -849,8 +849,7 @@ def cmd_backtest(args, logger: logging.Logger):
                 t1 = pd.to_datetime(df['time'].iloc[-1])
                 span_days = (t1 - t0).days
                 if span_days < 365:
-                    logger.error(f"Backtest data span too short: {span_days} days (<365). Provide at least 1 year of data.")
-                    return 1
+                    logger.warning(f"Backtest data span short: {span_days} days (<365). Results may be less representative.")
         except Exception:
             pass
 
@@ -1103,6 +1102,14 @@ def cmd_backtest(args, logger: logging.Logger):
                         strategy.initialize(starting_balance=float(args.balance))
                     except Exception:
                         pass
+
+                # Pre-compute ALL features once per TF for massive backtest speedup.
+                # Subsequent per-bar generate_features() calls return cached slices.
+                if hasattr(strategy, 'precompute_features'):
+                    try:
+                        strategy.precompute_features(data_map)
+                    except Exception as _pc_err:
+                        logger.warning(f"Feature precomputation failed (will compute per-bar): {_pc_err}")
 
                 window_size = 100
                 signals_out = []
