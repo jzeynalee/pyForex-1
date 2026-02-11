@@ -134,11 +134,15 @@ class Position:
         self.initial_tp = float(initial_tp)
 
         self.current_price = float(current_price)
-        self.unrealized_pnl = float(unrealized_pnl)
+        self._cached_unrealized_pnl = float(unrealized_pnl)
 
     @property
     def is_long(self) -> bool:
         return int(self.direction) == 1
+
+    def unrealized_pnl(self, current_price: float) -> float:
+        """Calculate unrealized P&L in price units."""
+        return (float(current_price) - float(self.entry_price)) * float(self.direction)
 
     def unrealized_pnl_pct(self, current_price: float) -> float:
         entry = float(self.entry_price) if self.entry_price else 1.0
