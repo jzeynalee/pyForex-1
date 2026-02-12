@@ -32,31 +32,43 @@ from research.mhtcn_filters.probabilistic import ProbabilisticMHTCNFilter
 logger = logging.getLogger("v6_profiles")
 
 # ── Profile definitions ─────────────────────────────────────────────────────
-# Each profile maps to:
-#   base_tf   – the LTF used as the harness data source
-#   weights   – V6 ProbabilisticTCN weights for that TF
+# Each profile uses a 3-TF hierarchy:
+#   LTF  – Lower TF for fine-tuning / feature enrichment
+#   TTF  – Trading TF (main signal generation & trade execution)
+#   HTF  – Higher TF for main trend discovery / gating
+#
+# The harness currently runs on TTF (base_tf). HTF/LTF integration is planned.
 PROFILE_CONFIG = {
     "SCALP": {
-        "base_tf": "M5",
-        "weights": "v6_prob_mhtcn_SCALP_M5.pt",
-        "lookback": 50,
-        "cooldown_bars": 3,
+        # LTF=M5, TTF=M15, HTF=H1
+        "ltf": "M5",
+        "base_tf": "M15",   # TTF – main trading frame
+        "htf": "H1",
+        "weights": "v6_prob_mhtcn_SCALP_M15.pt",
+        "lookback": 80,      # 80 × 15min = 20h of z-score history
+        "cooldown_bars": 4,  # 4 × 15min = 1h between trades
         "min_probability": 0.50,
         "directional_edge_min": 0.03,
     },
     "INTRADAY": {
-        "base_tf": "M15",
-        "weights": "v6_prob_mhtcn_INTRADAY_M15.pt",
-        "lookback": 100,
-        "cooldown_bars": 6,
+        # LTF=M15, TTF=H1, HTF=H4
+        "ltf": "M15",
+        "base_tf": "H1",    # TTF – main trading frame
+        "htf": "H4",
+        "weights": "v6_prob_mhtcn_INTRADAY_H1.pt",
+        "lookback": 100,     # 100 × 1h = ~4 days of z-score history
+        "cooldown_bars": 4,  # 4 × 1h = 4h between trades
         "min_probability": 0.50,
         "directional_edge_min": 0.03,
     },
     "SWING": {
-        "base_tf": "H1",
-        "weights": "v6_prob_mhtcn_SWING_H1.pt",
-        "lookback": 150,
-        "cooldown_bars": 10,
+        # LTF=H1, TTF=H4, HTF=D1
+        "ltf": "H1",
+        "base_tf": "H4",    # TTF – main trading frame
+        "htf": "D1",
+        "weights": "v6_prob_mhtcn_SWING_H4.pt",
+        "lookback": 80,      # 80 × 4h = ~13 days of z-score history
+        "cooldown_bars": 3,  # 3 × 4h = 12h between trades
         "min_probability": 0.50,
         "directional_edge_min": 0.03,
     },
@@ -155,8 +167,10 @@ def run_profile(
     tf = cfg["base_tf"]
     weights_file = WEIGHTS_DIR / cfg["weights"]
 
+    ltf = cfg.get("ltf", "?")
+    htf = cfg.get("htf", "?")
     logger.info("=" * 70)
-    logger.info(f"  PROFILE: {profile}  |  TF: {tf}  |  Weights: {weights_file.name}")
+    logger.info(f"  PROFILE: {profile}  |  LTF={ltf}  TTF={tf}  HTF={htf}  |  Weights: {weights_file.name}")
     logger.info("=" * 70)
 
     # Load data
