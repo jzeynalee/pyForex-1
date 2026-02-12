@@ -131,6 +131,11 @@ class Settings(BaseSettings):
     INTRADAY_DECAY_RATE: float = 0.02
     INTRADAY_KEY_FEATS_ONLY: bool = False
 
+    # V6 Strategy (AlphaV2 + ProbabilisticTCN)
+    V6_WEIGHTS_DIR: Path = Path("E:/pyProject/pyForex-assets/models/v6_profiles")
+    V6_MIN_G_FACTOR: float = 0.52  # Phase 1: g_factor IS trade probability
+    V6_DEVICE: str = "cpu"
+
     SWING_AGG_METHOD: str = "bayesian"
     SWING_MHTCN_WEIGHT: float = 0.3
     SWING_STABILITY_WEIGHT: float = 0.15
