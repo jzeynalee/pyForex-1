@@ -709,10 +709,12 @@ def cmd_live(args, logger: logging.Logger):
         from utils.config import settings
         from trading.bot import TradingBot, BotConfig
         from strategies.neural_hybrid import NeuralHybridStrategy
+        from strategies.v6_strategy import V6Strategy
         strategy_map = {
             "neural": NeuralHybridStrategy,
-            "tcn": NeuralHybridStrategy,
+            "tcn": NeuralHybridStrategy,  # Alias for clarity
             "unified3tf": None,
+            "v6": V6Strategy,
         }
 
         try:
@@ -731,24 +733,21 @@ def cmd_live(args, logger: logging.Logger):
         
         strategy_cls = strategy_map.get(str(getattr(args, 'strategy', '') or '').lower().strip(), NeuralHybridStrategy)
 
+        _ALLOWED_STRATEGIES = {'NeuralHybridStrategy', 'Unified3TFStrategy', 'V6Strategy'}
         if bool(getattr(settings, 'ENFORCE_AUTHORITATIVE_PIPELINE', True)):
             allow = False
             try:
-                allow = (strategy_cls is NeuralHybridStrategy)
+                allow = getattr(strategy_cls, '__name__', '') in _ALLOWED_STRATEGIES
             except Exception:
                 allow = False
             if not allow:
-                try:
-                    allow = (strategy_cls.__name__ == 'Unified3TFStrategy')
-                except Exception:
-                    allow = False
-            if not allow:
-                logger.error("Authoritative pipeline enforced: only NeuralHybridStrategy or Unified3TFStrategy is allowed")
+                logger.error(f"Authoritative pipeline enforced: strategy must be one of {_ALLOWED_STRATEGIES}")
                 return 1
         
-        if getattr(strategy_cls, '__name__', '') == 'Unified3TFStrategy':
+        _strat_name = getattr(strategy_cls, '__name__', '')
+
+        if _strat_name in ('Unified3TFStrategy', 'V6Strategy'):
             from trading.mt5_connector import MT5Connector
-            from strategies.unified_3tf_strategy import Unified3TFConfig
             connector = MT5Connector(
                 account=int(getattr(settings, 'MT5_ACCOUNT', 0) or 0),
                 password=str(getattr(settings, 'MT5_PASSWORD', '') or ''),
@@ -771,16 +770,36 @@ def cmd_live(args, logger: logging.Logger):
                     return self.conn.get_account_info()
                 def entry(self, signal: str, volume: float, sl: float, tp: float):
                     return self.conn.entry(signal, volume, sl, tp)
+                def get_open_positions(self, symbol=None):
+                    return self.conn.get_open_positions() if hasattr(self.conn, 'get_open_positions') else []
                 @property
                 def balance(self):
                     info = self.conn.get_account_info()
                     return float(getattr(info, 'balance', 10000.0) or 10000.0)
             provider = UnifiedProvider(connector)
-            bot = TradingBot(config=config, strategy_class=lambda **kw: Unified3TFStrategy(
-                config=Unified3TFConfig(profile=str(getattr(settings, 'PROFILE', 'INTRADAY') or 'INTRADAY').upper(), symbol=str(args.symbol).upper()),
-                data_provider=provider,
-                executor=provider,
-            ), connector=connector)
+
+            if _strat_name == 'V6Strategy':
+                from strategies.v6_strategy import V6StrategyConfig
+                profile = str(getattr(settings, 'PROFILE', 'INTRADAY') or 'INTRADAY').upper()
+                v6_weights_dir = str(getattr(settings, 'V6_WEIGHTS_DIR', '') or '')
+                v6_device = str(getattr(settings, 'V6_DEVICE', 'cpu') or 'cpu')
+                bot = TradingBot(config=config, strategy_class=lambda **kw: V6Strategy(
+                    config=V6StrategyConfig(
+                        profile=profile,
+                        symbol=str(args.symbol).upper(),
+                        device=v6_device,
+                        weights_dir=v6_weights_dir,
+                    ),
+                    data_provider=provider,
+                    executor=provider,
+                ), connector=connector)
+            else:
+                from strategies.unified_3tf_strategy import Unified3TFConfig
+                bot = TradingBot(config=config, strategy_class=lambda **kw: Unified3TFStrategy(
+                    config=Unified3TFConfig(profile=str(getattr(settings, 'PROFILE', 'INTRADAY') or 'INTRADAY').upper(), symbol=str(args.symbol).upper()),
+                    data_provider=provider,
+                    executor=provider,
+                ), connector=connector)
         else:
             bot = TradingBot(config=config, strategy_class=strategy_cls)
         bot.run()
@@ -896,6 +915,7 @@ def cmd_backtest(args, logger: logging.Logger):
             "neural": BacktestNeuralStrategy,
             "tcn": BacktestNeuralStrategy,  # Alias for clarity
             "unified3tf": None,
+            "v6": None,
         }
 
         try:
@@ -909,8 +929,16 @@ def cmd_backtest(args, logger: logging.Logger):
             strategy_map["unified3tf"] = RiskManagedUnified3TFStrategy
         except Exception as e:
             logger.warning(f"Could not import RiskManagedUnified3TFStrategy: {e}")
+
+        try:
+            from strategies.v6_strategy import V6Strategy
+            strategy_map["v6"] = V6Strategy
+        except Exception as e:
+            logger.warning(f"Could not import V6Strategy: {e}")
+
         strategy_cls = strategy_map.get(args.strategy, NeuralHybridStrategy)
 
+        _ALLOWED_BT = {'NeuralHybridStrategy', 'Unified3TFStrategy', 'RiskManagedUnified3TFStrategy', 'V6Strategy'}
         if bool(getattr(settings, 'ENFORCE_AUTHORITATIVE_PIPELINE', True)):
             allow = False
             try:
@@ -919,11 +947,11 @@ def cmd_backtest(args, logger: logging.Logger):
                 allow = False
             if not allow:
                 try:
-                    allow = (strategy_cls.__name__ in ('Unified3TFStrategy', 'RiskManagedUnified3TFStrategy'))
+                    allow = getattr(strategy_cls, '__name__', '') in _ALLOWED_BT
                 except Exception:
                     allow = False
             if not allow:
-                logger.error("Authoritative pipeline enforced: backtest strategy must be NeuralHybridStrategy or Unified3TFStrategy")
+                logger.error(f"Authoritative pipeline enforced: backtest strategy must be one of {_ALLOWED_BT}")
                 return 1
         
         # Run backtest
@@ -936,8 +964,12 @@ def cmd_backtest(args, logger: logging.Logger):
             except Exception:
                 base_tf = ''
         if not base_tf:
-            if str(getattr(args, 'strategy', '') or '').lower().strip() == 'unified3tf':
+            _strat_key = str(getattr(args, 'strategy', '') or '').lower().strip()
+            if _strat_key == 'unified3tf':
                 base_tf = {'SCALP': 'M5', 'INTRADAY': 'M15', 'SWING': 'H1'}.get(profile, 'M15')
+            elif _strat_key == 'v6':
+                # V6 runs on TTF (Trading Timeframe)
+                base_tf = {'SCALP': 'M15', 'INTRADAY': 'H1', 'SWING': 'H4'}.get(profile, 'H1')
             else:
                 base_tf = 'M5' if profile == 'SCALP' else 'H1'
 
@@ -1073,7 +1105,23 @@ def cmd_backtest(args, logger: logging.Logger):
                 base_df = data_map.get(base_tf.upper(), df)
                 provider = ThreeTFDataProvider(base_tf=base_tf, data_by_tf=data_map)
                 executor = BacktestExecutor(config=BacktestConfig(initial_balance=args.balance))
-                if getattr(strategy_cls, '__name__', '') == 'Unified3TFStrategy':
+                _bt_strat_name = getattr(strategy_cls, '__name__', '')
+                if _bt_strat_name == 'V6Strategy':
+                    from strategies.v6_strategy import V6StrategyConfig
+                    v6_weights_dir = str(getattr(settings, 'V6_WEIGHTS_DIR', '') or '')
+                    v6_device = str(getattr(settings, 'V6_DEVICE', 'cpu') or 'cpu')
+                    strategy = strategy_cls(
+                        config=V6StrategyConfig(
+                            profile=profile,
+                            symbol=str(getattr(args, 'symbol', 'EURUSD')),
+                            device=v6_device,
+                            weights_dir=v6_weights_dir,
+                            fast_backtest=bool(getattr(args, 'fast_backtest', False)),
+                        ),
+                        data_provider=provider,
+                        executor=executor,
+                    )
+                elif _bt_strat_name == 'Unified3TFStrategy':
                     from strategies.unified_3tf_strategy import Unified3TFConfig
                     fast_bt = bool(getattr(args, 'fast_backtest', False))
                     if str(getattr(args, 'strategy', '') or '').lower().strip() == 'unified3tf':
@@ -1083,7 +1131,7 @@ def cmd_backtest(args, logger: logging.Logger):
                         data_provider=provider,
                         executor=executor,
                     )
-                elif getattr(strategy_cls, '__name__', '') == 'RiskManagedUnified3TFStrategy':
+                elif _bt_strat_name == 'RiskManagedUnified3TFStrategy':
                     from strategies.unified_3tf_strategy import Unified3TFConfig
                     fast_bt = bool(getattr(args, 'fast_backtest', False))
                     if str(getattr(args, 'strategy', '') or '').lower().strip() == 'unified3tf':
@@ -1622,7 +1670,7 @@ Examples:
     )
     live_parser.add_argument("--symbol", default="EURUSD", help="Trading symbol")
     live_parser.add_argument("--timeframe", default="H1", help="Timeframe (M1,M5,M15,M30,H1,H4,D1)")
-    live_parser.add_argument("--strategy", default="neural", help="Strategy (neural, tcn)")
+    live_parser.add_argument("--strategy", default="neural", help="Strategy (neural, tcn, unified3tf, v6)")
     live_parser.add_argument("--interval", type=float, default=10.0, help="Check interval in seconds")
     live_parser.add_argument("--mock", action="store_true", help="Use mock connector (testing)")
     
@@ -1663,7 +1711,7 @@ Examples:
         default="EURUSD",
         help="Trading symbol (used by strategies)",
     )
-    bt_parser.add_argument("--strategy", default="neural", help="Strategy (neural, tcn)")
+    bt_parser.add_argument("--strategy", default="neural", help="Strategy (neural, tcn, unified3tf, v6)")
     bt_parser.add_argument("--balance", type=float, default=10000.0, help="Initial balance")
     bt_parser.add_argument(
         "--profile",
