@@ -144,8 +144,14 @@ class _VariantRunner:
         # 6. Compute final probability
         p_alpha = signal.probability
         g = mhtcn_out.g_factor
-        p_final = p_alpha * g
+        # Softened g: floor at 0.3 so MH-TCN modulates but doesn't kill signals
+        g_soft = 0.3 + 0.7 * g
+        p_final = p_alpha * g_soft
         p_final = self._calibrator.calibrate(p_final)
+        # Track g_factor diagnostics
+        if not hasattr(self, '_g_diag'):
+            self._g_diag = []
+        self._g_diag.append((g, g_soft, p_alpha, p_final))
 
         if p_final < self.cfg.min_probability:
             return
@@ -467,6 +473,22 @@ class ExperimentHarness:
 
         elapsed = time.time() - t0
         logger.info(f"Backtest complete in {elapsed:.1f}s")
+
+        # Log g_factor diagnostics
+        for runner in runners:
+            if hasattr(runner, '_g_diag') and runner._g_diag:
+                diag = runner._g_diag
+                g_raw = [d[0] for d in diag]
+                g_soft = [d[1] for d in diag]
+                p_alphas = [d[2] for d in diag]
+                p_finals = [d[3] for d in diag]
+                logger.info(
+                    f"  g_factor diagnostics ({len(diag)} trade signals): "
+                    f"g_raw=[{np.min(g_raw):.3f}, {np.mean(g_raw):.3f}, {np.max(g_raw):.3f}] "
+                    f"g_soft=[{np.min(g_soft):.3f}, {np.mean(g_soft):.3f}, {np.max(g_soft):.3f}] "
+                    f"p_alpha=[{np.min(p_alphas):.3f}, {np.mean(p_alphas):.3f}, {np.max(p_alphas):.3f}] "
+                    f"p_final=[{np.min(p_finals):.3f}, {np.mean(p_finals):.3f}, {np.max(p_finals):.3f}]"
+                )
 
         # Collect results
         results = []
